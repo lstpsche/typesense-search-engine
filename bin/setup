@@ -1,15 +1,14 @@
 #!/usr/bin/env ruby
-# frozen_string_literal: true
 
-require "fileutils"
-include FileUtils
+require 'fileutils'
+include FileUtils # rubocop:disable Style/MixinUsage
 
 # Install dependencies
-system("bundle install") || abort("Bundle install failed")
+system('bundle install') || abort('Bundle install failed')
 
 # Prepare dummy app dependencies
-Dir.chdir(File.expand_path("../examples/host_app", __dir__)) do
-  system("bundle install") || abort("Bundle install (dummy) failed")
+Dir.chdir(File.expand_path('../examples/host_app', __dir__)) do
+  system('bundle install') || abort('Bundle install (dummy) failed')
 end
 
-puts "Setup complete."
+puts 'Setup complete.'
