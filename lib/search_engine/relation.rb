@@ -35,6 +35,9 @@ module SearchEngine
       normalized = normalize_initial_state(state)
       @state = DEFAULT_STATE.merge(normalized)
       deep_freeze_inplace(@state)
+      @__result_memo = nil
+      @__loaded = false
+      @__load_lock = Mutex.new
     end
 
     # Return self for AR-like parity.
@@ -174,6 +177,125 @@ module SearchEngine
       "#<#{self.class.name} #{parts.join(' ')} >"
     end
 
+    # Materializers
+    # --------------
+    #
+    # Each materializer triggers at most one HTTP request per Relation instance
+    # by memoizing the loaded Result. Subsequent calls reuse the memo.
+
+    # Return a shallow copy of hydrated hits.
+    # @return [Array<Object>]
+    def to_a
+      ensure_loaded!
+      @__result_memo.to_a
+    end
+
+    # Iterate over hydrated hits.
+    # @yieldparam obj [Object] hydrated object
+    # @return [Enumerator] when no block is given
+    def each(&block)
+      ensure_loaded!
+      return @__result_memo.each unless block_given?
+
+      @__result_memo.each(&block)
+    end
+
+    # Return the first element or the first N elements from the loaded page.
+    # When +n+ is provided, returns an Array; otherwise returns a single object or nil.
+    # @param n [Integer, nil]
+    # @return [Object, Array<Object>]
+    def first(n = nil)
+      ensure_loaded!
+      return @__result_memo.to_a.first if n.nil?
+
+      @__result_memo.to_a.first(n)
+    end
+
+    # Return the last element or the last N elements from the currently fetched page.
+    # Note: operates on the loaded page only; does not trigger additional requests.
+    # @param n [Integer, nil]
+    # @return [Object, Array<Object>]
+    def last(n = nil)
+      ensure_loaded!
+      return @__result_memo.to_a.last if n.nil?
+
+      @__result_memo.to_a.last(n)
+    end
+
+    # Take N elements from the head. When N==1, returns a single object.
+    # @param n [Integer]
+    # @return [Object, Array<Object>]
+    def take(n = 1)
+      ensure_loaded!
+      return @__result_memo.to_a.first if n == 1
+
+      @__result_memo.to_a.first(n)
+    end
+
+    # Convenience for plucking :id values.
+    # @return [Array<Object>]
+    def ids
+      pluck(:id)
+    end
+
+    # Pluck one or multiple fields. For a single field, returns a flat Array.
+    # For multiple fields, returns an Array of Arrays, preserving field order.
+    # Prefers calling readers on hydrated objects when available, otherwise falls
+    # back to reading directly from the raw document.
+    # @param fields [Array<#to_sym,#to_s>]
+    # @return [Array<Object>, Array<Array<Object>>]
+    def pluck(*fields)
+      raise ArgumentError, 'pluck requires at least one field' if fields.nil? || fields.empty?
+
+      ensure_loaded!
+      names = fields.flatten.compact.map(&:to_s)
+
+      raw_hits = Array(@__result_memo.raw['hits'])
+      objects = @__result_memo.to_a
+
+      if names.length == 1
+        field = names.first
+        return objects.each_with_index.map do |obj, idx|
+          if obj.respond_to?(field)
+            obj.public_send(field)
+          else
+            doc = (raw_hits[idx] && raw_hits[idx]['document']) || {}
+            doc[field]
+          end
+        end
+      end
+
+      # Multiple fields -> array-of-arrays
+      objects.each_with_index.map do |obj, idx|
+        doc = (raw_hits[idx] && raw_hits[idx]['document']) || {}
+        names.map do |field|
+          if obj.respond_to?(field)
+            obj.public_send(field)
+          else
+            doc[field]
+          end
+        end
+      end
+    end
+
+    # Return total number of matching documents.
+    # Uses memoized Result when loaded; otherwise performs a minimal found-only request.
+    # @return [Integer]
+    def count
+      return @__result_memo.found.to_i if @__loaded && @__result_memo
+
+      fetch_found_only
+    end
+
+    # Whether any matching documents exist.
+    # Uses memoized Result when loaded; otherwise performs a minimal found-only request.
+    # @return [Boolean]
+    def exists?
+      return @__result_memo.found.to_i.positive? if @__loaded && @__result_memo
+
+      fetch_found_only.positive?
+    end
+
     protected
 
     # Spawn a new relation with a deep-duplicated mutable state.
@@ -193,7 +315,6 @@ module SearchEngine
       @klass.respond_to?(:name) && @klass.name ? @klass.name : @klass.to_s
     end
 
-    # rubocop:disable Metrics/PerceivedComplexity
     def format_value_for_inspect(value)
       case value
       when Array
@@ -219,7 +340,6 @@ module SearchEngine
         value.inspect
       end
     end
-    # rubocop:enable Metrics/PerceivedComplexity
 
     def normalize_initial_state(state)
       return {} if state.nil? || state.empty?
@@ -252,7 +372,7 @@ module SearchEngine
 
     # Normalize where arguments into an array of string fragments safe for Typesense.
     # Supports hash, raw string, and template-with-placeholders.
-    def normalize_where(args) # rubocop:disable Metrics/PerceivedComplexity
+    def normalize_where(args)
       list = Array(args).flatten.compact
       return [] if list.empty?
 
@@ -300,7 +420,7 @@ module SearchEngine
     end
 
     # Parse and normalize order input into an array of "field:dir" strings.
-    def normalize_order(value) # rubocop:disable Metrics/PerceivedComplexity
+    def normalize_order(value)
       return [] if value.nil?
 
       case value
@@ -440,6 +560,147 @@ module SearchEngine
       known_list = known.map(&:to_s).sort.join(', ')
       unknown_name = unknown.first.inspect
       raise ArgumentError, "Unknown attribute #{unknown_name} for #{klass_name}. Known: #{known_list}"
+    end
+
+    # Ensure the relation has executed the search and memoized the Result.
+    # Thread-safe: double-checked locking around the first load.
+    # @return [void]
+    def ensure_loaded!
+      return if @__loaded && @__result_memo
+
+      @__load_lock.synchronize do
+        return if @__loaded && @__result_memo
+
+        collection = collection_name_for_klass
+        params = build_search_params
+        url_opts = build_url_opts
+
+        result = client.search(collection: collection, params: params, url_opts: url_opts)
+        @__result_memo = result
+        @__loaded = true
+      end
+
+      nil
+    end
+
+    # Perform a minimal request to obtain only the total `found` count.
+    # Does not memoize the full Result.
+    # @return [Integer]
+    def fetch_found_only
+      collection = collection_name_for_klass
+      base = build_search_params
+
+      minimal = base.dup
+      minimal[:per_page] = 1
+      minimal[:page] = 1
+      # Keep include_fields minimal to reduce payload
+      minimal[:include_fields] = 'id'
+
+      url_opts = build_url_opts
+      result = client.search(collection: collection, params: minimal, url_opts: url_opts)
+      result.found.to_i
+    end
+
+    # Compile relation state into Typesense search params.
+    # @return [Hash]
+    def build_search_params
+      cfg = SearchEngine.config
+      opts = @state[:options] || {}
+
+      params = {}
+
+      # Query basics
+      q_val = option_value(opts, :q) || '*'
+      query_by_val = option_value(opts, :query_by) || cfg.default_query_by
+      params[:q] = q_val
+      params[:query_by] = query_by_val if query_by_val
+
+      # Infix option
+      infix_val = option_value(opts, :infix) || cfg.default_infix
+      params[:infix] = infix_val if infix_val
+
+      # Filters and sorting
+      filters = Array(@state[:filters])
+      params[:filter_by] = filters.join(' && ') unless filters.empty?
+
+      orders = Array(@state[:orders])
+      params[:sort_by] = orders.join(',') unless orders.empty?
+
+      # Field selection
+      selected = Array(@state[:select])
+      params[:include_fields] = selected.join(',') unless selected.empty?
+
+      # Pagination
+      pagination = compute_pagination
+      params[:page] = pagination[:page]
+      params[:per_page] = pagination[:per_page]
+
+      params
+    end
+
+    # Derive URL/common options for the client request.
+    # @return [Hash]
+    def build_url_opts
+      opts = @state[:options] || {}
+      url = {}
+      url[:use_cache] = option_value(opts, :use_cache) if opts.key?(:use_cache) || opts.key?('use_cache')
+      if opts.key?(:cache_ttl) || opts.key?('cache_ttl')
+        url[:cache_ttl] = begin
+          Integer(option_value(opts, :cache_ttl))
+        rescue StandardError
+          nil
+        end
+      end
+      url.compact
+    end
+
+    # Compute page and per_page from explicit page/per or limit/offset fallback.
+    # @return [Hash{Symbol=>Integer}]
+    def compute_pagination
+      page = @state[:page]
+      per = @state[:per_page]
+
+      if page && per
+        { page: page, per_page: per }
+      elsif per && !page
+        { page: 1, per_page: per }
+      elsif @state[:limit]
+        limit = @state[:limit]
+        off = @state[:offset] || 0
+        computed_page = (off.to_i / limit.to_i) + 1
+        { page: computed_page, per_page: limit }
+      else
+        { page: 1, per_page: @state[:per_page] || (@state[:limit] || 10) } # default low per_page if nothing specified
+      end
+    end
+
+    # Resolve the Typesense collection name for the bound class.
+    # @return [String]
+    def collection_name_for_klass
+      return @klass.collection if @klass.respond_to?(:collection) && @klass.collection
+
+      # Fallback: reverse-lookup in registry
+      begin
+        mapping = SearchEngine::Registry.mapping
+        found = mapping.find { |(_, kls)| kls == @klass }
+        return found.first if found
+      rescue StandardError
+        # ignore
+      end
+
+      raise ArgumentError, "Unknown collection for #{klass_name_for_inspect}"
+    end
+
+    def client
+      @__client ||= SearchEngine::Client.new # rubocop:disable Naming/MemoizedInstanceVariableName
+    end
+
+    def option_value(hash, key)
+      if hash.key?(key)
+        hash[key]
+      else
+        hash[key.to_s]
+      end
     end
   end
 end

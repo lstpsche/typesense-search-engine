@@ -45,6 +45,9 @@ Metrics/AbcSize:
 Metrics/CyclomaticComplexity:
   Enabled: false
 
+Metrics/PerceivedComplexity:
+  Max: 20
+
 Layout/LineLength:
   Max: 120
   AllowedPatterns: ['^ *#'] # ignore comments (only ones that take up the whole line)

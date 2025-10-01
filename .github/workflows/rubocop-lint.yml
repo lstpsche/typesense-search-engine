@@ -1,10 +1,6 @@
 name: Rubocop Lint CI
 
 on:
-  pull_request:
-    paths:
-      - '**/*.rb'
-      - '**/*.rake'
   push:
 
 jobs:
