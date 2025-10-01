@@ -167,15 +167,76 @@ module SearchEngine
     # @return [String]
     def inspect
       parts = []
-      parts << "klass=#{klass_name_for_inspect}"
-      DEFAULT_STATE.each_key do |key|
-        value = @state[key]
-        next if value == DEFAULT_STATE[key]
+      parts << "Model=#{klass_name_for_inspect}"
 
-        parts << "#{key}=#{format_value_for_inspect(value)}"
+      filters = Array(@state[:filters])
+      parts << "filters=#{filters.length}" unless filters.empty?
+
+      compiled = begin
+        to_typesense_params
+      rescue StandardError
+        {}
       end
+
+      sort_str = compiled[:sort_by]
+      parts << %(sort="#{truncate_for_inspect(sort_str)}") if sort_str && !sort_str.to_s.empty?
+
+      selected = Array(@state[:select])
+      parts << "select=#{selected.length}" unless selected.empty?
+
+      parts << "page=#{compiled[:page]}" if compiled.key?(:page)
+      parts << "per=#{compiled[:per_page]}" if compiled.key?(:per_page)
+
       "#<#{self.class.name} #{parts.join(' ')} >"
     end
+
+    # Compile immutable relation state and options into Typesense body params.
+    # The compiler is pure/deterministic and omits URL-level cache knobs.
+    #
+    # Key insertion order: q, query_by, filter_by, sort_by, include_fields, page, per_page, infix.
+    # Empty/nil values are omitted.
+    #
+    # @return [Hash] typesense body params suitable for Client#search
+    # @example
+    #   rel.to_typesense_params
+    #   # => { q: "*", query_by: "name,description", filter_by: "brand_id:=[1,2] && active:=true", page: 2, per_page: 20 }
+    def to_typesense_params
+      cfg = SearchEngine.config
+      opts = @state[:options] || {}
+
+      params = {}
+
+      # Query basics
+      q_val = option_value(opts, :q) || '*'
+      query_by_val = option_value(opts, :query_by) || cfg.default_query_by
+      params[:q] = q_val
+      params[:query_by] = query_by_val if query_by_val
+
+      # Filters and sorting
+      filters = Array(@state[:filters])
+      params[:filter_by] = filters.join(' && ') unless filters.empty?
+
+      orders = Array(@state[:orders])
+      params[:sort_by] = orders.join(',') unless orders.empty?
+
+      # Field selection
+      selected = Array(@state[:select])
+      params[:include_fields] = selected.join(',') unless selected.empty?
+
+      # Pagination
+      pagination = compute_pagination
+      params[:page] = pagination[:page] if pagination.key?(:page)
+      params[:per_page] = pagination[:per_page] if pagination.key?(:per_page)
+
+      # Keep infix last for stability; include when configured or overridden
+      infix_val = option_value(opts, :infix) || cfg.default_infix
+      params[:infix] = infix_val if infix_val
+
+      params
+    end
+
+    # Convenience alias to compiled body params.
+    alias to_h to_typesense_params
 
     # Materializers
     # --------------
@@ -572,7 +633,7 @@ module SearchEngine
         return if @__loaded && @__result_memo
 
         collection = collection_name_for_klass
-        params = build_search_params
+        params = to_typesense_params
         url_opts = build_url_opts
 
         result = client.search(collection: collection, params: params, url_opts: url_opts)
@@ -588,7 +649,7 @@ module SearchEngine
     # @return [Integer]
     def fetch_found_only
       collection = collection_name_for_klass
-      base = build_search_params
+      base = to_typesense_params
 
       minimal = base.dup
       minimal[:per_page] = 1
@@ -604,38 +665,7 @@ module SearchEngine
     # Compile relation state into Typesense search params.
     # @return [Hash]
     def build_search_params
-      cfg = SearchEngine.config
-      opts = @state[:options] || {}
-
-      params = {}
-
-      # Query basics
-      q_val = option_value(opts, :q) || '*'
-      query_by_val = option_value(opts, :query_by) || cfg.default_query_by
-      params[:q] = q_val
-      params[:query_by] = query_by_val if query_by_val
-
-      # Infix option
-      infix_val = option_value(opts, :infix) || cfg.default_infix
-      params[:infix] = infix_val if infix_val
-
-      # Filters and sorting
-      filters = Array(@state[:filters])
-      params[:filter_by] = filters.join(' && ') unless filters.empty?
-
-      orders = Array(@state[:orders])
-      params[:sort_by] = orders.join(',') unless orders.empty?
-
-      # Field selection
-      selected = Array(@state[:select])
-      params[:include_fields] = selected.join(',') unless selected.empty?
-
-      # Pagination
-      pagination = compute_pagination
-      params[:page] = pagination[:page]
-      params[:per_page] = pagination[:per_page]
-
-      params
+      to_typesense_params
     end
 
     # Derive URL/common options for the client request.
@@ -655,23 +685,32 @@ module SearchEngine
     end
 
     # Compute page and per_page from explicit page/per or limit/offset fallback.
+    # Omits pagination keys entirely when nothing is specified.
     # @return [Hash{Symbol=>Integer}]
     def compute_pagination
       page = @state[:page]
       per = @state[:per_page]
 
-      if page && per
-        { page: page, per_page: per }
-      elsif per && !page
-        { page: 1, per_page: per }
+      if page || per
+        out = {}
+        if per && page
+          out[:page] = page
+          out[:per_page] = per
+        elsif per && !page
+          out[:page] = 1
+          out[:per_page] = per
+        elsif page && !per
+          out[:page] = page
+        end
+        return out
       elsif @state[:limit]
         limit = @state[:limit]
         off = @state[:offset] || 0
         computed_page = (off.to_i / limit.to_i) + 1
-        { page: computed_page, per_page: limit }
-      else
-        { page: 1, per_page: @state[:per_page] || (@state[:limit] || 10) } # default low per_page if nothing specified
+        return { page: computed_page, per_page: limit }
       end
+
+      {}
     end
 
     # Resolve the Typesense collection name for the bound class.
@@ -701,6 +740,13 @@ module SearchEngine
       else
         hash[key.to_s]
       end
+    end
+
+    def truncate_for_inspect(str, max = 80)
+      return str unless str.is_a?(String)
+      return str if str.length <= max
+
+      "#{str[0, max]}..."
     end
   end
 end
