@@ -1,5 +1,4 @@
 plugins:
-  - rubocop-rails
   - rubocop-performance
 
 AllCops:
@@ -41,7 +40,7 @@ Layout/MultilineMethodCallBraceLayout:
   EnforcedStyle: new_line
 
 Metrics/AbcSize:
-  Enabled: false
+  Max: 50
 
 Metrics/CyclomaticComplexity:
   Enabled: false

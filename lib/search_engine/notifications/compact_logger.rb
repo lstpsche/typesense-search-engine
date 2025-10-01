@@ -97,7 +97,7 @@ module SearchEngine
       rescue StandardError
         nil
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # Map a Symbol severity to Logger integer constant.
       def self.map_level(level)

@@ -62,19 +62,33 @@ module SearchEngine
       end
     end
 
-    # Append ordering expressions. Accepts Symbol/String/Hash or Array of these.
-    # @param clause [Object]
+    # Append ordering expressions. Accepts Hash or String forms.
+    #
+    # Accepted input:
+    # - Hash: { field => :asc|:desc, ... }
+    # - String: "field:dir" or comma-separated "field:dir,other:asc"
+    #
+    # Normalization:
+    # - Stored as array of strings like ["field:asc", "other:desc"]
+    # - Direction lowercased; field trimmed; validation enforced
+    # - Dedupe by field with last-wins semantics while preserving last position
+    #
+    # @param value [Hash, String]
     # @return [SearchEngine::Relation]
-    def order(clause)
-      additions = normalize_order(clause)
+    # @raise [ArgumentError] when direction or field is invalid
+    def order(value)
+      additions = normalize_order(value)
       spawn do |s|
-        s[:orders] = Array(s[:orders]) + additions
+        existing = Array(s[:orders])
+        s[:orders] = dedupe_orders_last_wins(existing + additions)
       end
     end
 
-    # Select a subset of fields. De-duplicates and preserves order.
+    # Select a subset of fields. De-duplicates and preserves order of first appearance.
+    #
     # @param fields [Array<#to_sym,#to_s>]
     # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] when fields are blank or unknown for the model
     def select(*fields)
       normalized = normalize_select(fields)
       spawn do |s|
@@ -88,33 +102,44 @@ module SearchEngine
     # Set the maximum number of results.
     # @param n [Integer, #to_i, nil]
     # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] when n < 1 or not coercible to Integer
     def limit(n)
-      value = coerce_non_negative_integer(n, :limit)
+      value = coerce_integer_min(n, :limit, 1)
       spawn { |s| s[:limit] = value }
     end
 
     # Set the offset of results.
     # @param n [Integer, #to_i, nil]
     # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] when n < 0 or not coercible to Integer
     def offset(n)
-      value = coerce_non_negative_integer(n, :offset)
+      value = coerce_integer_min(n, :offset, 0)
       spawn { |s| s[:offset] = value }
     end
 
     # Set page number.
     # @param n [Integer, #to_i, nil]
     # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] when n < 1 or not coercible to Integer
     def page(n)
-      value = coerce_non_negative_integer(n, :page)
+      value = coerce_integer_min(n, :page, 1)
       spawn { |s| s[:page] = value }
     end
 
     # Set per-page size.
     # @param n [Integer, #to_i, nil]
     # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] when n < 1 or not coercible to Integer
     def per_page(n)
-      value = coerce_non_negative_integer(n, :per_page)
+      value = coerce_integer_min(n, :per, 1)
       spawn { |s| s[:per_page] = value }
+    end
+
+    # Convenience alias for per-page size.
+    # @param n [Integer, #to_i, nil]
+    # @return [SearchEngine::Relation]
+    def per(n)
+      per_page(n)
     end
 
     # Shallow-merge options into the relation.
@@ -197,7 +222,7 @@ module SearchEngine
     # rubocop:enable Metrics/PerceivedComplexity
 
     def normalize_initial_state(state)
-      return {} if state.blank?
+      return {} if state.nil? || state.empty?
       raise ArgumentError, 'state must be a Hash' unless state.is_a?(Hash)
 
       normalized = {}
@@ -210,19 +235,24 @@ module SearchEngine
           normalized[:orders] = normalize_order(value)
         when :select
           normalized[:select] = normalize_select(Array(value))
-        when :limit, :offset, :page, :per_page
-          normalized[k] = coerce_non_negative_integer(value, k)
+        when :limit
+          normalized[:limit] = coerce_integer_min(value, :limit, 1)
+        when :offset
+          normalized[:offset] = coerce_integer_min(value, :offset, 0)
+        when :page
+          normalized[:page] = coerce_integer_min(value, :page, 1)
+        when :per_page
+          normalized[:per_page] = coerce_integer_min(value, :per, 1)
         when :options
           normalized[:options] = (value || {}).dup
         end
       end
       normalized
     end
-    # rubocop:enable Metrics/AbcSize
 
     # Normalize where arguments into an array of string fragments safe for Typesense.
     # Supports hash, raw string, and template-with-placeholders.
-    def normalize_where(args) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+    def normalize_where(args) # rubocop:disable Metrics/PerceivedComplexity
       list = Array(args).flatten.compact
       return [] if list.empty?
 
@@ -269,45 +299,88 @@ module SearchEngine
       fragments
     end
 
-    def normalize_order(clause) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
-      return [] if clause.nil?
+    # Parse and normalize order input into an array of "field:dir" strings.
+    def normalize_order(value) # rubocop:disable Metrics/PerceivedComplexity
+      return [] if value.nil?
 
-      list = Array(clause).flatten.compact
-      list.flat_map do |entry|
-        case entry
-        when Hash
-          entry.map do |k, dir|
-            direction = dir.to_s.downcase
-            direction = %w[asc desc].include?(direction) ? direction : 'asc'
-            { field: k.to_sym, direction: direction.to_sym }
+      case value
+      when Hash
+        value.flat_map do |k, dir|
+          field = k.to_s.strip
+          raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+          direction = dir.to_s.strip.downcase
+          unless %w[asc desc].include?(direction)
+            raise ArgumentError, "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
           end
-        when Symbol
-          [{ field: entry, direction: :asc }]
-        when String
-          if entry.include?(' ')
-            name, dir = entry.split(' ', 2)
-            direction = dir.to_s.strip.downcase
-            direction = %w[asc desc].include?(direction) ? direction : 'asc'
-            [{ field: name.to_sym, direction: direction.to_sym }]
-          else
-            [{ field: entry.to_sym, direction: :asc }]
-          end
-        else
-          [entry]
+
+          "#{field}:#{direction}"
         end
+      when String
+        value.split(',').map(&:strip).reject(&:empty?).map do |chunk|
+          name, direction = chunk.split(':', 2).map { |p| p.to_s.strip }
+          if name.empty? || direction.empty?
+            raise ArgumentError, "order: expected 'field:direction' (got #{chunk.inspect})"
+          end
+
+          downcased = direction.downcase
+          unless %w[asc desc].include?(downcased)
+            raise ArgumentError,
+                  "order: direction must be :asc or :desc (got #{direction.inspect} for field #{name.inspect})"
+          end
+
+          "#{name}:#{downcased}"
+        end
+      when Array
+        # Allow arrays of accepted forms
+        value.flat_map { |v| normalize_order(v) }
+      when Symbol
+        # Back-compat: treat as ascending
+        field = value.to_s.strip
+        raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+        ["#{field}:asc"]
+      else
+        raise ArgumentError, "order: unsupported input #{value.class}"
       end
+    end
+
+    # Dedupe by field with last-wins semantics while preserving last positions.
+    def dedupe_orders_last_wins(list)
+      return [] if list.nil? || list.empty?
+
+      last_by_field = {}
+      list.each_with_index do |entry, idx|
+        field, dir = entry.split(':', 2)
+        last_by_field[field] = { idx: idx, str: "#{field}:#{dir}" }
+      end
+      last_by_field.values.sort_by { |h| h[:idx] }.map { |h| h[:str] }
     end
 
     def normalize_select(fields)
-      ordered = Array(fields).flatten.compact.map do |f|
-        f.respond_to?(:to_sym) ? f.to_sym : f.to_s
+      list = Array(fields).flatten.compact
+      return [] if list.empty?
+
+      known_attrs = safe_attributes_map
+      known = known_attrs.keys.map(&:to_s)
+
+      ordered = []
+      list.each do |f|
+        name = f.to_s.strip
+        raise ArgumentError, 'select: field names must be non-empty' if name.empty?
+
+        if !known.empty? && !known.include?(name)
+          klass_name = klass_name_for_inspect
+          known_list = known.sort.join(', ')
+          raise ArgumentError, "select: unknown field #{name.inspect} for #{klass_name}. Known: #{known_list}"
+        end
+
+        ordered << name unless ordered.include?(name)
       end
-      ordered.each_with_object([]) do |f, acc|
-        acc << f unless acc.include?(f)
-      end
+      ordered
     end
 
-    def coerce_non_negative_integer(value, name)
+    def coerce_integer_min(value, name, min)
       return nil if value.nil?
 
       integer =
@@ -315,7 +388,8 @@ module SearchEngine
         when Integer then value
         else Integer(value)
         end
-      raise ArgumentError, "#{name} must be non-negative" if integer.negative?
+
+      raise ArgumentError, "#{name} must be >= #{min}" if integer < min
 
       integer
     rescue ArgumentError, TypeError
@@ -356,7 +430,7 @@ module SearchEngine
     end
 
     def validate_hash_keys!(hash, attributes_map)
-      return if hash.blank?
+      return if hash.nil? || hash.empty?
 
       known = attributes_map.keys.map(&:to_sym)
       unknown = hash.keys.map(&:to_sym) - known
