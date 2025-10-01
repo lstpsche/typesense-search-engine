@@ -103,3 +103,26 @@ sequenceDiagram
   Client-->>App: result or raise
   Notif-->>App: subscriber(s) log compact line
 ```
+
+---
+
+## Relation execution events
+
+Execution initiated by `SearchEngine::Relation` results in a single client call and emits `search_engine.search` with a compact, redacted payload.
+
+- **Event**: `search_engine.search`
+- **Payload**: `{ collection, params: Observability.redact(params), url_opts: { use_cache, cache_ttl }, status, error_class }`
+- **Source**: `SearchEngine::Client#search` (Relation delegates execution to the client)
+
+```mermaid
+sequenceDiagram
+  participant Rel as Relation
+  participant Client as SearchEngine::Client
+  participant Notif as AS::Notifications
+  Rel->>Client: search(...)
+  Client->>Notif: instrument("search_engine.search", payload)
+  Notif-->>Client: yield
+  Client-->>Rel: Result
+```
+
+Backlinks: [Relation](./relation.md), [Materializers](./materializers.md), [Client](./client.md)

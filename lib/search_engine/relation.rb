@@ -632,16 +632,32 @@ module SearchEngine
       @__load_lock.synchronize do
         return if @__loaded && @__result_memo
 
-        collection = collection_name_for_klass
-        params = to_typesense_params
-        url_opts = build_url_opts
-
-        result = client.search(collection: collection, params: params, url_opts: url_opts)
-        @__result_memo = result
-        @__loaded = true
+        execute
       end
 
       nil
+    end
+
+    # Execute the search via the client and memoize the Result.
+    #
+    # Compiles body params and derives URL/common options by starting from
+    # configuration defaults and applying relation-level overrides (whitelisted).
+    # Instrumentation is performed by the client to avoid duplicate events.
+    #
+    # @return [SearchEngine::Result]
+    def execute
+      collection = collection_name_for_klass
+      params = to_typesense_params
+
+      # Start from config defaults, then apply relation-level overrides
+      url_opts = ClientOptions.url_options_from_config(SearchEngine.config)
+      overrides = build_url_opts
+      url_opts.merge!(overrides) unless overrides.empty?
+
+      result = client.search(collection: collection, params: params, url_opts: url_opts)
+      @__result_memo = result
+      @__loaded = true
+      result
     end
 
     # Perform a minimal request to obtain only the total `found` count.
@@ -657,7 +673,11 @@ module SearchEngine
       # Keep include_fields minimal to reduce payload
       minimal[:include_fields] = 'id'
 
-      url_opts = build_url_opts
+      # Merge config defaults with any relation-level overrides
+      url_opts = ClientOptions.url_options_from_config(SearchEngine.config)
+      overrides = build_url_opts
+      url_opts.merge!(overrides) unless overrides.empty?
+
       result = client.search(collection: collection, params: minimal, url_opts: url_opts)
       result.found.to_i
     end

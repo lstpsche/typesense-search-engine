@@ -49,7 +49,7 @@ flowchart LR
   C --> D[order]
   D --> E[limit / offset / page / per]
   E --> F[Relation (new each step)]
-  F --> G[(Future: execute via Client)]
+  F --> G[(Execute via Client)]
 ```
 
 See [Client](./client.md) for execution context.

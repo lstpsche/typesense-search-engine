@@ -106,3 +106,31 @@ Callouts:
 - `last` operates on the currently fetched page. For dataset tail, use explicit sorting/pagination.
 - `pluck` prefers model readers when available, otherwise reads raw documents for robustness.
 - `count`/`exists?` perform a minimal request only when there is no memo; once loaded, they reuse the cached `found`.
+
+---
+
+## Execution & memoization
+
+Materializers call into relation execution, which compiles Typesense body params, merges URL-level cache knobs (config defaults with optional relation overrides), and performs a single client call per relation instance. The raw response is wrapped as `SearchEngine::Result` and memoized for reuse.
+
+```mermaid
+sequenceDiagram
+  participant Rel as Relation
+  participant Notif as AS::Notifications
+  participant Client as SearchEngine::Client
+  participant TS as Typesense
+  Rel->>Rel: to_typesense_params
+  Rel->>Client: search(collection, params, url_opts)
+  Client->>Notif: instrument("search_engine.search", payload)
+  Notif-->>Client: yield
+  Client->>TS: POST /collections/:c/documents/search
+  TS-->>Client: 2xx JSON
+  Client-->>Rel: wrapped Result
+  Rel->>Rel: memoize
+  Rel-->>Caller: Result / enumerables
+```
+
+- **URL options**: `{ use_cache, cache_ttl }` originate from `SearchEngine.config` and may be overridden per relation via `relation.options(use_cache: ..., cache_ttl: ...)`.
+- **Redaction**: Event payload params are redacted via `SearchEngine::Observability.redact`.
+
+See also: [Observability](./observability.md) and [Client](./client.md).
