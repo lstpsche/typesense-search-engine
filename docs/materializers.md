@@ -1,6 +1,6 @@
 [← Back to Index](./index.md)
 
-[Client](./client.md) · [Models](./models.md)
+[Client](./client.md) · [Relation](./relation.md)
 
 ## Result materialization and hydration
 
@@ -56,3 +56,53 @@ result.to_a # => [#<SearchEngine::Product ...>, ...]
 ```
 
 Tip: When using Typesense `include_fields`, only included fields will be hydrated on each object.
+
+---
+
+## Relation materializers and single-request memoization
+
+Materializers on `SearchEngine::Relation` trigger execution and cache a single `SearchEngine::Result` per relation instance. The first materializer issues exactly one search; subsequent materializers reuse the cached result. Relation immutability is preserved: chainers return new relations; materializers only populate an internal memo that is invisible to `inspect` and equality.
+
+```mermaid
+flowchart TD
+  A[Materializer called] -->|no cache| B[Execute search]
+  B --> C[Memoize Result]
+  C --> D[Return mapped value]
+  A -->|cache present| D
+```
+
+### API
+
+- `to_a` → triggers fetch and memoizes; returns hydrated hits
+- `each` → enumerates hydrated hits
+- `first(n = nil)` → from the loaded page; `n` optional
+- `last(n = nil)` → from the loaded page tail; no extra HTTP
+- `take(n = 1)` → head items; when `n == 1` returns a single object
+- `pluck(*fields)` → for one field returns a flat array; for many returns array-of-arrays. Falls back to raw documents when model readers are absent
+- `ids` → convenience for `pluck(:id)`
+- `count` → if loaded, uses memoized `found`; otherwise performs a minimal request
+- `exists?` → if loaded, uses memoized `found`; otherwise performs a minimal request
+
+### Minimal request for `count` / `exists?`
+
+When the relation has no memo yet, `count`/`exists?` issue a minimal search using the same compiled filters/sort and query defaults, but forcing:
+
+- `per_page = 1`, `page = 1`
+- `include_fields = "id"`
+
+The response’s `found` is returned and no full `Result` is memoized.
+
+### Examples
+
+```ruby
+rel = SearchEngine::Product.where(active: true).limit(10)
+rel.to_a   # triggers fetch and memoizes
+rel.count  # uses memoized found
+rel.ids    # plucks id from cached hits
+```
+
+Callouts:
+
+- `last` operates on the currently fetched page. For dataset tail, use explicit sorting/pagination.
+- `pluck` prefers model readers when available, otherwise reads raw documents for robustness.
+- `count`/`exists?` perform a minimal request only when there is no memo; once loaded, they reuse the cached `found`.
