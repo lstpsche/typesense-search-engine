@@ -8,6 +8,7 @@ Welcome to the SearchEngine documentation.
 - [Configuration](./configuration.md)
 - [Client](./client.md)
 - [Models](./models.md)
+- [Relation](./relation.md)
 - [Observability](./observability.md)
 
 ## Overview

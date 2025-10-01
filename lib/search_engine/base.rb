@@ -52,6 +52,18 @@ module SearchEngine
         parent_attrs = @attributes || {}
         subclass.instance_variable_set(:@attributes, parent_attrs.dup)
       end
+
+      # Return a fresh, immutable relation bound to this model class.
+      #
+      # @example
+      #   class Product < SearchEngine::Base; end
+      #   r = Product.all
+      #   r.empty? #=> true
+      #
+      # @return [SearchEngine::Relation]
+      def all
+        SearchEngine::Relation.new(self)
+      end
     end
 
     # TODO: In a future change, implement instance-level hydration/initialization
