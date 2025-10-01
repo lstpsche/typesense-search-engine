@@ -1,0 +1,80 @@
+plugins:
+  - rubocop-rails
+  - rubocop-performance
+
+AllCops:
+  NewCops: disable
+  SuggestExtensions: false
+  TargetRubyVersion: 3.1
+
+Style/FrozenStringLiteralComment:
+  EnforcedStyle: never
+
+Layout/EmptyLinesAroundAttributeAccessor:
+  Enabled: true
+
+Layout/SpaceAroundMethodCallOperator:
+  Enabled: true
+
+Lint/RaiseException:
+  Enabled: true
+
+Lint/StructNewOverride:
+  Enabled: true
+
+Style/ExponentialNotation:
+  Enabled: true
+
+Style/HashEachMethods:
+  Enabled: true
+
+Style/HashTransformKeys:
+  Enabled: true
+
+Style/HashTransformValues:
+  Enabled: true
+
+Style/SlicingWithRange:
+  Enabled: true
+
+Layout/MultilineMethodCallBraceLayout:
+  EnforcedStyle: new_line
+
+Metrics/CyclomaticComplexity:
+  Max: 10
+
+Layout/LineLength:
+  Max: 120
+  AllowedPatterns: ['^ *#'] # ignore comments (only ones that take up the whole line)
+
+Metrics/MethodLength:
+  Max: 20
+
+Metrics/ClassLength:
+  Max: 200
+
+Metrics/BlockLength:
+  Exclude:
+    - spec/**/*
+    - lib/tasks/**/*
+
+Metrics/ParameterLists:
+  Max: 10
+
+Naming/RescuedExceptionsVariableName:
+  PreferredName: error
+
+Style/NumericLiterals:
+  Enabled: false
+
+Style/HashSyntax:
+  EnforcedShorthandSyntax: either_consistent
+
+Layout/SpaceAroundOperators:
+  EnforcedStyleForExponentOperator: space
+
+Layout/HashAlignment:
+  Enabled: false
+
+Performance/RedundantMerge:
+  MaxKeyValuePairs: 1
