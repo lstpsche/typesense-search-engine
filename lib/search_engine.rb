@@ -2,6 +2,7 @@ require 'search_engine/version'
 require 'search_engine/engine'
 require 'search_engine/config'
 require 'search_engine/registry'
+require 'search_engine/relation'
 require 'search_engine/base'
 
 # Top-level namespace for the SearchEngine gem.
