@@ -1,12 +1,40 @@
 [← Back to Index](./index.md)
 
-### Configuration
+# Configuration
 
 This engine centralizes all knobs under `SearchEngine.config`. These values drive the future client and relation layers and are hydrated from ENV at boot by the engine initializer.
 
 - See also: [Installation](./installation.md)
 
-### Initializer
+## Field reference
+
+| Field              | Type                 | Default        | Notes |
+|--------------------|----------------------|----------------|-------|
+| `host`             | String               | `"localhost"`  | Typesense node host |
+| `port`             | Integer              | `8108`         | Typesense node port |
+| `protocol`         | String               | `"http"`       | `"http"` or `"https"` |
+| `api_key`          | String, nil          | `nil`          | Required for real requests; redacted in logs |
+| `timeout_ms`       | Integer              | `5000`         | Total request timeout (ms) |
+| `open_timeout_ms`  | Integer              | `1000`         | Connect/open timeout (ms) |
+| `retries`          | Hash                 | `{ attempts: 2, backoff: 0.2 }` | Non-negative values |
+| `logger`           | Logger-like          | Rails logger or stdout | Must respond to `#info/#warn/#error` |
+| `default_query_by` | String, nil          | `nil`          | Comma-separated fields for `query_by` default |
+| `default_infix`    | String               | `"fallback"`   | Typesense infix option |
+| `use_cache`        | Boolean              | `true`         | URL/common param only |
+| `cache_ttl_s`      | Integer              | `60`           | URL/common param: TTL seconds -> `cache_ttl` |
+
+## ENV mapping
+
+Only blank/unset fields are hydrated from ENV during engine boot; explicit initializer values win.
+
+| ENV var             | Field      |
+|---------------------|------------|
+| `TYPESENSE_HOST`    | `host`     |
+| `TYPESENSE_PORT`    | `port`     |
+| `TYPESENSE_PROTOCOL`| `protocol` |
+| `TYPESENSE_API_KEY` | `api_key`  |
+
+## Initializer
 
 Place the following in your host app at `config/initializers/search_engine.rb`:
 
@@ -31,30 +59,21 @@ end
 > [!NOTE]
 > `ENV.fetch("TYPESENSE_API_KEY")` will raise if not set. This is intentional for production/staging. In development you can omit an initializer and rely on defaults/ENV.
 
-### ENV fallbacks
-
-The engine hydrates only blank/unset fields from ENV during boot; explicit initializer assignments take precedence.
-
-- `TYPESENSE_HOST` → `host`
-- `TYPESENSE_PORT` → `port`
-- `TYPESENSE_PROTOCOL` → `protocol`
-- `TYPESENSE_API_KEY` → `api_key`
-
-### Caching knobs
+## URL-level caching knobs
 
 - `use_cache` and `cache_ttl_s` are URL-level options consumed by the client. They should not be included in request bodies.
 
-### Timeouts & retries
+## Timeouts & retries
 
 - `timeout_ms`: total request timeout (ms)
 - `open_timeout_ms`: connect/open timeout (ms)
 - `retries`: `{ attempts: Integer, backoff: Float }` with non-negative values
 
-### Logger
+## Logger
 
 Defaults to `Rails.logger` when available; otherwise a `$stdout` logger at INFO level. You may supply any object responding to `#info`, `#warn`, and `#error`.
 
-### Validation & warnings
+## Validation & warnings
 
 Calling `SearchEngine.configure { ... }` validates obvious misconfigurations (bad protocol, negative timeouts, etc.). At boot, the engine logs a one-time warning if `api_key` or `default_query_by` are missing; secrets are not printed.
 
@@ -65,7 +84,7 @@ flowchart LR
   C --> D[Client & Relations]
 ```
 
-### Self-check
+## Self-check
 
 You can verify configuration without a host app by running the included script from the gem root:
 

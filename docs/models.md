@@ -54,3 +54,9 @@ flowchart LR
 ```
 
 See also: [Client](./client.md).
+
+### Thread-safety and reload-friendliness
+
+The collection registry uses a copy-on-write Hash guarded by a small Mutex. Reads are lock-free and writes are atomic, which makes it safe under concurrency and friendly to Rails code reloading in development.
+
+See also: [Index](./index.md).
