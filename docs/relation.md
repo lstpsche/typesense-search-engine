@@ -53,3 +53,34 @@ flowchart LR
 ```
 
 See [Client](./client.md) for execution context.
+
+---
+
+## where DSL
+
+The `where` chainer accepts three forms. Each call appends fragments with AND semantics. The relation is immutable and returns a new instance.
+
+```ruby
+SearchEngine::Product
+  .where(id: 5)
+  .where("brand_id:=[1,2,3]")
+  .where("price > ?", 100)
+```
+
+- **Hash form**: keys must match the model’s declared `attributes`.
+  - Scalars become `field:=<quoted>`
+  - Arrays become `field:=[<quoted, ...>]`
+- **Raw string**: passed through untouched (escape hatch); no validation.
+- **Placeholders**: `?` are replaced by safely quoted values. Placeholder count must match args.
+
+```mermaid
+flowchart LR
+  A[Hash/Fragment Input] --> B[Sanitizer]
+  B --> C[Normalized Filters]
+  C --> D[Relation State]
+```
+
+Notes:
+- Hash keys are validated against model attributes.
+- Raw string form is passed through; use with care.
+- Placeholder form is sanitized; `?` args are quoted/escaped.

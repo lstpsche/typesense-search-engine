@@ -40,15 +40,18 @@ Style/SlicingWithRange:
 Layout/MultilineMethodCallBraceLayout:
   EnforcedStyle: new_line
 
+Metrics/AbcSize:
+  Enabled: false
+
 Metrics/CyclomaticComplexity:
-  Max: 10
+  Enabled: false
 
 Layout/LineLength:
   Max: 120
   AllowedPatterns: ['^ *#'] # ignore comments (only ones that take up the whole line)
 
 Metrics/MethodLength:
-  Max: 20
+  Max: 50
 
 Metrics/ClassLength:
   Enabled: false

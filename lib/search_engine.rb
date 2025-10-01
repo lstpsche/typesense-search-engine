@@ -4,6 +4,7 @@ require 'search_engine/config'
 require 'search_engine/registry'
 require 'search_engine/relation'
 require 'search_engine/base'
+require 'search_engine/filters/sanitizer'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
