@@ -1,0 +1,118 @@
+module SearchEngine
+  # Lightweight utilities for observability concerns (redaction, excerpts).
+  #
+  # Provides a single public entry point {.redact} used by the client and
+  # optional subscribers to produce compact, redacted payloads that avoid
+  # leaking secrets while keeping useful context.
+  module Observability
+    # Keys that are considered sensitive and must be redacted whenever present.
+    SENSITIVE_KEY_PATTERN = /key|token|secret|password/i
+
+    # Whitelisted search parameter keys to include in payload excerpts.
+    PARAM_WHITELIST = %i[q query_by per_page page infix filter_by].freeze
+
+    # Maximum length for `q` values before truncation.
+    MAX_Q_LENGTH = 128
+
+    # Redact a value producing a new structure without mutating the input.
+    #
+    # - When given a Hash of search params, returns a compact excerpt that only
+    #   includes whitelisted keys with secrets redacted and `filter_by` masked.
+    # - When given an Array, returns a redacted array by applying the same logic
+    #   to each element.
+    # - For other values, returns a best-effort redacted representation.
+    #
+    # @param value [Object]
+    # @return [Object]
+    def self.redact(value)
+      case value
+      when Hash
+        redact_params_hash(value)
+      when Array
+        value.map { |v| redact(v) }
+      when String
+        redact_string(value)
+      else
+        value
+      end
+    end
+
+    # Internal: Redact a Hash presumed to be Typesense search params.
+    # Returns a new Hash with only whitelisted keys preserved. Sensitive keys
+    # are not included; `filter_by` literals are masked.
+    def self.redact_params_hash(params)
+      result = {}
+
+      PARAM_WHITELIST.each do |key|
+        next unless params.key?(key)
+
+        val = params[key]
+        case key
+        when :q
+          result[:q] = truncate_q(val)
+        when :filter_by
+          result[:filter_by] = redact_filter_by(val)
+        else
+          result[key] = redact_simple_value(val)
+        end
+      end
+
+      result
+    end
+
+    # Internal: Best-effort redaction for simple scalar values.
+    def self.redact_simple_value(value)
+      return value unless value.is_a?(String)
+
+      redact_string(value)
+    end
+
+    # Internal: Truncate overly long query strings.
+    def self.truncate_q(query)
+      return query unless query.is_a?(String)
+
+      query.length > MAX_Q_LENGTH ? "#{query[0, MAX_Q_LENGTH]}..." : query
+    end
+
+    # Internal: Redact secrets in a string and mask obvious literal fragments.
+    def self.redact_string(str)
+      return str unless str.is_a?(String)
+
+      # Mask obvious quoted literals first
+      redacted = str.gsub(/"[^"]*"|'[^']*'/, '***')
+
+      # Mask numeric literals (best-effort)
+      redacted.gsub(/\b\d+(?:\.\d+)?\b/, '***')
+    end
+
+    # Internal: Mask literal values in Typesense filter expressions while
+    # preserving attribute/operator structure. Best-effort and lightweight.
+    # Examples:
+    #   "category_id:=123" => "category_id:=***"
+    #   "price:>10 && brand:='Acme'" => "price:>*** && brand:=***"
+    def self.redact_filter_by(filter)
+      return filter unless filter.is_a?(String)
+
+      # Replace values that follow a comparator or a colon with *** until a
+      # delimiter is reached. Also mask quoted strings and numbers.
+      masked = filter.gsub(/([!:><=]{1,2})\s*([^\s)&|]+)/, '\1***')
+      masked = masked.gsub(/"[^"]*"|'[^']*'/, '***')
+      masked.gsub(/\b\d+(?:\.\d+)?\b/, '***')
+    end
+
+    # Build a filtered URL/common options hash for payloads.
+    # @param url_opts [Hash]
+    # @return [Hash]
+    def self.filtered_url_opts(url_opts)
+      return {} unless url_opts.is_a?(Hash)
+
+      {
+        use_cache: url_opts[:use_cache],
+        cache_ttl: url_opts[:cache_ttl]
+      }
+    end
+
+    private_class_method :redact_params_hash, :redact_simple_value, :truncate_q,
+                         :redact_string, :redact_filter_by
+  end
+end

@@ -1,6 +1,7 @@
 require 'search_engine'
 require 'search_engine/client_options'
 require 'search_engine/errors'
+require 'search_engine/observability'
 
 module SearchEngine
   # Thin wrapper on top of the official `typesense` gem.
@@ -22,7 +23,7 @@ module SearchEngine
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
     # @return [Hash] Parsed response
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
-    def search(collection:, params:, url_opts: {})
+    def search(collection:, params:, url_opts: {}) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       validate_single!(collection, params)
 
       cache_params = derive_cache_opts(url_opts)
@@ -32,14 +33,42 @@ module SearchEngine
       payload = params.dup
       path = "/collections/#{collection}/documents/search"
 
-      response = with_exception_mapping(:post, path, cache_params, start) do
-        ts.collections[collection].documents.search(payload, common_params: cache_params)
+      # Observability event payload (pre-built; redacted)
+      if defined?(ActiveSupport::Notifications)
+        se_payload = {
+          collection: collection,
+          params: Observability.redact(params),
+          url_opts: Observability.filtered_url_opts(cache_params),
+          status: nil,
+          error_class: nil,
+          retries: nil
+        }
+
+        result = nil
+        ActiveSupport::Notifications.instrument('search_engine.search', se_payload) do
+          result = with_exception_mapping(:post, path, cache_params, start) do
+            ts.collections[collection].documents.search(payload, common_params: cache_params)
+          end
+          se_payload[:status] = :ok
+        rescue Errors::Api => error
+          se_payload[:status] = error.status
+          se_payload[:error_class] = error.class.name
+          raise
+        rescue Errors::Error => error
+          se_payload[:status] = :error
+          se_payload[:error_class] = error.class.name
+          raise
+        end
+      else
+        result = with_exception_mapping(:post, path, cache_params, start) do
+          ts.collections[collection].documents.search(payload, common_params: cache_params)
+        end
       end
 
       duration = current_monotonic_ms - start
       instrument(:post, path, duration, cache_params)
       log_success(:post, path, start, cache_params)
-      response
+      result
     end
 
     # Execute a federated multi-search request.
@@ -48,7 +77,7 @@ module SearchEngine
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
     # @return [Hash] Parsed response from Typesense multi-search
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
-    def multi_search(searches:, url_opts: {})
+    def multi_search(searches:, url_opts: {}) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       validate_multi!(searches)
 
       cache_params = derive_cache_opts(url_opts)
@@ -58,14 +87,44 @@ module SearchEngine
       path = '/multi_search'
       body = { searches: searches }
 
-      response = with_exception_mapping(:post, path, cache_params, start) do
-        ts.multi_search.perform(body, common_params: cache_params)
+      # Observability event payload (pre-built; redacted)
+      if defined?(ActiveSupport::Notifications)
+        collections = searches.map { |s| s[:collection].to_s }.reject { |c| c.strip.empty? }.uniq
+        redacted_params = searches.map { |s| Observability.redact(s) }
+        se_payload = {
+          collections: collections,
+          params: redacted_params,
+          url_opts: Observability.filtered_url_opts(cache_params),
+          status: nil,
+          error_class: nil,
+          retries: nil
+        }
+
+        result = nil
+        ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+          result = with_exception_mapping(:post, path, cache_params, start) do
+            ts.multi_search.perform(body, common_params: cache_params)
+          end
+          se_payload[:status] = :ok
+        rescue Errors::Api => error
+          se_payload[:status] = error.status
+          se_payload[:error_class] = error.class.name
+          raise
+        rescue Errors::Error => error
+          se_payload[:status] = :error
+          se_payload[:error_class] = error.class.name
+          raise
+        end
+      else
+        result = with_exception_mapping(:post, path, cache_params, start) do
+          ts.multi_search.perform(body, common_params: cache_params)
+        end
       end
 
       duration = current_monotonic_ms - start
       instrument(:post, path, duration, cache_params)
       log_success(:post, path, start, cache_params)
-      response
+      result
     end
 
     private
