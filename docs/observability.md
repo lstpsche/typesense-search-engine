@@ -25,6 +25,19 @@ Redaction rules:
 - `q` is truncated when longer than 128 chars
 - `filter_by` literals are masked while preserving structure (e.g., `price:>10` → `price:>***`)
 
+| Key           | Type                 | Redaction |
+|---------------|----------------------|-----------|
+| `collection`  | String               | N/A |
+| `collections` | Array<String>        | N/A |
+| `params`      | Hash/Array<Hash>     | Whitelisted keys only; `q` truncated; `filter_by` masked |
+| `url_opts`    | Hash                 | Includes only `use_cache` and `cache_ttl` |
+| `status`      | Integer or Symbol    | N/A |
+| `error_class` | String, nil          | N/A |
+| `retries`     | Integer, nil         | Reserved; nil by default |
+| `duration`    | Float (ms) via event | N/A |
+
+For URL/cache knobs, see [Configuration](./configuration.md).
+
 ### Enable compact logging
 
 One-liner subscriber that logs compact, single-line entries for both events:

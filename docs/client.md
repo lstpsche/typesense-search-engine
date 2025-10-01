@@ -1,4 +1,6 @@
-[← Back to Index](./index.md) · [Installation](./installation.md) · [Configuration](./configuration.md)
+[← Back to Index](./index.md)
+
+[Installation](./installation.md) · [Configuration](./configuration.md) · [Observability](./observability.md)
 
 ## SearchEngine::Client
 
@@ -60,3 +62,5 @@ Public errors are exposed via `SearchEngine::Errors`:
 - `InvalidParams`: wrapper pre‑call validation problems
 
 See `lib/search_engine/errors.rb` for details.
+
+See [Observability](./observability.md) for emitted events and compact logging.
