@@ -21,7 +21,7 @@ module SearchEngine
     # @param collection [String] collection name
     # @param params [Hash] Typesense search parameters (q, query_by, etc.)
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
-    # @return [Hash] Parsed response
+    # @return [SearchEngine::Result] Wrapped response with hydrated hits
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
     def search(collection:, params:, url_opts: {})
       validate_single!(collection, params)
@@ -68,7 +68,13 @@ module SearchEngine
       duration = current_monotonic_ms - start
       instrument(:post, path, duration, cache_params)
       log_success(:post, path, start, cache_params)
-      result
+      # Wrap raw response into a Result with safe registry lookup for klass
+      klass = begin
+        SearchEngine.collection_for(collection)
+      rescue ArgumentError
+        nil
+      end
+      SearchEngine::Result.new(result, klass: klass)
     end
 
     # Execute a federated multi-search request.
@@ -198,6 +204,8 @@ module SearchEngine
       map_and_raise(error, method, path, cache_params, start_ms)
     end
 
+    # Map network and API exceptions into stable SearchEngine errors, with
+    # redaction and logging.
     def map_and_raise(error, method, path, cache_params, start_ms)
       if error.respond_to?(:http_code)
         status = error.http_code
@@ -276,7 +284,7 @@ module SearchEngine
     end
 
     def current_monotonic_ms
-      (Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_second) * 1000.0)
+      Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond).to_i
     end
   end
 end

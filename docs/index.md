@@ -10,6 +10,7 @@ Welcome to the SearchEngine documentation.
 - [Models](./models.md)
 - [Relation](./relation.md)
 - [Observability](./observability.md)
+- [Materializers](./materializers.md)
 
 ## Overview
 
