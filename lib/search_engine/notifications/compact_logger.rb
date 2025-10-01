@@ -53,7 +53,7 @@ module SearchEngine
         true
       end
 
-      # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # rubocop:disable Metrics/PerceivedComplexity
       # Internal: Emit one compact line for a notification event.
       def self.emit_line(logger, severity, event, include_params:, multi:)
         return unless logger
@@ -97,7 +97,7 @@ module SearchEngine
       rescue StandardError
         nil
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # Map a Symbol severity to Logger integer constant.
       def self.map_level(level)

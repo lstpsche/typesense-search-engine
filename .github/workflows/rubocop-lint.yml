@@ -5,8 +5,9 @@ on:
     paths:
       - '*.rb'
       - '*.rake'
+    branches: ['**']
   push:
-    branches: [main]
+    branches: ['**']
 
 jobs:
   lint:

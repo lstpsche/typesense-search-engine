@@ -23,7 +23,7 @@ module SearchEngine
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
     # @return [Hash] Parsed response
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
-    def search(collection:, params:, url_opts: {}) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    def search(collection:, params:, url_opts: {})
       validate_single!(collection, params)
 
       cache_params = derive_cache_opts(url_opts)
@@ -77,7 +77,7 @@ module SearchEngine
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
     # @return [Hash] Parsed response from Typesense multi-search
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
-    def multi_search(searches:, url_opts: {}) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    def multi_search(searches:, url_opts: {})
       validate_multi!(searches)
 
       cache_params = derive_cache_opts(url_opts)
@@ -135,7 +135,7 @@ module SearchEngine
       @typesense ||= build_typesense_client
     end
 
-    def build_typesense_client # rubocop:disable Metrics/AbcSize
+    def build_typesense_client
       require 'typesense'
 
       Typesense::Client.new(
@@ -198,7 +198,7 @@ module SearchEngine
       map_and_raise(error, method, path, cache_params, start_ms)
     end
 
-    def map_and_raise(error, method, path, cache_params, start_ms) # rubocop:disable Metrics/AbcSize
+    def map_and_raise(error, method, path, cache_params, start_ms)
       if error.respond_to?(:http_code)
         status = error.http_code
         body = parse_error_body(error)

@@ -43,8 +43,17 @@ module SearchEngine
       self
     end
 
-    # Add filters in a normalized form.
-    # Accepts Hash, String/Symbol, or Arrays of these.
+    # Add filters to the relation.
+    #
+    # Accepted forms:
+    # - Hash: where(id: 1, brand_id: [1,2,3])
+    # - Raw string fragment: where("brand_id:=[1,2,3]")
+    # - Template with placeholders: where("price > ?", 100)
+    #
+    # Multiple calls compose with AND semantics (filters accumulate).
+    # The relation is immutable; a new instance is returned.
+    #
+    # @param args [Array<Object>] filter arguments
     # @return [SearchEngine::Relation]
     def where(*args)
       fragments = normalize_where(args)
@@ -159,7 +168,7 @@ module SearchEngine
       @klass.respond_to?(:name) && @klass.name ? @klass.name : @klass.to_s
     end
 
-    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
+    # rubocop:disable Metrics/PerceivedComplexity
     def format_value_for_inspect(value)
       case value
       when Array
@@ -209,22 +218,58 @@ module SearchEngine
       end
       normalized
     end
-    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
+    # rubocop:enable Metrics/AbcSize
 
-    def normalize_where(args)
-      Array(args).flatten.compact.flat_map do |arg|
-        case arg
+    # Normalize where arguments into an array of string fragments safe for Typesense.
+    # Supports hash, raw string, and template-with-placeholders.
+    def normalize_where(args) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+      list = Array(args).flatten.compact
+      return [] if list.empty?
+
+      fragments = []
+      i = 0
+      known_attrs = safe_attributes_map
+
+      while i < list.length
+        entry = list[i]
+        case entry
         when Hash
-          arg.each_pair.map { |k, v| { field: k.to_sym, op: :eq, value: v } }
-        when String, Symbol
-          [{ raw: arg.to_s }]
+          validate_hash_keys!(entry, known_attrs)
+          fragments.concat(SearchEngine::Filters::Sanitizer.build_from_hash(entry, known_attrs))
+          i += 1
+        when String
+          if entry.match?(/(?<!\\)\?/) # has unescaped placeholders
+            tail = list[(i + 1)..] || []
+            needed = SearchEngine::Filters::Sanitizer.count_placeholders(entry)
+            args_for_template = tail.first(needed)
+            if args_for_template.length != needed # rubocop:disable Metrics/BlockNesting
+              raise ArgumentError, "expected #{needed} args for #{needed} placeholders, got #{args_for_template.length}"
+            end
+
+            fragments << SearchEngine::Filters::Sanitizer.apply_placeholders(entry, args_for_template)
+            i += 1 + needed
+          else
+            fragments << entry.to_s
+            i += 1
+          end
+        when Symbol
+          # Treat symbol as raw string fragment for compatibility
+          fragments << entry.to_s
+          i += 1
+        when Array
+          # Recurse over nested arrays
+          nested = normalize_where(entry)
+          fragments.concat(nested)
+          i += 1
         else
-          [arg]
+          raise ArgumentError, "unsupported where argument of type #{entry.class}"
         end
       end
+
+      fragments
     end
 
-    def normalize_order(clause) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
+    def normalize_order(clause) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
       return [] if clause.nil?
 
       list = Array(clause).flatten.compact
@@ -300,6 +345,27 @@ module SearchEngine
         obj.freeze if obj.is_a?(String)
       end
       obj
+    end
+
+    def safe_attributes_map
+      if @klass.respond_to?(:attributes)
+        @klass.attributes || {}
+      else
+        {}
+      end
+    end
+
+    def validate_hash_keys!(hash, attributes_map)
+      return if hash.blank?
+
+      known = attributes_map.keys.map(&:to_sym)
+      unknown = hash.keys.map(&:to_sym) - known
+      return if unknown.empty?
+
+      klass_name = klass_name_for_inspect
+      known_list = known.map(&:to_s).sort.join(', ')
+      unknown_name = unknown.first.inspect
+      raise ArgumentError, "Unknown attribute #{unknown_name} for #{klass_name}. Known: #{known_list}"
     end
   end
 end
