@@ -1,0 +1,4 @@
+.cursor/
+tmp/
+log/
+vendor/
