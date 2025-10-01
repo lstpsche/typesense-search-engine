@@ -19,3 +19,5 @@ require "search_engine"
 ```
 
 On boot, Zeitwerk will load from `lib/` and `app/search_engine/` as configured by the engine.
+
+See [Configuration](./configuration.md) for available knobs and ENV fallbacks.

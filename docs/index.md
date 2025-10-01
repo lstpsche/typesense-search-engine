@@ -4,7 +4,8 @@
 
 SearchEngine is a mountless Rails::Engine that wraps Typesense for Rails apps.
 
-- See [Installation](./installation.md)
+- [Installation](./installation.md)
+- [Configuration](./configuration.md)
 
 ```mermaid
 flowchart LR
