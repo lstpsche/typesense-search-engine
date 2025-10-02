@@ -358,6 +358,54 @@ module SearchEngine
     # Convenience alias to compiled body params.
     alias to_h to_typesense_params
 
+    # Explain the current relation without performing any network calls.
+    #
+    # Returns a concise, multi-line String summarizing chainers and compiled
+    # parameters. When `to: :stdout` is provided, also prints the summary.
+    #
+    # @param to [Symbol, nil] when `:stdout`, prints to STDOUT in addition to returning
+    # @return [String]
+    # @example
+    #   rel.explain
+    #   #=> "SearchEngine::Product Relation\n  where: active:=true AND brand_id IN [1,2]\n  order: updated_at:desc\n  select: id,name\n  page/per: 2/20"
+    def explain(to: nil)
+      params = to_typesense_params
+
+      lines = []
+      header = "#{klass_name_for_inspect} Relation"
+      lines << header
+
+      if params[:filter_by] && !params[:filter_by].to_s.strip.empty?
+        where_str = friendly_where(params[:filter_by].to_s)
+        lines << "  where: #{where_str}"
+      end
+
+      lines << "  order: #{params[:sort_by]}" if params[:sort_by] && !params[:sort_by].to_s.strip.empty?
+
+      if params[:include_fields] && !params[:include_fields].to_s.strip.empty?
+        lines << "  select: #{params[:include_fields]}"
+      end
+
+      pagination = {}
+      pagination[:page] = params[:page] if params.key?(:page)
+      pagination[:per_page] = params[:per_page] if params.key?(:per_page)
+      if pagination.key?(:page) || pagination.key?(:per_page)
+        p = pagination[:page]
+        per = pagination[:per_page]
+        if p && per
+          lines << "  page/per: #{p}/#{per}"
+        elsif p && !per
+          lines << "  page/per: #{p}/"
+        elsif per && !p
+          lines << "  page/per: /#{per}"
+        end
+      end
+
+      out = lines.join("\n")
+      puts(out) if to == :stdout
+      out
+    end
+
     # Materializers
     # --------------
     #
@@ -498,28 +546,24 @@ module SearchEngine
 
     def format_value_for_inspect(value)
       case value
+      when String
+        value.inspect
       when Array
-        return '[]' if value.empty?
-
-        if value.length <= 3
-          value.inspect
-        else
-          head = value.first(3).map(&:inspect).join(', ')
-          "[#{head}... +#{value.length - 3}]"
-        end
-      when Hash
-        return '{}' if value.empty?
-
-        keys = value.keys
-        if keys.length <= 3
-          value.inspect
-        else
-          head = keys.first(3).map(&:inspect).join(', ')
-          "{#{head}... +#{keys.length - 3} keys}"
-        end
+        "[#{value.map { |v| format_value_for_inspect(v) }.join(', ')}]"
       else
         value.inspect
       end
+    end
+
+    def friendly_where(filter_by)
+      s = filter_by.to_s
+      return s if s.empty?
+
+      # Replace tokens for readability
+      s = s.gsub(' && ', ' AND ')
+      s = s.gsub(' || ', ' OR ')
+      s = s.gsub(':=[', ' IN [')
+      s.gsub(':!=[', ' NOT IN [')
     end
 
     def normalize_initial_state(state)
