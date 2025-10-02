@@ -99,7 +99,195 @@ module SearchEngine
         { diff: diff_hash, pretty: pretty_print(diff_hash) }
       end
 
+      # Apply schema lifecycle: create a new physical collection, reindex data into it,
+      # atomically point the alias (logical name) to it, and enforce retention.
+      #
+      # The reindexing step can be provided via an optional block (yielded with the new
+      # physical name). If no block is given, and the klass responds to
+      # `reindex_all_to(physical_name)`, that method will be called. If neither is available,
+      # an ArgumentError is raised and no alias swap occurs. If reindexing fails, the
+      # newly created physical is left intact for inspection; retention cleanup only runs
+      # after a successful alias swap.
+      #
+      # @param klass [Class] model class inheriting from {SearchEngine::Base}
+      # @param client [SearchEngine::Client] optional client wrapper (for tests)
+      # @yieldparam physical_name [String] the newly created physical collection name
+      # @return [Hash] { logical: String, new_physical: String, previous_physical: String, alias_target: String, dropped_physicals: Array<String> }
+      # @raise [SearchEngine::Errors::Api, ArgumentError]
+      def apply!(klass, client: SearchEngine::Client.new)
+        compiled = compile(klass)
+        logical = compiled[:name]
+
+        start_ms = monotonic_ms
+        current_target = client.resolve_alias(logical)
+
+        new_physical = generate_physical_name(logical, client: client)
+        create_schema = { name: new_physical, fields: compiled[:fields].map(&:dup) }
+        client.create_collection(create_schema)
+
+        if block_given?
+          yield new_physical
+        elsif klass.respond_to?(:reindex_all_to)
+          klass.reindex_all_to(new_physical)
+        else
+          raise ArgumentError, 'reindex step is required: provide a block or implement klass.reindex_all_to(name)'
+        end
+
+        # Idempotent: if alias already points to new physical, treat as no-op
+        current_after_reindex = client.resolve_alias(logical)
+        client.upsert_alias(logical, new_physical) unless current_after_reindex == new_physical
+
+        # Retention cleanup
+        _, dropped = enforce_retention!(logical, new_physical, client: client, keep_last: effective_keep_last(klass))
+
+        payload = {
+          logical: logical,
+          new_physical: new_physical,
+          previous_physical: current_target,
+          alias_target: new_physical,
+          dropped_physicals: dropped
+        }
+
+        if defined?(ActiveSupport::Notifications)
+          ActiveSupport::Notifications.instrument('search_engine.schema.apply',
+                                                  logical: logical,
+                                                  new_physical: new_physical,
+                                                  previous_physical: current_target,
+                                                  dropped_count: dropped.size,
+                                                  duration_ms: (monotonic_ms - start_ms)
+                                                 )
+        end
+
+        payload
+      end
+
+      # Roll back the alias for the given klass to the previous retained physical collection.
+      #
+      # Chooses the most recent retained physical behind the current alias target. If none
+      # is available, raises an ArgumentError explaining that retention may be set to 0.
+      # The method is idempotent: if the alias already points to the chosen target, no-op.
+      #
+      # @param klass [Class]
+      # @param client [SearchEngine::Client]
+      # @return [Hash] { logical: String, new_target: String, previous_target: String }
+      # @raise [ArgumentError] when no previous physical exists
+      def rollback(klass, client: SearchEngine::Client.new)
+        compiled = compile(klass)
+        logical = compiled[:name]
+
+        start_ms = monotonic_ms
+        current_target = client.resolve_alias(logical)
+
+        physicals = list_physicals(logical, client: client)
+        ordered = order_physicals_desc(logical, physicals)
+        previous = ordered.find { |name| name != current_target }
+        if previous.nil?
+          raise ArgumentError,
+                'No previous physical available for rollback; retention keep_last may be 0'
+        end
+
+        # Idempotent swap
+        client.upsert_alias(logical, previous) unless current_target == previous
+
+        if defined?(ActiveSupport::Notifications)
+          ActiveSupport::Notifications.instrument('search_engine.schema.rollback',
+                                                  logical: logical,
+                                                  new_target: previous,
+                                                  previous_target: current_target,
+                                                  duration_ms: (monotonic_ms - start_ms)
+                                                 )
+        end
+
+        { logical: logical, new_target: previous, previous_target: current_target }
+      end
+
       private
+
+      # Generate a new physical name using UTC timestamp + 3-digit sequence.
+      # Example: "products_20250131_235959_001"
+      def generate_physical_name(logical, client:)
+        now = Time.now.utc
+        timestamp = now.strftime('%Y%m%d_%H%M%S')
+        prefix = "#{logical}_#{timestamp}_"
+
+        existing = list_physicals_starting_with(prefix, client: client)
+        used_sequences = existing.map { |name| name.split('_').last.to_i }
+
+        seq = 1
+        seq += 1 while used_sequences.include?(seq) && seq < 999
+        format('%<prefix>s%<seq>03d', prefix: prefix, seq: seq)
+      end
+
+      # Return current alias target or nil.
+      def current_alias_target(logical, client:)
+        client.resolve_alias(logical)
+      end
+
+      # Atomically swap alias to the provided physical.
+      def swap_alias!(logical, physical, client:)
+        client.upsert_alias(logical, physical)
+      end
+
+      # Enumerate all physicals that match the naming pattern for the logical name.
+      def list_physicals(logical, client:)
+        collections = Array(client.list_collections)
+        re = /^#{Regexp.escape(logical)}_\d{8}_\d{6}_\d{3}$/
+        names = collections.map { |c| (c[:name] || c['name']).to_s }
+        names.select { |n| re.match?(n) }
+      end
+
+      # Internal: list physicals that share the same timestamp prefix (for sequence calculation)
+      def list_physicals_starting_with(prefix, client:)
+        collections = Array(client.list_collections)
+        names = collections.map { |c| (c[:name] || c['name']).to_s }
+        names.select { |n| n.start_with?(prefix) }
+      end
+
+      def enforce_retention!(logical, new_target, client:, keep_last:)
+        keep = Integer(keep_last || 0)
+        keep = 0 if keep.negative?
+
+        physicals = list_physicals(logical, client: client)
+        ordered = order_physicals_desc(logical, physicals)
+        candidates = ordered.reject { |name| name == new_target }
+        to_keep = candidates.first(keep)
+        to_drop = candidates.drop(keep)
+
+        to_drop.each do |name|
+          # Safety: best-effort delete; ignore 404
+          client.delete_collection(name)
+        end
+
+        [to_keep, to_drop]
+      end
+
+      def order_physicals_desc(logical, names)
+        names.sort_by { |n| [-extract_timestamp(logical, n).to_i, -extract_sequence(logical, n)] }
+      end
+
+      def extract_timestamp(logical, name)
+        # name format logical_YYYYMMDD_HHMMSS_###
+        base = name.delete_prefix("#{logical}_")
+        parts = base.split('_')
+        return 0 unless parts.size == 3
+
+        (parts[0] + parts[1]).to_i
+      end
+
+      def extract_sequence(_logical, name)
+        name.split('_').last.to_i
+      end
+
+      def effective_keep_last(klass)
+        per = klass.respond_to?(:schema_retention) && klass.schema_retention ? klass.schema_retention[:keep_last] : nil
+        return per unless per.nil?
+
+        SearchEngine.config.schema.retention.keep_last
+      end
+
+      def monotonic_ms
+        Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+      end
 
       def typesense_type_for(type_descriptor)
         # Array types (e.g., [:string]) => "string[]"; support nested symbol or string

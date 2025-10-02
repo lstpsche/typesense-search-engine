@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Compiler](./compiler.md)
+[← Back to Index](./index.md) · [Indexer](./indexer.md)
 
 # Schema Compiler & Diff
 
@@ -16,6 +16,8 @@ flowchart LR
 
 - `SearchEngine::Schema.compile(klass)` → returns a Typesense-compatible schema hash built from the DSL. Pure and deterministic (no network I/O).
 - `SearchEngine::Schema.diff(klass)` → resolves alias → physical, fetches the live schema, and returns a structured diff plus a compact human summary.
+- `SearchEngine::Schema.apply!(klass)` → create new physical, reindex, atomically swap alias, enforce retention; returns `{ logical, new_physical, previous_physical, alias_target, dropped_physicals }`.
+- `SearchEngine::Schema.rollback(klass)` → swap alias back to previous retained physical; returns `{ logical, new_target, previous_target }`.
 
 Both methods are documented with YARD. Keys are returned as symbols; empty/nil values are omitted. The returned schema is deeply frozen.
 
@@ -64,10 +66,43 @@ Collection: products
 No changes
 ```
 
-## Caveats
+## Lifecycle (Blue/Green with retention)
 
-- Alias resolution uses the `aliases` endpoint; if not found, the logical name is treated as physical.
-- Options not present in our DSL are intentionally ignored in comparisons to keep diffs focused on actionable changes.
-- Network I/O (alias resolution and live schema fetch) occurs only in `diff`.
+```mermaid
+sequenceDiagram
+  participant App
+  participant TS as Typesense
+  App->>TS: Create new physical (versioned)
+  App->>TS: Bulk reindex into new physical
+  App->>TS: Alias swap (logical -> new physical)
+  App->>TS: Retention cleanup (drop old N)
+```
+
+- Physical name format: `"#{logical}_YYYYMMDD_HHMMSS_###"` (3-digit zero-padded sequence).
+- Alias equals the logical name (e.g., `products`). Swap is performed via a single upsert call, which the server handles atomically.
+- Idempotent: if alias already points to the new physical, swap is a no-op.
+- Reindexing is required. Provide a block to `apply!` or implement `klass.reindex_all_to(physical_name)` to perform bulk import. On failure, no alias swap occurs and the new physical remains for inspection.
+
+### Retention
+
+- Global default: keep none.
+
+```ruby
+SearchEngine.configure { |c| c.schema.retention.keep_last = 0 }
+```
+
+- Per-collection override:
+
+```ruby
+class SearchEngine::Product < SearchEngine::Base
+  schema_retention keep_last: 2
+end
+```
+
+After a successful swap, older physicals that match the naming pattern and are not the alias target are ordered by embedded timestamp (desc). Everything beyond the first `keep_last` is deleted. The alias target is never deleted.
+
+### Rollback
+
+`SearchEngine::Schema.rollback(klass)` will swap the alias back to the most recent retained physical (behind the current). If no previous physical exists, it raises an error (e.g., when `keep_last` is 0). No collections are deleted during rollback.
 
 See also: [Client](./client.md), [Configuration](./configuration.md), and [Compiler](./compiler.md).
