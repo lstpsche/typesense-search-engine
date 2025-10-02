@@ -26,7 +26,7 @@ module SearchEngine
       # @param args [Array] optional, used only when +input+ is a template String
       # @param klass [Class] SearchEngine::Base subclass used for attribute validation
       # @return [SearchEngine::AST::Node, Array<SearchEngine::AST::Node>]
-      # @raise [ArgumentError] on template mismatch, unknown fields, or invalid arrays
+      # @raise [SearchEngine::Errors::InvalidField, SearchEngine::Errors::InvalidOperator, SearchEngine::Errors::InvalidType]
       def parse(input, klass:, args: [])
         case input
         when Hash
@@ -118,7 +118,7 @@ module SearchEngine
 
           if array_like?(value)
             values = normalize_array_values(value, field: field, klass: klass)
-            ensure_non_empty_values!(values)
+            ensure_non_empty_values!(values, field: field, klass: klass)
             SearchEngine::AST.in_(field, values)
           else
             coerced = coerce_value_for_field(value, field: field, klass: klass)
@@ -136,7 +136,10 @@ module SearchEngine
 
         args = Array(args)
         m = template.match(/\A\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=|!=|>=|<=|>|<|IN|NOT\s+IN|MATCHES|PREFIX)\s*\?\s*\z/i)
-        raise ArgumentError, "Parser: invalid template '#{template}'" unless m
+        unless m
+          raise SearchEngine::Errors::InvalidOperator,
+                "invalid template '#{template}'. Supported: =, !=, >, >=, <, <=, IN, NOT IN, MATCHES, PREFIX"
+        end
 
         field_raw = m[1]
         op = m[2].upcase.gsub(/\s+/, ' ')
@@ -160,18 +163,18 @@ module SearchEngine
           SearchEngine::AST.lte(field_sym, coerce_value_for_field(args.first, field: field_sym, klass: klass))
         when 'IN'
           values = normalize_array_values(args.first, field: field_sym, klass: klass)
-          ensure_non_empty_values!(values)
+          ensure_non_empty_values!(values, field: field_sym, klass: klass)
           SearchEngine::AST.in_(field_sym, values)
         when 'NOT IN'
           values = normalize_array_values(args.first, field: field_sym, klass: klass)
-          ensure_non_empty_values!(values)
+          ensure_non_empty_values!(values, field: field_sym, klass: klass)
           SearchEngine::AST.not_in(field_sym, values)
         when 'MATCHES'
           SearchEngine::AST.matches(field_sym, args.first)
         when 'PREFIX'
           SearchEngine::AST.prefix(field_sym, String(args.first))
         else
-          raise ArgumentError, "Parser: unsupported operator '#{op}'"
+          raise SearchEngine::Errors::InvalidOperator, "unsupported operator '#{op}'"
         end
       end
 
@@ -214,8 +217,8 @@ module SearchEngine
       def ensure_placeholder_arity!(needed, provided, template)
         return if needed == provided
 
-        raise ArgumentError,
-              "Parser: expected #{needed} args for #{needed} placeholders in template '#{template}', got #{provided}."
+        raise SearchEngine::Errors::InvalidOperator,
+              "expected #{needed} args for #{needed} placeholders in template '#{template}', got #{provided}."
       end
 
       def safe_attributes_map(klass)
@@ -233,21 +236,20 @@ module SearchEngine
         unknown = hash.keys.map(&:to_sym) - known
         return if unknown.empty?
 
-        klass_name = klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
-        known_list = known.map(&:to_s).sort.join(', ')
-        unknown_name = unknown.first.inspect
-        raise ArgumentError, "Unknown attribute #{unknown_name} for #{klass_name}. Known: #{known_list}"
+        return unless strict_fields?
+
+        raise build_invalid_field_error(unknown.first, known, klass)
       end
 
       def validate_field!(field, attributes_map, klass)
         return if attributes_map.nil? || attributes_map.empty?
+        return unless strict_fields?
 
         sym = field.to_sym
         return if attributes_map.key?(sym)
 
-        klass_name = klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
-        known_list = attributes_map.keys.map(&:to_s).sort.join(', ')
-        raise ArgumentError, "Unknown attribute #{sym.inspect} for #{klass_name}. Known: #{known_list}"
+        known = attributes_map.keys.map(&:to_sym)
+        raise build_invalid_field_error(sym, known, klass)
       end
 
       def array_like?(value)
@@ -259,10 +261,11 @@ module SearchEngine
         arr.map { |v| coerce_value_for_field(v, field: field, klass: klass) }
       end
 
-      def ensure_non_empty_values!(values)
+      def ensure_non_empty_values!(values, field:, klass:)
         return if values.is_a?(Array) && !values.empty?
 
-        raise ArgumentError, "Parser: values for IN must be a non-empty Array (got #{values.inspect})."
+        raise SearchEngine::Errors::InvalidType,
+              invalid_type_message(field: field, klass: klass, expectation: 'a non-empty Array', got: values)
       end
 
       def coerce_value_for_field(value, field:, klass:)
@@ -271,27 +274,72 @@ module SearchEngine
         rescue StandardError
           nil
         end
-        coerce_value(value, type_hint: type)
+        coerce_value(value, type_hint: type, field: field, klass: klass)
       end
 
-      def coerce_value(value, type_hint: nil)
+      def coerce_value(value, type_hint: nil, field: nil, klass: nil)
         # Booleans from strings when type is boolean
         if type_boolean?(type_hint) && value.is_a?(String)
           lc = value.strip.downcase
           return true if lc == 'true'
           return false if lc == 'false'
+
+          raise SearchEngine::Errors::InvalidType,
+                invalid_type_message(field: field, klass: klass, expectation: 'boolean', got: value)
         end
 
-        # Date/DateTime -> Time UTC
+        # Date/DateTime/Time normalization
         case value
         when DateTime
           return value.to_time.utc
         when Date
-          # Date#to_time may be local; normalize to UTC midnight
           return value.to_time.utc
+        when Time
+          return value.utc? ? value : value.utc
         else
-          # Time as-is; ensure Time is UTC if it responds
-          return value.utc if value.is_a?(Time) && !value.utc?
+          if type_time?(type_hint) && value.is_a?(String)
+            begin
+              require 'time'
+              return Time.parse(value).utc
+            rescue StandardError
+              raise SearchEngine::Errors::InvalidType,
+                    invalid_type_message(field: field, klass: klass, expectation: 'time', got: value)
+            end
+          end
+        end
+
+        # Numeric coercion
+        if type_integer?(type_hint)
+          return value if value.is_a?(Integer)
+
+          if value.is_a?(String)
+            begin
+              int_val = Integer(value, 10)
+              return int_val
+            rescue StandardError
+              raise SearchEngine::Errors::InvalidType,
+                    invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value)
+            end
+          end
+          # Reject non-integer numerics (e.g., Float)
+          if value.is_a?(Numeric)
+            raise SearchEngine::Errors::InvalidType,
+                  invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value)
+          end
+        elsif type_float?(type_hint)
+          # Preserve Integer literal when provided to keep stable filter rendering
+          return value if value.is_a?(Integer)
+          return value.to_f if value.is_a?(Numeric)
+
+          if value.is_a?(String)
+            begin
+              Float(value)
+            rescue StandardError
+              raise SearchEngine::Errors::InvalidType,
+                    invalid_type_message(field: field, klass: klass, expectation: 'numeric', got: value)
+            end
+            return value.to_f
+          end
         end
 
         value
@@ -302,6 +350,77 @@ module SearchEngine
         when :boolean, 'boolean', TrueClass, FalseClass then true
         else false
         end
+      end
+
+      def type_integer?(hint)
+        case hint
+        when :integer, 'integer', Integer then true
+        else false
+        end
+      end
+
+      def type_float?(hint)
+        case hint
+        when :float, 'float', :decimal, 'decimal', Float then true
+        else false
+        end
+      end
+
+      def type_time?(hint)
+        case hint
+        when :time, 'time', Time, Date, DateTime then true
+        else false
+        end
+      end
+
+      def strict_fields?
+        begin
+          cfg = SearchEngine.config
+          val = cfg.respond_to?(:strict_fields) ? cfg.strict_fields : nil
+          return !!val unless val.nil?
+        rescue StandardError
+          # default below
+        end
+        true
+      end
+
+      def build_invalid_field_error(field, known, klass)
+        klass_name = klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
+        suggestion = did_you_mean(field, known)
+        msg = "unknown field #{field.inspect} for #{klass_name}"
+        msg += " (did you mean #{suggestion.inspect}?)" if suggestion
+        SearchEngine::Errors::InvalidField.new(msg)
+      end
+
+      def did_you_mean(field, known)
+        return nil if known.nil? || known.empty?
+
+        begin
+          require 'did_you_mean'
+          require 'did_you_mean/levenshtein'
+        rescue StandardError
+          return nil
+        end
+
+        candidates = known.map(&:to_s)
+        input = field.to_s
+
+        # Compute minimal Levenshtein distance deterministically
+        distances = candidates.each_with_object({}) do |cand, acc|
+          acc[cand] = DidYouMean::Levenshtein.distance(input, cand)
+        end
+        min = distances.values.min
+        return nil if min.nil? || min > 2
+
+        best = distances.select { |_, d| d == min }.keys
+        return nil unless best.length == 1
+
+        best.first.to_sym
+      end
+
+      def invalid_type_message(field:, klass:, expectation:, got:)
+        klass_name = klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
+        %(expected #{field.inspect} to be #{expectation} for #{klass_name} (got #{got.class}: #{got.inspect}))
       end
     end
   end

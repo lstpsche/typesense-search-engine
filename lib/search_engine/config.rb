@@ -35,6 +35,10 @@ module SearchEngine
     #   @return [Boolean] whether to allow URL-level caching
     # @!attribute [rw] cache_ttl_s
     #   @return [Integer] cache TTL in seconds (URL-level only)
+    # @!attribute [rw] strict_fields
+    #   @return [Boolean] when true, the Parser validates field names/types and raises
+    #     friendly errors; when false, unknown fields are allowed (operators and shapes
+    #     are still validated). Defaults to true in development/test.
     attr_accessor :api_key,
                   :host,
                   :port,
@@ -46,7 +50,8 @@ module SearchEngine
                   :default_query_by,
                   :default_infix,
                   :use_cache,
-                  :cache_ttl_s
+                  :cache_ttl_s,
+                  :strict_fields
 
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
@@ -71,6 +76,7 @@ module SearchEngine
       @default_infix = 'fallback'
       @use_cache = true
       @cache_ttl_s = 60
+      @strict_fields = default_strict_fields
       @logger = default_logger
       nil
     end
@@ -85,6 +91,12 @@ module SearchEngine
       set_if_present(:port, integer_or_nil(env['TYPESENSE_PORT']), override_existing)
       set_if_present(:protocol, env['TYPESENSE_PROTOCOL'], override_existing)
       set_if_present(:api_key, env['TYPESENSE_API_KEY'], override_existing)
+      # Accept TYPESENSE_STRICT_FIELDS as 'true'/'false' when provided
+      val = env['TYPESENSE_STRICT_FIELDS']
+      if !val.nil? && val.is_a?(String) && !val.strip.empty?
+        normalized = %w[1 true yes on].include?(val.to_s.strip.downcase)
+        set_if_present(:strict_fields, normalized, override_existing)
+      end
       self
     end
 
@@ -143,7 +155,8 @@ module SearchEngine
         default_query_by: default_query_by,
         default_infix: default_infix,
         use_cache: use_cache ? true : false,
-        cache_ttl_s: cache_ttl_s
+        cache_ttl_s: cache_ttl_s,
+        strict_fields: strict_fields ? true : false
       }
     end
 
@@ -156,6 +169,15 @@ module SearchEngine
     end
 
     private
+
+    def default_strict_fields
+      env = if defined?(Rails) && Rails.respond_to?(:env)
+              Rails.env.to_s
+            else
+              ENV['RACK_ENV'] || ENV['RAILS_ENV'] || 'development'
+            end
+      %w[development test].include?(env)
+    end
 
     def default_logger
       if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger

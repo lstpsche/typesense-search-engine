@@ -17,7 +17,7 @@ class RelationASTMigrationTest < Minitest::Test
     assert_equal 2, r.ast.length
     filter_by = r.to_typesense_params[:filter_by]
     assert_match(/active:=true/, filter_by)
-    assert_match(/brand_id:=\[1, 2\]/, filter_by)
+    assert_match(/brand_id:=\[1,\s*2\]/, filter_by)
   end
 
   def test_compilation_prefers_ast

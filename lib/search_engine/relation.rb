@@ -766,6 +766,15 @@ module SearchEngine
       unknown = hash.keys.map(&:to_sym) - known
       return if unknown.empty?
 
+      # Respect strict_fields toggle: when false, allow unknown fields here to avoid
+      # duplicating parser-time validation and to keep Relation tolerant in relaxed mode.
+      begin
+        cfg = SearchEngine.config
+        return unless cfg.respond_to?(:strict_fields) ? cfg.strict_fields : true
+      rescue StandardError
+        # fall through to strict behavior
+      end
+
       klass_name = klass_name_for_inspect
       known_list = known.map(&:to_s).sort.join(', ')
       unknown_name = unknown.first.inspect

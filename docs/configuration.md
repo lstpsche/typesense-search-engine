@@ -20,19 +20,21 @@ This engine centralizes all knobs under `SearchEngine.config`. These values driv
 | `logger`           | Logger-like          | Rails logger or stdout | Must respond to `#info/#warn/#error` |
 | `default_query_by` | String, nil          | `nil`          | Comma-separated fields for `query_by` default |
 | `default_infix`    | String               | `"fallback"`   | Typesense infix option |
-| `use_cache`        | Boolean              | `true`         | URL/common param only |
-| `cache_ttl_s`      | Integer              | `60`           | URL/common param: TTL seconds -> `cache_ttl` |
+| `use_cache`        | Boolean              | `true`         | URL-level option only |
+| `cache_ttl_s`      | Integer              | `60`           | URL-level option: TTL seconds -> `cache_ttl` |
+| `strict_fields`    | Boolean              | `true` in development/test; else `false` | Parser validates unknown fields when `true`; see [Query DSL](./query_dsl.md#error-reference) |
 
 ## ENV mapping
 
 Only blank/unset fields are hydrated from ENV during engine boot; explicit initializer values win.
 
-| ENV var             | Field      |
-|---------------------|------------|
-| `TYPESENSE_HOST`    | `host`     |
-| `TYPESENSE_PORT`    | `port`     |
-| `TYPESENSE_PROTOCOL`| `protocol` |
-| `TYPESENSE_API_KEY` | `api_key`  |
+| ENV var                  | Field           |
+|--------------------------|-----------------|
+| `TYPESENSE_HOST`         | `host`          |
+| `TYPESENSE_PORT`         | `port`          |
+| `TYPESENSE_PROTOCOL`     | `protocol`      |
+| `TYPESENSE_API_KEY`      | `api_key`       |
+| `TYPESENSE_STRICT_FIELDS`| `strict_fields` |
 
 ## Initializer
 
@@ -52,6 +54,7 @@ SearchEngine.configure do |c|
   c.default_infix    = "fallback"
   c.use_cache        = true
   c.cache_ttl_s      = 60
+  c.strict_fields    = Rails.env.development? || Rails.env.test?
   c.logger           = Rails.logger
 end
 ```
