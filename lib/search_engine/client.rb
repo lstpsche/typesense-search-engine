@@ -204,12 +204,65 @@ module SearchEngine
       instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
+    # Bulk import JSONL documents into a collection using Typesense import API.
+    #
+    # @param collection [String] physical collection name
+    # @param jsonl [String] newline-delimited JSON payload
+    # @param action [Symbol, String] one of :upsert, :create, :update (default: :upsert)
+    # @return [Object] upstream return (String of JSONL statuses or Array of Hashes depending on gem version)
+    # @raise [SearchEngine::Errors::*]
+    def import_documents(collection:, jsonl:, action: :upsert)
+      unless collection.is_a?(String) && !collection.strip.empty?
+        raise Errors::InvalidParams, 'collection must be a non-empty String'
+      end
+      raise Errors::InvalidParams, 'jsonl must be a String' unless jsonl.is_a?(String)
+
+      ts = typesense_for_import
+      start = current_monotonic_ms
+      path = "/collections/#{collection}/documents/import"
+
+      result = with_exception_mapping(:post, path, {}, start) do
+        # The official client accepts (documents, action: "upsert") and appends query params.
+        ts.collections[collection].documents.import(jsonl, action: action.to_s)
+      end
+
+      instrument(:post, path, current_monotonic_ms - start, {})
+      result
+    end
+
     private
 
     attr_reader :config
 
     def typesense
       @typesense ||= build_typesense_client
+    end
+
+    def typesense_for_import
+      import_timeout = begin
+        config.indexer&.timeout_ms
+      rescue StandardError
+        nil
+      end
+      if import_timeout&.to_i&.positive? && import_timeout.to_i != config.timeout_ms.to_i
+        build_typesense_client_with_read_timeout(import_timeout.to_i / 1000.0)
+      else
+        typesense
+      end
+    end
+
+    def build_typesense_client_with_read_timeout(read_timeout_seconds)
+      require 'typesense'
+
+      Typesense::Client.new(
+        nodes: build_nodes,
+        api_key: config.api_key,
+        connection_timeout_seconds: (config.open_timeout_ms.to_i / 1000.0),
+        read_timeout_seconds: read_timeout_seconds,
+        num_retries: config.retries[:attempts].to_i,
+        retry_interval_seconds: config.retries[:backoff].to_f,
+        logger: safe_logger
+      )
     end
 
     def build_typesense_client

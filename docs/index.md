@@ -14,6 +14,7 @@ Welcome to the SearchEngine documentation.
 - [Query DSL](./query_dsl.md)
 - [Compiler](./compiler.md)
 - [Multi-search](./multi_search.md)
+- [Indexer](./indexer.md)
 
 ## Overview
 
