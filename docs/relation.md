@@ -50,8 +50,10 @@ flowchart LR
   B --> C[where/order/select]
   C --> D[Pagination]
   D --> E[Compiler]
-  E --> F[Typesense params]
+E --> F[Typesense params]
 ```
+
+See also: [Compiler](./compiler.md)
 
 See [Client](./client.md) for execution context.
 

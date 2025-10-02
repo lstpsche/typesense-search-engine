@@ -12,6 +12,7 @@ Welcome to the SearchEngine documentation.
 - [Observability](./observability.md)
 - [Materializers](./materializers.md)
 - [Query DSL](./query_dsl.md)
+- [Compiler](./compiler.md)
 
 ## Overview
 

@@ -219,8 +219,14 @@ module SearchEngine
       params[:query_by] = query_by_val if query_by_val
 
       # Filters and sorting
-      filters = Array(@state[:filters])
-      params[:filter_by] = filters.join(' && ') unless filters.empty?
+      ast_nodes = Array(@state[:filters_ast]).flatten.compact
+      if !ast_nodes.empty?
+        compiled = SearchEngine::Compiler.compile(ast_nodes, klass: @klass)
+        params[:filter_by] = compiled unless compiled.to_s.empty?
+      else
+        filters = Array(@state[:filters])
+        params[:filter_by] = filters.join(' && ') unless filters.empty?
+      end
 
       orders = Array(@state[:orders])
       params[:sort_by] = orders.join(',') unless orders.empty?
