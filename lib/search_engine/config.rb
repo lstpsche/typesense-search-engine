@@ -95,6 +95,66 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for data source adapters.
+    class SourcesConfig
+      # Defaults for ActiveRecord-backed source adapter.
+      class ActiveRecordConfig
+        # @return [Integer] default batch size for ORM batching
+        attr_accessor :batch_size
+        # @return [Boolean] mark relations as readonly to avoid dirty tracking
+        attr_accessor :readonly
+        # @return [Boolean] wrap fetching into a read-only transaction (best-effort, off by default)
+        attr_accessor :use_transaction
+
+        def initialize
+          @batch_size = 2000
+          @readonly = true
+          @use_transaction = false
+        end
+      end
+
+      # Defaults for raw SQL streaming source adapter.
+      class SQLConfig
+        # @return [Integer] default fetch size for server-side cursor/streaming
+        attr_accessor :fetch_size
+        # @return [Integer, nil] optional per-statement timeout (ms)
+        attr_accessor :statement_timeout_ms
+        # @return [Symbol] preferred row shape (:auto, :hash)
+        attr_accessor :row_shape
+
+        def initialize
+          @fetch_size = 2000
+          @statement_timeout_ms = nil
+          @row_shape = :auto
+        end
+      end
+
+      # Defaults for lambda-backed source adapter.
+      class LambdaConfig
+        # @return [Integer, nil] optional hint used for validation/metrics only
+        attr_accessor :max_batch_size_hint
+
+        def initialize
+          @max_batch_size_hint = nil
+        end
+      end
+
+      # @return [SearchEngine::Config::SourcesConfig::ActiveRecordConfig]
+      def active_record
+        @active_record ||= ActiveRecordConfig.new
+      end
+
+      # @return [SearchEngine::Config::SourcesConfig::SQLConfig]
+      def sql
+        @sql ||= SQLConfig.new
+      end
+
+      # @return [SearchEngine::Config::SourcesConfig::LambdaConfig]
+      def lambda
+        @lambda ||= LambdaConfig.new
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -123,6 +183,7 @@ module SearchEngine
       @multi_search_limit = 50
       @schema = SchemaConfig.new
       @indexer = IndexerConfig.new
+      @sources = SourcesConfig.new
       nil
     end
 
@@ -136,6 +197,12 @@ module SearchEngine
     # @return [SearchEngine::Config::IndexerConfig]
     def indexer
       @indexer ||= IndexerConfig.new
+    end
+
+    # Expose data source adapters configuration.
+    # @return [SearchEngine::Config::SourcesConfig]
+    def sources
+      @sources ||= SourcesConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -222,6 +289,21 @@ module SearchEngine
           timeout_ms: indexer.timeout_ms,
           retries: indexer.retries,
           gzip: indexer.gzip ? true : false
+        },
+        sources: {
+          active_record: {
+            batch_size: sources.active_record.batch_size,
+            readonly: sources.active_record.readonly ? true : false,
+            use_transaction: sources.active_record.use_transaction ? true : false
+          },
+          sql: {
+            fetch_size: sources.sql.fetch_size,
+            statement_timeout_ms: sources.sql.statement_timeout_ms,
+            row_shape: sources.sql.row_shape
+          },
+          lambda: {
+            max_batch_size_hint: sources.lambda.max_batch_size_hint
+          }
         }
       }
     end

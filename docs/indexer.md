@@ -56,4 +56,21 @@ flowchart TD
 - **Do I need a mapper?** Not yet; provide Hash documents with at least an `id` field. A DSL may be introduced later.
 - **Timeouts?** You can set `SearchEngine.config.indexer.timeout_ms` to override read timeout during import.
 
+### Data Sources
+
+Adapters provide batched records for the Indexer in a memory-stable way. Each adapter implements `each_batch(partition:, cursor:)` and yields arrays.
+
+Examples:
+
+```ruby
+source :active_record, model: ::Product, scope: -> { where(active: true) }, batch_size: 2000
+source :sql, sql: "SELECT * FROM products WHERE active = TRUE", fetch_size: 2000
+source :lambda do |cursor: nil, partition: nil|
+  Enumerator.new { |y| external_api.each_page(cursor) { |rows| y << rows } }
+end
+```
+
+- `partition` and `cursor` are opaque; adapters interpret them per-domain (e.g., id ranges, keyset predicates, external API tokens).
+- Instrumentation: emits `search_engine.source.batch_fetched` and `search_engine.source.error`.
+
 Backlinks: [Schema](./schema.md), [Observability](./observability.md), [Client](./client.md)
