@@ -3,6 +3,7 @@
 require 'json'
 require 'timeout'
 require 'digest'
+require 'time'
 
 module SearchEngine
   # Batch importer for streaming JSONL documents into a physical collection.
@@ -36,7 +37,7 @@ module SearchEngine
     # @param into [String, nil] target collection; defaults to resolver or the logical collection alias
     # @return [Summary]
     # @raise [SearchEngine::Errors::InvalidParams]
-    def self.rebuild_partition!(klass, partition:, into: nil)
+    def self.rebuild_partition!(klass, partition:, into: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       raise Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
       unless klass.ancestors.include?(SearchEngine::Base)
         raise Errors::InvalidParams, 'klass must inherit from SearchEngine::Base'
@@ -55,6 +56,22 @@ module SearchEngine
       before_hook = compiled_partitioner&.instance_variable_get(:@before_hook_proc)
       after_hook  = compiled_partitioner&.instance_variable_get(:@after_hook_proc)
 
+      started_at = monotonic_ms
+      pfields = SearchEngine::Observability.partition_fields(partition)
+      dispatch_ctx = SearchEngine::Instrumentation.context
+      SearchEngine::Instrumentation.instrument(
+        'search_engine.indexer.partition_start',
+        {
+          collection: (klass.respond_to?(:collection) ? klass.collection : klass.name.to_s),
+          into: target_into,
+          partition: pfields[:partition],
+          partition_hash: pfields[:partition_hash],
+          dispatch_mode: dispatch_ctx[:dispatch_mode],
+          job_id: dispatch_ctx[:job_id],
+          timestamp: Time.now.utc.iso8601
+        }
+      ) {}
+
       if before_hook
         run_hook_with_timeout(before_hook, partition,
                               timeout_ms: SearchEngine.config.partitioning.before_hook_timeout_ms
@@ -70,13 +87,35 @@ module SearchEngine
         end
       end
 
-      summary = import!(klass, into: target_into, enum: docs_enum, batch_size: nil, action: :upsert)
+      summary = import!(
+        klass,
+        into: target_into,
+        enum: docs_enum,
+        batch_size: nil,
+        action: :upsert
+      )
 
       if after_hook
         run_hook_with_timeout(after_hook, partition,
                               timeout_ms: SearchEngine.config.partitioning.after_hook_timeout_ms
         )
       end
+
+      SearchEngine::Instrumentation.instrument(
+        'search_engine.indexer.partition_finish',
+        {
+          collection: (klass.respond_to?(:collection) ? klass.collection : klass.name.to_s),
+          into: target_into,
+          partition: pfields[:partition],
+          partition_hash: pfields[:partition_hash],
+          batches_total: summary.batches_total,
+          docs_total: summary.docs_total,
+          success_total: summary.success_total,
+          failed_total: summary.failed_total,
+          status: summary.status,
+          duration_ms: (monotonic_ms - started_at).round(1)
+        }
+      ) {}
 
       summary
     end
@@ -199,28 +238,6 @@ module SearchEngine
         duration_ms_total: duration.round(1),
         batches: batches_stats
       )
-    end
-
-    # Build JSONL for the first batch without HTTP.
-    # @return [Hash] { collection, action, bytes_estimate, docs_count, sample_line }
-    def self.dry_run!(_klass, into:, enum:, _batch_size: nil, action: :upsert)
-      raise Errors::InvalidParams, 'enum must be an Enumerable' unless enum.respond_to?(:each)
-
-      first_batch = enum.respond_to?(:first) ? enum.first : nil
-      first_batch = to_array(first_batch) if first_batch
-      first_batch ||= []
-
-      buffer = +''
-      docs_count = encode_jsonl!(first_batch, buffer)
-      sample_line = buffer.lines.first&.strip
-
-      {
-        collection: into.to_s,
-        action: action.to_sym,
-        bytes_estimate: buffer.bytesize,
-        docs_count: docs_count,
-        sample_line: sample_line
-      }
     end
 
     class << self
@@ -446,7 +463,8 @@ module SearchEngine
 
         if defined?(ActiveSupport::Notifications)
           se_payload = {
-            collection: collection,
+            collection: SearchEngine::Instrumentation.context[:collection] || collection,
+            into: collection,
             batch_index: idx,
             docs_count: docs_count,
             success_count: nil,
@@ -651,6 +669,8 @@ module SearchEngine
           filter_hash: filter_hash
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.started', payload) {}
+        pf = SearchEngine::Observability.partition_fields(partition)
+        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'started')) {}
       end
 
       def instrument_finished(klass:, into:, partition:, duration_ms:, deleted_count:)
@@ -664,6 +684,8 @@ module SearchEngine
           deleted_count: deleted_count
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.finished', payload) {}
+        pf = SearchEngine::Observability.partition_fields(partition)
+        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'ok')) {}
       end
 
       def instrument_error(error, klass:, into:, partition:)
@@ -677,6 +699,8 @@ module SearchEngine
           message_truncated: error.message.to_s[0, 200]
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.error', payload) {}
+        pf = SearchEngine::Observability.partition_fields(partition)
+        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'failed')) {}
       end
 
       def instrument_stale(_type, reason:, klass:, into:, partition:)
@@ -689,6 +713,8 @@ module SearchEngine
           partition: partition
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.skipped', payload) {}
+        pf = SearchEngine::Observability.partition_fields(partition)
+        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'skipped')) {}
       end
 
       def suspicious_filter?(filter)

@@ -2,6 +2,7 @@
 
 require 'logger'
 require 'active_support/notifications'
+require 'json'
 
 module SearchEngine
   module Notifications
@@ -16,18 +17,31 @@ module SearchEngine
     class CompactLogger
       EVENT_SEARCH = 'search_engine.search'
       EVENT_MULTI  = 'search_engine.multi_search'
+      EVENT_SCHEMA_DIFF   = 'search_engine.schema.diff'
+      EVENT_SCHEMA_APPLY  = 'search_engine.schema.apply'
+      EVENT_PARTITION_START  = 'search_engine.indexer.partition_start'
+      EVENT_PARTITION_FINISH = 'search_engine.indexer.partition_finish'
+      EVENT_BATCH_IMPORT     = 'search_engine.indexer.batch_import'
+      EVENT_DELETE_STALE     = 'search_engine.indexer.delete_stale'
+      # Legacy (emitted by current codebase): stale_deletes.*
+      LEGACY_STALE_STARTED  = 'search_engine.stale_deletes.started'
+      LEGACY_STALE_FINISHED = 'search_engine.stale_deletes.finished'
+      LEGACY_STALE_ERROR    = 'search_engine.stale_deletes.error'
+      LEGACY_STALE_SKIPPED  = 'search_engine.stale_deletes.skipped'
 
       # Subscribe to SearchEngine notifications.
       #
       # @param logger [#info,#warn,#error] Logger instance; defaults to config.logger or $stdout
       # @param level [Symbol] one of :debug, :info, :warn, :error
       # @param include_params [Boolean] when true, include whitelisted params for single-search
+      # @param format [Symbol, nil] :kv or :json; defaults to config.observability.log_format
       # @return [Array<Object>] subscription handles that can be passed to {.unsubscribe}
-      def self.subscribe(logger: default_logger, level: :info, include_params: false)
+      def self.subscribe(logger: default_logger, level: :info, include_params: false, format: nil) # rubocop:disable Metrics/AbcSize
         return [] unless defined?(ActiveSupport::Notifications)
 
         severity = map_level(level)
         log = logger || default_logger
+        fmt = (format || (SearchEngine.config.observability&.log_format || :kv)).to_sym
 
         search_sub = ActiveSupport::Notifications.subscribe(EVENT_SEARCH) do |*args|
           ev = ActiveSupport::Notifications::Event.new(*args)
@@ -39,7 +53,56 @@ module SearchEngine
           emit_line(log, severity, ev, include_params: include_params, multi: true)
         end
 
-        @last_handle = [search_sub, multi_sub]
+        schema_diff_sub = ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_DIFF) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_schema_diff(log, severity, ev, format: fmt)
+        end
+
+        schema_apply_sub = ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_APPLY) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_schema_apply(log, severity, ev, format: fmt)
+        end
+
+        part_start_sub = ActiveSupport::Notifications.subscribe(EVENT_PARTITION_START) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_partition_start(log, severity, ev, format: fmt)
+        end
+
+        part_finish_sub = ActiveSupport::Notifications.subscribe(EVENT_PARTITION_FINISH) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_partition_finish(log, severity, ev, format: fmt)
+        end
+
+        batch_sub = ActiveSupport::Notifications.subscribe(EVENT_BATCH_IMPORT) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_batch_import(log, severity, ev, format: fmt)
+        end
+
+        stale_sub = ActiveSupport::Notifications.subscribe(EVENT_DELETE_STALE) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_delete_stale(log, severity, ev, format: fmt)
+        end
+
+        # Backward-compat for legacy stale events, map to new formatter
+        legacy_started = ActiveSupport::Notifications.subscribe(LEGACY_STALE_STARTED) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_delete_stale(log, severity, ev, format: fmt, legacy: :started)
+        end
+        legacy_finished = ActiveSupport::Notifications.subscribe(LEGACY_STALE_FINISHED) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_delete_stale(log, severity, ev, format: fmt, legacy: :finished)
+        end
+        legacy_error = ActiveSupport::Notifications.subscribe(LEGACY_STALE_ERROR) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_delete_stale(log, severity, ev, format: fmt, legacy: :error)
+        end
+        legacy_skipped = ActiveSupport::Notifications.subscribe(LEGACY_STALE_SKIPPED) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_delete_stale(log, severity, ev, format: fmt, legacy: :skipped)
+        end
+
+        @last_handle = [search_sub, multi_sub, schema_diff_sub, schema_apply_sub, part_start_sub, part_finish_sub,
+                        batch_sub, stale_sub, legacy_started, legacy_finished, legacy_error, legacy_skipped]
       end
 
       # Unsubscribe a previous subscription set.
@@ -80,6 +143,172 @@ module SearchEngine
       rescue StandardError
         nil
       end
+
+      # Schema diff formatter
+      def self.emit_schema_diff(logger, severity, event, format: :kv)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = event.payload
+        h = {
+          'event' => 'schema.diff',
+          'collection' => p[:collection] || p[:logical],
+          'fields.changed' => p[:fields_changed_count],
+          'fields.added' => p[:added_count],
+          'fields.removed' => p[:removed_count],
+          'in_sync' => p[:in_sync],
+          'duration.ms' => event.duration.round(1)
+        }
+        emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      # Schema apply formatter
+      def self.emit_schema_apply(logger, severity, event, format: :kv)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = event.payload
+        h = {
+          'event' => 'schema.apply',
+          'collection' => p[:collection] || p[:logical],
+          'into' => p[:physical_new] || p[:new_physical],
+          'alias_swapped' => p[:alias_swapped],
+          'retention_deleted_count' => p[:retention_deleted_count] || p[:dropped_count],
+          'status' => p[:status] || 'ok',
+          'duration.ms' => event.duration.round(1)
+        }
+        emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      def self.emit_partition_start(logger, severity, event, format: :kv)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = event.payload
+        h = {
+          'event' => 'indexer.partition_start',
+          'collection' => p[:collection],
+          'into' => p[:into],
+          'partition' => p[:partition_hash] || p[:partition],
+          'dispatch_mode' => p[:dispatch_mode],
+          'job_id' => p[:job_id],
+          'timestamp' => p[:timestamp]
+        }
+        emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      def self.emit_partition_finish(logger, severity, event, format: :kv)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = event.payload
+        h = {
+          'event' => 'indexer.partition_finish',
+          'collection' => p[:collection],
+          'into' => p[:into],
+          'partition' => p[:partition_hash] || p[:partition],
+          'batches.total' => p[:batches_total],
+          'docs.total' => p[:docs_total],
+          'success.total' => p[:success_total],
+          'failed.total' => p[:failed_total],
+          'status' => p[:status],
+          'duration.ms' => event.duration.round(1)
+        }
+        emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      def self.emit_batch_import(logger, severity, event, format: :kv)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = event.payload
+        h = {
+          'event' => 'indexer.batch_import',
+          'collection' => p[:collection],
+          'into' => p[:into],
+          'batch_index' => p[:batch_index],
+          'docs.count' => p[:docs_count],
+          'success.count' => p[:success_count],
+          'failure.count' => p[:failure_count],
+          'attempts' => p[:attempts],
+          'http_status' => p[:http_status],
+          'bytes.sent' => p[:bytes_sent],
+          'duration.ms' => event.duration.round(1),
+          'transient_retry' => p[:transient_retry]
+        }
+        if SearchEngine.config.observability.include_error_messages && p[:error_sample]
+          h['error.sample_count'] = Array(p[:error_sample]).size
+          h['message'] =
+            SearchEngine::Observability.truncate_message(Array(p[:error_sample]).first,
+                                                         SearchEngine.config.observability.max_message_length
+                                                        )
+        end
+        emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      def self.emit_delete_stale(logger, severity, event, format: :kv, legacy: nil)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = normalize_stale_payload(event.payload, legacy: legacy)
+        h = {
+          'event' => 'indexer.delete_stale',
+          'collection' => p[:collection],
+          'into' => p[:into],
+          'partition' => p[:partition_hash] || p[:partition],
+          'filter.hash' => p[:filter_hash],
+          'deleted.count' => p[:deleted_count],
+          'status' => p[:status] || 'ok',
+          'reason' => p[:reason],
+          'duration.ms' => p[:duration_ms] || event.duration.round(1)
+        }
+        emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      # Emit according to format
+      def self.emit(logger, severity, hash, format)
+        case format
+        when :json
+          line = JSON.generate(hash.compact)
+          log_with_level(logger, severity, line)
+        else
+          parts = []
+          hash.each do |k, v|
+            next if v.nil?
+
+            parts << "#{k}=#{v}"
+          end
+          log_with_level(logger, severity, parts.join(' '))
+        end
+      end
+
+      def self.normalize_stale_payload(p, legacy: nil)
+        h = p.dup
+        case legacy
+        when :started
+          h[:status] = 'started'
+        when :finished
+          h[:status] = 'ok'
+        when :error
+          h[:status] = 'failed'
+        when :skipped
+          h[:status] = 'skipped'
+        end
+        h
+      end
+      private_class_method :normalize_stale_payload
 
       def self.multi_parts(payload)
         labels = Array(payload[:labels]).map(&:to_s)

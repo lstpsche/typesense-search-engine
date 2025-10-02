@@ -40,7 +40,10 @@ module SearchEngine
                 )
 
       started = monotonic_ms
-      summary = SearchEngine::Indexer.rebuild_partition!(klass, partition: partition, into: into)
+      summary = nil
+      SearchEngine::Instrumentation.with_context(dispatch_mode: :active_job, job_id: job_id) do
+        summary = SearchEngine::Indexer.rebuild_partition!(klass, partition: partition, into: into)
+      end
       duration = (monotonic_ms - started).round(1)
 
       instrument(

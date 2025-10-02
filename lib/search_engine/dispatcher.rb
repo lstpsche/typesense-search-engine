@@ -74,7 +74,10 @@ module SearchEngine
           metadata: metadata
         }
         instrument('search_engine.dispatcher.inline_started', payload)
-        summary = SearchEngine::Indexer.rebuild_partition!(klass, partition: partition, into: into)
+        summary = nil
+        SearchEngine::Instrumentation.with_context(dispatch_mode: :inline) do
+          summary = SearchEngine::Indexer.rebuild_partition!(klass, partition: partition, into: into)
+        end
         duration = (monotonic_ms - started).round(1)
         instrument(
           'search_engine.dispatcher.inline_finished',

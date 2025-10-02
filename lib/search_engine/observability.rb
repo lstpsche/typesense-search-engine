@@ -114,6 +114,44 @@ module SearchEngine
       }
     end
 
+    # Compute a SHA1 hex digest for a value.
+    # @param value [#to_s]
+    # @return [String]
+    def self.sha1(value)
+      require 'digest'
+      Digest::SHA1.hexdigest(value.to_s)
+    end
+
+    # Return a shortened hash prefix for display/logging.
+    # @param hexdigest [String]
+    # @param length [Integer]
+    # @return [String]
+    def self.short_hash(hexdigest, length = 8)
+      s = hexdigest.to_s
+      s[0, length]
+    end
+
+    # Truncate and normalize a free-text message to a single line.
+    # @param message [String]
+    # @param max [Integer]
+    # @return [String]
+    def self.truncate_message(message, max = 200)
+      s = message.to_s.gsub(/\s+/, ' ').strip
+      s[0, max]
+    end
+
+    # Compute partition helpers used in logs: prefer raw numeric; hash strings.
+    # @param partition [Object]
+    # @return [Hash] { partition: <raw>, partition_hash: <String,nil> }
+    def self.partition_fields(partition)
+      if partition.is_a?(Numeric)
+        { partition: partition, partition_hash: nil }
+      else
+        hex = sha1(partition)
+        { partition: partition, partition_hash: short_hash(hex) }
+      end
+    end
+
     private_class_method :redact_params_hash, :redact_simple_value, :truncate_q,
                          :redact_string, :redact_filter_by
   end

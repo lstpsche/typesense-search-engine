@@ -7,6 +7,12 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
 - **Events**
   - `search_engine.search` — wraps `SearchEngine::Client#search`
   - `search_engine.multi_search` — wraps the top-level helper around `Client#multi_search`
+  - `search_engine.schema.diff` — around schema diffing
+  - `search_engine.schema.apply` — around schema apply lifecycle (create → reindex → swap → retention)
+  - `search_engine.indexer.partition_start` — partition processing started (inline or ActiveJob)
+  - `search_engine.indexer.partition_finish` — partition processing finished with summary
+  - `search_engine.indexer.batch_import` — each bulk import attempt
+  - `search_engine.indexer.delete_stale` — stale delete lifecycle (started/ok/failed/skipped)
 
 Duration is available via the event (`ev.duration`).
 
@@ -18,12 +24,16 @@ Duration is available via the event (`ev.duration`).
 - **status/http_status**: Integer when available, otherwise `:ok`/`:error`
 - **error_class**: String or nil
 - **retries**: Attempts used (reserved; nil by default)
+- **partition/partition_hash**: Numeric raw key or short hash for strings
+- **into**: Physical collection name
+- **duration_ms**: Float measured duration in milliseconds
 
 Redaction rules:
 - Sensitive keys matching `/key|token|secret|password/i` are redacted
 - Only whitelisted param keys are preserved: `q`, `query_by`, `per_page`, `page`, `infix`, `filter_by`
 - `q` is truncated when longer than 128 chars
 - `filter_by` literals are masked while preserving structure (e.g., `price:>10` → `price:>***`)
+- `filter_by` is never logged as-is; a `filter_hash` (sha1) is provided instead for stale deletes
 
 | Key            | Type                 | Redaction |
 |----------------|----------------------|-----------|
@@ -37,6 +47,9 @@ Redaction rules:
 | `error_class`  | String, nil          | N/A |
 | `retries`      | Integer, nil         | Reserved; nil by default |
 | `duration`     | Float (ms) via event | N/A |
+| `partition`    | Numeric or hidden    | Hidden for strings; use `partition_hash` |
+| `partition_hash` | String (sha1 prefix) | N/A |
+| `filter_hash`  | String (sha1)        | Raw filter never logged |
 
 For URL/cache knobs, see [Configuration](./configuration.md).
 
@@ -54,7 +67,8 @@ Options:
 SearchEngine::Notifications::CompactLogger.subscribe(
   logger: Rails.logger,    # default: SearchEngine.config.logger || STDOUT
   level: :info,            # :debug, :info, :warn, :error
-  include_params: false    # when true, logs only whitelisted param keys
+  include_params: false,   # when true, logs only whitelisted param keys
+  format: :kv              # :kv (default), :json
 )
 ```
 
@@ -65,45 +79,39 @@ Example lines:
 [se.multi] count=2 labels=products,brands status=200 duration=18.6ms cache=true ttl=60
 ```
 
-`filter_by` is never logged raw; when `include_params` is true and `filter_by` is present, it is rendered as `filter_by=***`.
+New KV examples:
 
-### Allowed snippets
+```
+event=schema.diff collection=SearchEngine::Product fields.changed=0 fields.added=3 fields.removed=0 in_sync=false duration_ms=12.1
 
-Instrument inside your own code if needed:
+event=schema.apply collection=SearchEngine::Product into=products_20251001_120000_001 alias_swapped=true retention_deleted_count=2 status=ok duration_ms=842.4
 
-```ruby
-ActiveSupport::Notifications.instrument(
-  "search_engine.search",
-  collection: collection,
-  params: SearchEngine::Observability.redact(params)
-) do
-  # perform HTTP request
-end
+event=indexer.partition_start collection=SearchEngine::Product into=products_20251001_120000_001 partition=9 dispatch_mode=inline timestamp=2025-10-02T12:00:00Z
+
+event=indexer.partition_finish collection=SearchEngine::Product into=products_20251001_120000_001 partition=9 batches_total=4 docs_total=8000 success_total=8000 failed_total=0 status=ok duration_ms=5234.7
+
+event=indexer.batch_import collection=products into=products batch_index=1 docs_count=2000 success_count=2000 failure_count=0 attempts=1 http_status=200 bytes_sent=123456 duration_ms=317.9
+
+event=indexer.delete_stale collection=SearchEngine::Product into=products_20251001_120000_001 partition=ab12cd34 filter_hash=f3e1... deleted_count=120 status=ok duration_ms=210.0
 ```
 
-Subscribe directly without the helper:
+JSON example (one line):
 
-```ruby
-ActiveSupport::Notifications.subscribe("search_engine.search") do |*args|
-  ev = ActiveSupport::Notifications::Event.new(*args)
-  Rails.logger.info(
-    "[se.search] collection=#{ev.payload[:collection]} status=#{ev.payload[:status]} duration=#{ev.duration.round(1)}ms"
-  )
-end
+```json
+{"event":"schema.apply","collection":"SearchEngine::Product","into":"products_20251001_120000_001","alias_swapped":true,"retention_deleted_count":2,"status":"ok","duration_ms":842.4}
 ```
 
 ### Event flow
 
 ```mermaid
-sequenceDiagram
-  participant App
-  participant Client as SearchEngine::Client
-  participant Notif as AS::Notifications
-  App->>Client: search(...)
-  Client->>Notif: instrument("search_engine.search", payload)
-  Notif-->>Client: yield
-  Client-->>App: result or raise
-  Notif-->>App: subscriber(s) log compact line
+flowchart TD
+  A[Schema Diff] -->|schema.diff| N[Notifications]
+  B[Schema Apply] -->|schema.apply| N
+  C[Partition Start] -->|indexer.partition_start| N
+  D[Batch Import] -->|indexer.batch_import| N
+  E[Delete Stale] -->|indexer.delete_stale| N
+  C2[Partition Finish] -->|indexer.partition_finish| N
+  N --> L[Compact Logger]
 ```
 
 ---
@@ -127,4 +135,4 @@ sequenceDiagram
   Client-->>Rel: Result
 ```
 
-Backlinks: [Relation](./relation.md), [Materializers](./materializers.md), [Client](./client.md)
+Backlinks: [Relation](./relation.md), [Materializers](./materializers.md), [Client](./client.md), [Schema](./schema.md), [Indexer](./indexer.md)

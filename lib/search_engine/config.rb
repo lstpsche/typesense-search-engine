@@ -221,6 +221,28 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for observability/logging.
+    class ObservabilityConfig
+      # @return [Boolean] enable the compact logging subscriber automatically
+      attr_accessor :enabled
+      # @return [Symbol] :kv or :json
+      attr_accessor :log_format
+      # @return [Integer] maximum message length for error samples in logs
+      attr_accessor :max_message_length
+      # @return [Boolean] include short error messages in logs for batch/stale events
+      attr_accessor :include_error_messages
+      # @return [Boolean] also emit legacy event aliases where applicable
+      attr_accessor :emit_legacy_event_aliases
+
+      def initialize
+        @enabled = true
+        @log_format = :kv
+        @max_message_length = 200
+        @include_error_messages = false
+        @emit_legacy_event_aliases = true
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -253,6 +275,7 @@ module SearchEngine
       @mapper = MapperConfig.new
       @partitioning = PartitioningConfig.new
       @stale_deletes = StaleDeletesConfig.new
+      @observability = ObservabilityConfig.new
       nil
     end
 
@@ -290,6 +313,12 @@ module SearchEngine
     # @return [SearchEngine::Config::StaleDeletesConfig]
     def stale_deletes
       @stale_deletes ||= StaleDeletesConfig.new
+    end
+
+    # Expose observability/logging configuration.
+    # @return [SearchEngine::Config::ObservabilityConfig]
+    def observability
+      @observability ||= ObservabilityConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -374,7 +403,8 @@ module SearchEngine
         indexer: indexer_hash_for_to_h,
         sources: sources_hash_for_to_h,
         mapper: mapper_hash_for_to_h,
-        partitioning: partitioning_hash_for_to_h
+        partitioning: partitioning_hash_for_to_h,
+        observability: observability_hash_for_to_h
       }
     end
 
@@ -434,6 +464,16 @@ module SearchEngine
         before_hook_timeout_ms: partitioning.before_hook_timeout_ms,
         after_hook_timeout_ms: partitioning.after_hook_timeout_ms,
         max_error_samples: partitioning.max_error_samples
+      }
+    end
+
+    def observability_hash_for_to_h
+      {
+        enabled: observability.enabled ? true : false,
+        log_format: observability.log_format,
+        max_message_length: observability.max_message_length,
+        include_error_messages: observability.include_error_messages ? true : false,
+        emit_legacy_event_aliases: observability.emit_legacy_event_aliases ? true : false
       }
     end
 
