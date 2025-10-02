@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Compiler](./compiler.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md)
 
 # Relation
 
@@ -59,6 +59,22 @@ See [Client](./client.md) for execution context.
 
 ---
 
+## Predicates as AST
+
+`Relation#where` parses inputs into a Predicate AST via the [Query DSL](./query_dsl.md) and stores nodes in `ast` (authoritative). Legacy string fragments are preserved for backward compatibility, but compilation prefers AST when present.
+
+```ruby
+rel = SearchEngine::Product.where(id: 1).where(["price > ?", 100])
+rel.ast # => [#<AST::Eq field=:id ...>, #<AST::Gt field=:price ...>]
+rel.to_typesense_params[:filter_by] # compiled string via Compiler
+```
+
+- **Read-only**: `rel.ast` returns a frozen Array.
+- **Composition**: multiple `where` calls append with AND semantics (compiled as `AST.and_`).
+- **Back-compat**: legacy relations with `filters` are migrated once into `AST::Raw` nodes.
+
+---
+
 ## where DSL
 
 The `where` chainer accepts three forms. Each call appends fragments with AND semantics. The relation is immutable and returns a new instance.
@@ -78,14 +94,16 @@ SearchEngine::Product
 
 ```mermaid
 flowchart LR
-  A[Hash/Fragment Input] --> B[Sanitizer]
-  B --> C[Normalized Filters]
-  C --> D[Relation State]
+  A[Hash/Fragment Input] --> B[Parser]
+  B --> C[AST nodes]
+  C --> D[Relation.ast]
+  D --> E[Compiler]
+  E --> F[filter_by]
 ```
 
 Notes:
 - Hash keys are validated against model attributes.
-- Raw string form is passed through; use with care.
+- Raw string form is passed through as `AST::Raw`; use with care.
 - Placeholder form is sanitized; `?` args are quoted/escaped.
 
 ---
@@ -121,7 +139,7 @@ Dedupe behavior: **order last-wins by field**, **select first-wins**.
 
 - **Relation#to_typesense_params**: compile immutable state to a Typesense body params Hash. Pure and deterministic. Omits URL-level options (cache knobs are handled by the client).
 - **Relation#to_h**: alias of `#to_typesense_params`.
-- **Relation#inspect**: concise, stable, and redacted summary `#<SearchEngine::Relation Model=Product filters=2 sort="updated_at:desc" select=2 page=2 per=20>`.
+- **Relation#inspect**: concise, stable, and redacted summary `#<SearchEngine::Relation Model=Product filters=2 ast=2 sort="updated_at:desc" select=2 page=2 per=20>`.
 
 ### Defaults merged
 
@@ -139,12 +157,13 @@ Dedupe behavior: **order last-wins by field**, **select first-wins**.
 
 | Relation state                  | Typesense param    | Notes |
 | ---                             | ---                | ---   |
-| `filters: [..]`                 | `filter_by`        | joined with ` && ` |
+| `ast: [..]`                     | `filter_by`        | compiled via Compiler; preferred |
+| `filters: [..]`                 | `filter_by`        | joined with ` && ` (fallback) |
 | `orders: [..]`                  | `sort_by`          | comma-joined |
 | `select: [..]`                  | `include_fields`   | comma-joined |
 | `page` / `per_page`             | `page`, `per_page` | if present, they win |
 | `limit` / `offset`              | `page`, `per_page` | fallback: `per_page = limit`; `page = (offset / limit).floor + 1` |
-| `options[:q]` or default `"*"` | `q`                | always present |
+| `options[:q]` or default "*"    | `q`                | always present |
 | `config.default_query_by`       | `query_by`         | omitted when nil |
 
 ```mermaid

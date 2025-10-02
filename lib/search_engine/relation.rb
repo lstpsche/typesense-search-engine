@@ -16,7 +16,7 @@ module SearchEngine
     # Internal normalized state keys
     DEFAULT_STATE = {
       filters: [].freeze,
-      filters_ast: [].freeze, # AST side-channel for predicates parsed from where inputs (non-breaking)
+      ast:     [].freeze, # Predicate AST nodes (authoritative)
       orders:  [].freeze,
       select:  [].freeze,
       limit:   nil,
@@ -29,6 +29,15 @@ module SearchEngine
     # @return [Class] bound model class (typically a SearchEngine::Base subclass)
     attr_reader :klass
 
+    # Read-only access to accumulated predicate AST nodes.
+    #
+    # @return [Array<SearchEngine::AST::Node>] a frozen Array of AST nodes
+    # @note The returned array is frozen; modifying it will raise.
+    def ast
+      nodes = Array(@state[:ast])
+      nodes.frozen? ? nodes : nodes.dup.freeze
+    end
+
     # Create a new Relation.
     #
     # @param klass [Class] model class the relation is bound to
@@ -37,6 +46,7 @@ module SearchEngine
       @klass = klass
       normalized = normalize_initial_state(state)
       @state = DEFAULT_STATE.merge(normalized)
+      migrate_legacy_filters_to_ast!(@state)
       deep_freeze_inplace(@state)
       @__result_memo = nil
       @__loaded = false
@@ -62,12 +72,13 @@ module SearchEngine
     # @param args [Array<Object>] filter arguments
     # @return [SearchEngine::Relation]
     def where(*args)
-      fragments = normalize_where(args)
-      # Build AST nodes in parallel to string fragments for future compiler use
+      # Build AST nodes for all supported inputs via the DSL parser
       ast_nodes = SearchEngine::DSL::Parser.parse_list(args, klass: @klass)
+      # Back-compat: preserve legacy string fragments as well (escape hatch)
+      fragments = normalize_where(args)
       spawn do |s|
+        s[:ast] = Array(s[:ast]) + Array(ast_nodes)
         s[:filters] = Array(s[:filters]) + fragments
-        s[:filters_ast] = Array(s[:filters_ast]) + Array(ast_nodes)
       end
     end
 
@@ -178,6 +189,9 @@ module SearchEngine
       filters = Array(@state[:filters])
       parts << "filters=#{filters.length}" unless filters.empty?
 
+      ast_nodes = Array(@state[:ast])
+      parts << "ast=#{ast_nodes.length}" unless ast_nodes.empty?
+
       compiled = begin
         to_typesense_params
       rescue StandardError
@@ -219,7 +233,7 @@ module SearchEngine
       params[:query_by] = query_by_val if query_by_val
 
       # Filters and sorting
-      ast_nodes = Array(@state[:filters_ast]).flatten.compact
+      ast_nodes = Array(@state[:ast]).flatten.compact
       if !ast_nodes.empty?
         compiled = SearchEngine::Compiler.compile(ast_nodes, klass: @klass)
         params[:filter_by] = compiled unless compiled.to_s.empty?
@@ -425,13 +439,21 @@ module SearchEngine
         when :filters
           normalized[:filters] = normalize_where(Array(value))
         when :filters_ast
+          # Back-compat: accept legacy key and map to :ast
           nodes = Array(value).flatten.compact
-          # Accept pre-built nodes or inputs to parse
-          normalized[:filters_ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                                       nodes
-                                     else
-                                       SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                                     end
+          normalized[:ast] ||= []
+          normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                                nodes
+                              else
+                                SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                              end
+        when :ast
+          nodes = Array(value).flatten.compact
+          normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                               nodes
+                             else
+                               SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                             end
         when :orders
           normalized[:orders] = normalize_order(value)
         when :select
@@ -449,6 +471,19 @@ module SearchEngine
         end
       end
       normalized
+    end
+
+    # One-time migration: when AST is empty and legacy string filters exist, map
+    # each fragment to AST::Raw and prefer AST going forward. Idempotent.
+    def migrate_legacy_filters_to_ast!(state)
+      return unless state.is_a?(Hash)
+
+      ast_nodes = Array(state[:ast]).flatten.compact
+      legacy = Array(state[:filters]).flatten.compact
+      return if !ast_nodes.empty? || legacy.empty?
+
+      raw_nodes = legacy.map { |fragment| SearchEngine::AST.raw(String(fragment)) }
+      state[:ast] = raw_nodes
     end
 
     # Normalize where arguments into an array of string fragments safe for Typesense.
