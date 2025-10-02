@@ -202,6 +202,25 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for stale deletes.
+    class StaleDeletesConfig
+      # @return [Boolean] global kill switch
+      attr_accessor :enabled
+      # @return [Boolean] strict mode blocks suspicious filters
+      attr_accessor :strict_mode
+      # @return [Integer, nil] timeout in ms for delete requests
+      attr_accessor :timeout_ms
+      # @return [Boolean] enable found estimation via search
+      attr_accessor :estimation_enabled
+
+      def initialize
+        @enabled = true
+        @strict_mode = false
+        @timeout_ms = nil
+        @estimation_enabled = false
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -233,6 +252,7 @@ module SearchEngine
       @sources = SourcesConfig.new
       @mapper = MapperConfig.new
       @partitioning = PartitioningConfig.new
+      @stale_deletes = StaleDeletesConfig.new
       nil
     end
 
@@ -264,6 +284,12 @@ module SearchEngine
     # @return [SearchEngine::Config::PartitioningConfig]
     def partitioning
       @partitioning ||= PartitioningConfig.new
+    end
+
+    # Expose stale deletes configuration.
+    # @return [SearchEngine::Config::StaleDeletesConfig]
+    def stale_deletes
+      @stale_deletes ||= StaleDeletesConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.

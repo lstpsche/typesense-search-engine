@@ -230,6 +230,31 @@ module SearchEngine
       result
     end
 
+    # Delete documents by filter from a collection.
+    # @param collection [String] physical collection name
+    # @param filter_by [String] Typesense filter string
+    # @param timeout_ms [Integer, nil] optional read timeout override in ms
+    # @return [Hash] response from Typesense client (symbolized)
+    def delete_documents_by_filter(collection:, filter_by:, timeout_ms: nil)
+      unless collection.is_a?(String) && !collection.strip.empty?
+        raise Errors::InvalidParams, 'collection must be a non-empty String'
+      end
+      unless filter_by.is_a?(String) && !filter_by.strip.empty?
+        raise Errors::InvalidParams, 'filter_by must be a non-empty String'
+      end
+
+      ts = timeout_ms&.to_i&.positive? ? build_typesense_client_with_read_timeout(timeout_ms.to_i / 1000.0) : typesense
+      start = current_monotonic_ms
+      path = "/collections/#{collection}/documents"
+
+      result = with_exception_mapping(:delete, path, {}, start) do
+        ts.collections[collection].documents.delete(filter_by: filter_by)
+      end
+
+      instrument(:delete, path, current_monotonic_ms - start, {})
+      symbolize_keys_deep(result)
+    end
+
     private
 
     attr_reader :config

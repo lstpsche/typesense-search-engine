@@ -109,6 +109,21 @@ module SearchEngine
         instance_variable_set(:@__mapper_dsl__, definition)
         nil
       end
+
+      # Define a stale filter builder for delete-by-filter operations.
+      #
+      # The block must accept a keyword argument `partition:` and return either
+      # a non-empty String (to enable deletes) or nil/blank (to disable).
+      #
+      # @yieldparam partition [Object, nil]
+      # @yieldreturn [String, nil]
+      # @return [void]
+      def stale_filter_by(&block)
+        raise ArgumentError, 'stale_filter_by requires a block' unless block
+
+        instance_variable_set(:@__stale_filter_proc__, block)
+        nil
+      end
     end
 
     # TODO: In a future change, implement instance-level hydration/initialization

@@ -144,6 +144,60 @@ Notes:
 - Hooks are optional; if provided, they must accept exactly one argument (the partition key).
 - When `partition_fetch` is missing, the source adapter is used with the partition passed through; for ActiveRecord sources, provide a `Hash`/`Range` partition or define `partition_fetch`.
 
+### Stale Deletes
+
+Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Dispatcher](./indexer.md#dispatcher)
+
+DSL:
+
+```ruby
+class SearchEngine::Product < SearchEngine::Base
+  stale_filter_by do |partition: nil|
+    partition ? "shop_id:=#{partition} && archived:=true" : "archived:=true"
+  end
+end
+```
+
+API:
+
+```ruby
+SearchEngine::Indexer.delete_stale!(SearchEngine::Product, partition: nil)
+```
+
+- Produces a `filter_by` string from your block and issues a `DELETE /collections/:collection/documents` with `filter_by`.
+- If the block returns `nil` or an empty String, deletion is skipped.
+- Strict-mode guardrails block suspicious catch-alls; enable via `SearchEngine.config.stale_deletes.strict_mode = true`.
+- Dry-run preview: `SearchEngine::Indexer.delete_stale!(SearchEngine::Product, partition: shop_id, dry_run: true)` returns a summary without deleting.
+
+Typical filters:
+
+| Pattern | Example |
+| --- | --- |
+| Archived flag | `archived:=true` |
+| Partition + archived | `shop_id:=123 && archived:=true` |
+| Date threshold | `updated_at:<"2025-01-01T00:00:00Z"` |
+
+```mermaid
+sequenceDiagram
+  participant Orchestrator
+  participant Partition
+  Orchestrator->>Partition: before_partition
+  Orchestrator->>Partition: import batches
+  Orchestrator->>Partition: after_partition
+```
+
+Events:
+- `search_engine.stale_deletes.started` — `{ collection, into, partition, filter_hash }`
+- `search_engine.stale_deletes.skipped` — `{ reason, collection, into, partition }`
+- `search_engine.stale_deletes.finished` — `{ collection, into, partition, duration_ms, deleted_count }`
+- `search_engine.stale_deletes.error` — `{ collection, into, partition, error_class, message_truncated }`
+
+Config:
+- `SearchEngine.config.stale_deletes.enabled = true`
+- `SearchEngine.config.stale_deletes.strict_mode = false`
+- `SearchEngine.config.stale_deletes.timeout_ms = nil`
+- `SearchEngine.config.stale_deletes.estimation_enabled = false`
+
 ### Dispatcher
 
 Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Mapper](./indexer.md#mapper)

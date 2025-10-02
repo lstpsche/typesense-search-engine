@@ -22,6 +22,7 @@ require 'search_engine/mapper'
 require 'search_engine/sources'
 require 'search_engine/partitioner'
 require 'search_engine/dispatcher'
+require 'search_engine/stale_filter'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
