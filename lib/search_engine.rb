@@ -14,6 +14,7 @@ require 'search_engine/dsl/parser'
 require 'search_engine/compiler'
 require 'search_engine/multi'
 require 'search_engine/client_options'
+require 'search_engine/multi_result'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
@@ -92,6 +93,50 @@ module SearchEngine
       end
 
       SearchEngine::Multi::ResultSet.new(pairs)
+    end
+
+    # Execute a federated multi-search and return a MultiResult wrapper.
+    #
+    # Non-breaking: this is a convenience helper; {.multi_search} remains unchanged
+    # and returns {SearchEngine::Multi::ResultSet}.
+    #
+    # @param common [Hash] optional params merged into each per-search payload after relation compilation
+    # @yieldparam m [SearchEngine::Multi] builder to add labeled relations
+    # @return [SearchEngine::MultiResult]
+    # @raise [ArgumentError] when the number of searches exceeds the configured limit
+    # @raise [SearchEngine::Errors::Api] when Typesense returns a non-2xx status
+    # @example
+    #   mr = SearchEngine.multi_search_result(common: { query_by: SearchEngine.config.default_query_by }) do |m|
+    #     m.add :products, Product.all.per(10)
+    #     m.add :brands,   Brand.all.per(5)
+    #   end
+    #   mr[:products].found
+    def multi_search_result(common: {})
+      raise ArgumentError, 'block required' unless block_given?
+
+      builder = SearchEngine::Multi.new
+      yield builder
+
+      count = builder.labels.size
+      limit = SearchEngine.config.multi_search_limit
+      if count > limit
+        raise ArgumentError,
+              "multi_search: #{count} searches exceed limit (#{limit}). " \
+              'Increase `SearchEngine.config.multi_search_limit` if necessary.'
+      end
+
+      labels = builder.labels
+      payloads = builder.to_payloads(common: common)
+
+      url_opts = SearchEngine::ClientOptions.url_options_from_config(SearchEngine.config)
+      raw = begin
+        SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+      rescue Errors::Api => error
+        raise augment_multi_api_error(error, labels)
+      end
+
+      list = Array(raw && raw['results'])
+      SearchEngine::MultiResult.new(labels: labels, raw_results: list, klasses: builder.klasses)
     end
 
     # Execute a federated multi-search and return the raw response.
