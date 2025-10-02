@@ -15,6 +15,7 @@ require 'search_engine/compiler'
 require 'search_engine/multi'
 require 'search_engine/client_options'
 require 'search_engine/multi_result'
+require 'search_engine/observability'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
@@ -57,6 +58,8 @@ module SearchEngine
     #     m.add :brands,   Brand.all.where('name:~rud').per(5)
     #   end
     #   res[:products].found
+    # @note Emits "search_engine.multi_search" via ActiveSupport::Notifications with
+    #   payload: { searches_count, labels, http_status, source: :multi }.
     def multi_search(common: {})
       raise ArgumentError, 'block required' unless block_given?
 
@@ -76,10 +79,32 @@ module SearchEngine
       payloads = builder.to_payloads(common: common)
 
       url_opts = SearchEngine::ClientOptions.url_options_from_config(SearchEngine.config)
-      raw = begin
-        SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
-      rescue Errors::Api => error
-        raise augment_multi_api_error(error, labels)
+      raw = nil
+      if defined?(ActiveSupport::Notifications)
+        se_payload = {
+          searches_count: count,
+          labels: labels.map(&:to_s),
+          http_status: nil,
+          source: :multi,
+          url_opts: Observability.filtered_url_opts(url_opts)
+        }
+        begin
+          ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+            raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+            se_payload[:http_status] = 200
+          rescue Errors::Api => error
+            se_payload[:http_status] = error.status
+            raise
+          end
+        rescue Errors::Api => error
+          raise augment_multi_api_error(error, labels)
+        end
+      else
+        begin
+          raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+        rescue Errors::Api => error
+          raise augment_multi_api_error(error, labels)
+        end
       end
 
       # Typesense returns a Hash with key 'results' => [ { ... }, ... ]
@@ -111,6 +136,8 @@ module SearchEngine
     #     m.add :brands,   Brand.all.per(5)
     #   end
     #   mr[:products].found
+    # @note Emits "search_engine.multi_search" via ActiveSupport::Notifications with
+    #   payload: { searches_count, labels, http_status, source: :multi }.
     def multi_search_result(common: {})
       raise ArgumentError, 'block required' unless block_given?
 
@@ -129,10 +156,32 @@ module SearchEngine
       payloads = builder.to_payloads(common: common)
 
       url_opts = SearchEngine::ClientOptions.url_options_from_config(SearchEngine.config)
-      raw = begin
-        SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
-      rescue Errors::Api => error
-        raise augment_multi_api_error(error, labels)
+      raw = nil
+      if defined?(ActiveSupport::Notifications)
+        se_payload = {
+          searches_count: count,
+          labels: labels.map(&:to_s),
+          http_status: nil,
+          source: :multi,
+          url_opts: Observability.filtered_url_opts(url_opts)
+        }
+        begin
+          ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+            raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+            se_payload[:http_status] = 200
+          rescue Errors::Api => error
+            se_payload[:http_status] = error.status
+            raise
+          end
+        rescue Errors::Api => error
+          raise augment_multi_api_error(error, labels)
+        end
+      else
+        begin
+          raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+        rescue Errors::Api => error
+          raise augment_multi_api_error(error, labels)
+        end
       end
 
       list = Array(raw && raw['results'])
@@ -150,6 +199,8 @@ module SearchEngine
     # @return [Hash] Raw Typesense multi-search response
     # @raise [ArgumentError] when the number of searches exceeds the configured limit
     # @raise [SearchEngine::Errors::Api] when Typesense returns a non-2xx status
+    # @note Emits "search_engine.multi_search" via ActiveSupport::Notifications with
+    #   payload: { searches_count, labels, http_status, source: :multi }.
     def multi_search_raw(common: {})
       raise ArgumentError, 'block required' unless block_given?
 
@@ -168,7 +219,29 @@ module SearchEngine
       payloads = builder.to_payloads(common: common)
 
       url_opts = SearchEngine::ClientOptions.url_options_from_config(SearchEngine.config)
-      SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+      if defined?(ActiveSupport::Notifications)
+        se_payload = {
+          searches_count: count,
+          labels: labels.map(&:to_s),
+          http_status: nil,
+          source: :multi,
+          url_opts: Observability.filtered_url_opts(url_opts)
+        }
+        begin
+          ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+            SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts).tap do
+              se_payload[:http_status] = 200
+            end
+          rescue Errors::Api => error
+            se_payload[:http_status] = error.status
+            raise
+          end
+        rescue Errors::Api => error
+          raise augment_multi_api_error(error, labels)
+        end
+      else
+        SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+      end
     rescue Errors::Api => error
       raise augment_multi_api_error(error, labels)
     end

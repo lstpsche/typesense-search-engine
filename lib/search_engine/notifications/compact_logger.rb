@@ -66,21 +66,28 @@ module SearchEngine
         parts = []
         if multi
           parts << '[se.multi]'
-          cols = Array(p[:collections]).join(',')
-          parts << "collections=#{cols}" unless cols.empty?
-          searches_count = p[:params].is_a?(Array) ? p[:params].size : nil
-          parts << "searches=#{searches_count}" if searches_count
+          # Prefer new helper-level payload keys; fallback to older client-level shape
+          labels = Array(p[:labels]).map(&:to_s)
+          labels = Array(p[:collections]).map(&:to_s) if labels.empty? || labels.all?(&:empty?)
+          count = p[:searches_count]
+          count ||= (p[:params].is_a?(Array) ? p[:params].size : nil)
+
+          parts << "count=#{count}" if count
+          parts << "labels=#{labels.join(',')}" unless labels.empty?
         else
           parts << '[se.search]'
           parts << "collection=#{p[:collection]}" if p[:collection]
         end
 
-        parts << "status=#{p[:status] || 'ok'}"
+        status_val = p.key?(:http_status) ? p[:http_status] : (p[:status] || 'ok')
+        parts << "status=#{status_val}"
         parts << "duration=#{duration_ms}ms"
 
-        url = p[:url_opts] || {}
-        parts << "cache=#{url[:use_cache] ? true : false}"
-        parts << "ttl=#{url[:cache_ttl]}" unless url[:cache_ttl].nil?
+        url = p[:url_opts]
+        if url.is_a?(Hash)
+          parts << "cache=#{url[:use_cache] ? true : false}" if url.key?(:use_cache)
+          parts << "ttl=#{url[:cache_ttl]}" if url.key?(:cache_ttl)
+        end
 
         if include_params && !multi
           # Only include whitelisted keys for single searches
