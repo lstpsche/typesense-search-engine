@@ -90,3 +90,40 @@ flowchart LR
 - Types: the normalized record stores `:name, :collection, :local_key, :foreign_key`. Future compiler passes may add type hints; the DSL remains unchanged.
 - Compiler usage: the compiler reads `joins_config`/`join_for` to determine target collection and key mapping for server‑side joins without loading foreign models.
 
+---
+
+## Nested field selection for joined collections
+
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md)
+
+You can select fields from joined collections using a nested Ruby shape. These compile to Typesense `include_fields` with `$assoc(field,...)` segments.
+
+```ruby
+# Full relation example
+SearchEngine::Book
+  .joins(:authors)
+  .include_fields(:id, :title, authors: [:first_name, :last_name])
+```
+
+Compiles to:
+
+```
+$authors(first_name,last_name),id,title
+```
+
+- **Input types**: mix base fields (`:id, "title"`) and nested hashes (`authors: [:first_name, :last_name]`).
+- **Merging**: multiple calls merge and dedupe. First mention wins ordering; later calls append only new fields.
+
+```ruby
+# Merged across calls
+SearchEngine::Book
+  .include_fields(:id, authors: [:a])
+  .include_fields(:title, authors: [:b, :a])
+# => "$authors(a,b),id,title"
+```
+
+- **Ordering policy**: nested `$assoc(...)` segments are emitted first in association first-mention order, then base fields.
+- **Validation**: association keys are validated against `klass.joins_config` (`UnknownJoin` on typos). Calling `.joins(:assoc)` before selecting nested fields is recommended; the compiler will still emit `$assoc(...)` even if `joins` wasn't chained yet.
+
+See also: [Relation](./relation.md) for the `#select` / `#include_fields` chainers and [Compiler](./compiler.md) for parameter mapping.
+
