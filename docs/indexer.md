@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Schema](./schema.md) · [Observability](./observability.md)
+[← Back to Index](./index.md) · [Schema](./schema.md) · [Observability](./observability.md) · [CLI](./cli.md)
 
 ## Indexer
 
@@ -146,7 +146,7 @@ Notes:
 
 ### Stale Deletes
 
-Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Dispatcher](./indexer.md#dispatcher)
+Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Dispatcher](./indexer.md#dispatcher), [CLI](./cli.md)
 
 DSL:
 
@@ -200,7 +200,7 @@ Config:
 
 ### Dispatcher
 
-Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Mapper](./indexer.md#mapper)
+Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Mapper](./indexer.md#mapper), [CLI](./cli.md)
 
 ```ruby
 SearchEngine.configure do |c|
@@ -227,7 +227,6 @@ Instrumentation events (small payloads):
 - `search_engine.dispatcher.job_started` — `{ collection, partition, into, queue, job_id }`
 - `search_engine.dispatcher.job_finished` — `{ collection, partition, into, queue, job_id, duration_ms, status }`
 - `search_engine.dispatcher.job_error` — `{ collection, partition, into, queue, job_id, error_class, message_truncated }`
-- `search_engine.dispatcher.inline_started` / `.inline_finished` / `.inline_error` — analogous fields (no job_id).
 
 Job arguments are JSON-safe; constants are passed as class name strings and reified at runtime.
 
