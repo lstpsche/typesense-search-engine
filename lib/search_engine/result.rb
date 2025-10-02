@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Result wraps a Typesense search response and exposes hydrated hits.
   #

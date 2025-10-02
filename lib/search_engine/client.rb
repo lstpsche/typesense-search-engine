@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'search_engine'
 require 'search_engine/client_options'
 require 'search_engine/errors'

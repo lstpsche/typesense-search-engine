@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Provides basic information about the engine for smoke testing.
   class AppInfo

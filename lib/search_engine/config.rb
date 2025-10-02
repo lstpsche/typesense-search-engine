@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Central configuration container for the engine.
   #

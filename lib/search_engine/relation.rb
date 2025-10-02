@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Immutable, chainable query relation bound to a model class.
   #

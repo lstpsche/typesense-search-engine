@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Observability](./observability.md) · [Materializers](./materializers.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md)
 
 # Relation
 

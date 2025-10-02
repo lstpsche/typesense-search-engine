@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Lightweight utilities for observability concerns (redaction, excerpts).
   #
