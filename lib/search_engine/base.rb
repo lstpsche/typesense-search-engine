@@ -83,6 +83,32 @@ module SearchEngine
       def all
         SearchEngine::Relation.new(self)
       end
+
+      # Define collection-level indexing configuration and mapping.
+      #
+      # Usage:
+      #   index do
+      #     source :active_record, model: ::Product
+      #     map { |r| { id: r.id, name: r.name } }
+      #   end
+      #
+      # @yieldparam dsl [SearchEngine::Mapper::Dsl]
+      # @return [void]
+      def index
+        raise ArgumentError, 'block required' unless block_given?
+
+        dsl = SearchEngine::Mapper::Dsl.new(self)
+        yield dsl
+
+        definition = dsl.to_definition
+        unless definition[:map].respond_to?(:call)
+          raise ArgumentError, 'index requires a map { |record| ... } block returning a document'
+        end
+
+        # Store definition on the class; Mapper.for will compile and cache
+        instance_variable_set(:@__mapper_dsl__, definition)
+        nil
+      end
     end
 
     # TODO: In a future change, implement instance-level hydration/initialization
