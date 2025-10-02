@@ -23,6 +23,63 @@ module SearchEngine
       keyword_init: true
     )
 
+    # Rebuild a single partition end-to-end using the model's partitioning + mapper.
+    #
+    # The flow is:
+    # - Resolve a partition fetch enumerator from the partitioning DSL (or fall back to source adapter)
+    # - Optionally run before/after hooks with configured timeouts
+    # - Map each batch to documents and stream-import them into the target collection
+    #
+    # @param klass [Class] a {SearchEngine::Base} subclass
+    # @param partition [Object] opaque partition key as defined by the DSL/source
+    # @param into [String, nil] target collection; defaults to resolver or the logical collection alias
+    # @return [Summary]
+    # @raise [SearchEngine::Errors::InvalidParams]
+    def self.rebuild_partition!(klass, partition:, into: nil)
+      raise Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
+      unless klass.ancestors.include?(SearchEngine::Base)
+        raise Errors::InvalidParams, 'klass must inherit from SearchEngine::Base'
+      end
+
+      compiled_partitioner = SearchEngine::Partitioner.for(klass)
+      mapper = SearchEngine::Mapper.for(klass)
+      unless mapper
+        raise Errors::InvalidParams,
+              "mapper is not defined for #{klass.name}. Define it via `index do ... map { ... } end`."
+      end
+
+      target_into = resolve_into!(klass, partition: partition, into: into)
+      rows_enum = rows_enumerator_for(klass, partition: partition, compiled_partitioner: compiled_partitioner)
+
+      before_hook = compiled_partitioner&.instance_variable_get(:@before_hook_proc)
+      after_hook  = compiled_partitioner&.instance_variable_get(:@after_hook_proc)
+
+      if before_hook
+        run_hook_with_timeout(before_hook, partition,
+                              timeout_ms: SearchEngine.config.partitioning.before_hook_timeout_ms
+        )
+      end
+
+      docs_enum = Enumerator.new do |y|
+        idx = 0
+        rows_enum.each do |rows|
+          docs, _report = mapper.map_batch!(rows, batch_index: idx)
+          y << docs
+          idx += 1
+        end
+      end
+
+      summary = import!(klass, into: target_into, enum: docs_enum, batch_size: nil, action: :upsert)
+
+      if after_hook
+        run_hook_with_timeout(after_hook, partition,
+                              timeout_ms: SearchEngine.config.partitioning.after_hook_timeout_ms
+        )
+      end
+
+      summary
+    end
+
     # Import pre-batched documents using JSONL bulk import.
     #
     # @param klass [Class] a SearchEngine::Base subclass (reserved for future mappers)
@@ -113,6 +170,55 @@ module SearchEngine
 
     class << self
       private
+
+      def rows_enumerator_for(klass, partition:, compiled_partitioner:)
+        if compiled_partitioner
+          compiled_partitioner.partition_fetch_enum(partition)
+        else
+          dsl = mapper_dsl_for(klass)
+          source_def = dsl && dsl[:source]
+          unless source_def
+            raise Errors::InvalidParams,
+                  'No partition_fetch defined and no source adapter provided. Define one in the DSL.'
+          end
+          adapter = SearchEngine::Sources.build(source_def[:type], **(source_def[:options] || {}), &source_def[:block])
+          adapter.each_batch(partition: partition)
+        end
+      end
+
+      def resolve_into!(klass, partition:, into:)
+        return into if into && !into.to_s.strip.empty?
+
+        resolver = SearchEngine.config.partitioning&.default_into_resolver
+        if resolver.respond_to?(:arity)
+          case resolver.arity
+          when 1
+            val = resolver.call(klass)
+            return val if val && !val.to_s.strip.empty?
+          when 2, -1
+            val = resolver.call(klass, partition)
+            return val if val && !val.to_s.strip.empty?
+          end
+        elsif resolver
+          val = resolver.call(klass)
+          return val if val && !val.to_s.strip.empty?
+        end
+
+        name = if klass.respond_to?(:collection)
+                 klass.collection
+               else
+                 klass.name.to_s
+               end
+        name.to_s
+      end
+
+      def run_hook_with_timeout(proc_obj, partition, timeout_ms:)
+        return proc_obj.call(partition) unless timeout_ms&.to_i&.positive?
+
+        Timeout.timeout(timeout_ms.to_f / 1000.0) do
+          proc_obj.call(partition)
+        end
+      end
 
       def import_batch_with_handling(client, collection, docs, action, next_index)
         buffer = +''
@@ -346,6 +452,12 @@ module SearchEngine
 
       def monotonic_ms
         Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+      end
+
+      def mapper_dsl_for(klass)
+        return unless klass.instance_variable_defined?(:@__mapper_dsl__)
+
+        klass.instance_variable_get(:@__mapper_dsl__)
       end
     end
   end

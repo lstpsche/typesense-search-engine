@@ -86,12 +86,24 @@ module SearchEngine
       attr_accessor :retries
       # @return [Boolean] whether to gzip JSONL payloads (disabled by default)
       attr_accessor :gzip
+      # @return [Symbol] dispatcher mode: :active_job or :inline
+      attr_accessor :dispatch
+      # @return [String] queue name for ActiveJob enqueues
+      attr_accessor :queue_name
 
       def initialize
         @batch_size = 2000
         @timeout_ms = nil
         @retries = { attempts: 3, base: 0.5, max: 5.0, jitter_fraction: 0.2 }
         @gzip = false
+        @dispatch = active_job_available? ? :active_job : :inline
+        @queue_name = 'search_index'
+      end
+
+      private
+
+      def active_job_available?
+        defined?(::ActiveJob::Base)
       end
     end
 
@@ -359,7 +371,9 @@ module SearchEngine
         batch_size: indexer.batch_size,
         timeout_ms: indexer.timeout_ms,
         retries: indexer.retries,
-        gzip: indexer.gzip ? true : false
+        gzip: indexer.gzip ? true : false,
+        dispatch: indexer.dispatch,
+        queue_name: indexer.queue_name
       }
     end
 
