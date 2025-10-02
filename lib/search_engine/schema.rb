@@ -79,6 +79,16 @@ module SearchEngine
             changed_fields: {},
             collection_options: { live: :missing }
           }
+          payload = {
+            collection: klass.name.to_s,
+            logical: logical_name,
+            physical_current: nil,
+            fields_changed_count: 0,
+            added_count: diff_hash[:added_fields].size,
+            removed_count: 0,
+            in_sync: false
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.schema.diff', payload) {}
           return { diff: diff_hash, pretty: pretty_print(diff_hash) }
         end
 
@@ -95,6 +105,17 @@ module SearchEngine
           changed_fields: changed,
           collection_options: collection_opts_changes
         }
+
+        payload = {
+          collection: klass.name.to_s,
+          logical: logical_name,
+          physical_current: physical_name,
+          fields_changed_count: changed.size,
+          added_count: added.size,
+          removed_count: removed.size,
+          in_sync: added.empty? && removed.empty? && changed.empty? && collection_opts_changes.empty?
+        }
+        SearchEngine::Instrumentation.instrument('search_engine.schema.diff', payload) {}
 
         { diff: diff_hash, pretty: pretty_print(diff_hash) }
       end
@@ -135,30 +156,36 @@ module SearchEngine
 
         # Idempotent: if alias already points to new physical, treat as no-op
         current_after_reindex = client.resolve_alias(logical)
-        client.upsert_alias(logical, new_physical) unless current_after_reindex == new_physical
+        swapped = current_after_reindex != new_physical
+        client.upsert_alias(logical, new_physical) if swapped
 
         # Retention cleanup
         _, dropped = enforce_retention!(logical, new_physical, client: client, keep_last: effective_keep_last(klass))
 
-        payload = {
+        if defined?(ActiveSupport::Notifications)
+          # Preserve legacy payload shape while adding canonical keys expected by the subscriber
+          ActiveSupport::Notifications.instrument('search_engine.schema.apply',
+                                                  logical: logical,
+                                                  new_physical: new_physical,
+                                                  previous_physical: current_target,
+                                                  dropped_count: dropped.size,
+                                                  # canonical keys
+                                                  collection: klass.name.to_s,
+                                                  physical_new: new_physical,
+                                                  alias_swapped: swapped,
+                                                  retention_deleted_count: dropped.size,
+                                                  status: :ok,
+                                                  duration_ms: (monotonic_ms - start_ms)
+                                                 )
+        end
+
+        {
           logical: logical,
           new_physical: new_physical,
           previous_physical: current_target,
           alias_target: new_physical,
           dropped_physicals: dropped
         }
-
-        if defined?(ActiveSupport::Notifications)
-          ActiveSupport::Notifications.instrument('search_engine.schema.apply',
-                                                  logical: logical,
-                                                  new_physical: new_physical,
-                                                  previous_physical: current_target,
-                                                  dropped_count: dropped.size,
-                                                  duration_ms: (monotonic_ms - start_ms)
-                                                 )
-        end
-
-        payload
       end
 
       # Roll back the alias for the given klass to the previous retained physical collection.

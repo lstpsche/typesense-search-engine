@@ -20,5 +20,26 @@ module SearchEngine
       cfg.hydrate_from_env!(ENV, override_existing: false)
       cfg.warn_if_incomplete!
     end
+
+    initializer 'search_engine.observability' do
+      cfg = SearchEngine.config
+      next unless cfg.observability&.enabled
+
+      # Defer requiring subscriber to runtime to avoid eager load issues
+      begin
+        require 'search_engine/notifications/compact_logger'
+      rescue LoadError
+        # no-op; allow running without ActiveSupport
+      end
+
+      if defined?(SearchEngine::Notifications::CompactLogger)
+        # Subscribe once per boot; store handle in a class ivar in the subscriber
+        SearchEngine::Notifications::CompactLogger.subscribe(
+          logger: cfg.logger,
+          level: :info,
+          include_params: false
+        )
+      end
+    end
   end
 end
