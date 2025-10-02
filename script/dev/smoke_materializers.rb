@@ -23,7 +23,7 @@ SearchEngine.configure do |c|
 end
 
 module SearchEngine
-  class Product < Base # rubocop:disable Style/Documentation
+  class Product < Base
     collection 'products'
     attribute :id, :string
     attribute :name, :string

@@ -4,7 +4,7 @@ $LOAD_PATH.unshift File.expand_path('../../lib', __dir__)
 require 'bundler/setup'
 require 'search_engine'
 
-class Product < SearchEngine::Base # rubocop:disable Style/Documentation
+class Product < SearchEngine::Base
   collection 'products_smoke'
   attribute :id, :integer
   attribute :active, :boolean

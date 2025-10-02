@@ -118,3 +118,36 @@ Note: field names are validated against the model's declared `attributes`. Raw s
 - `Relation#to_typesense_params` compiles `relation.ast` via the [Compiler](./compiler.md) when present; otherwise falls back to legacy string `filters`.
 
 See also: [Relation](./relation.md) · [Materializers](./materializers.md)
+
+## Re‑chainers (reselect / rewhere / unscope)
+
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
+AR‑style helpers to adjust a built relation immutably:
+
+- `reselect(*fields)` — replace the selected fields (Typesense `include_fields`).
+- `rewhere(input, *args)` — clear previous predicates, parse new input into AST.
+- `unscope(:order, :where, :select, :limit, :offset, :page, :per)` — remove parts of state.
+
+```ruby
+rel.reselect(:id, :name)
+rel.rewhere(active: true)
+rel.unscope(:order)
+```
+
+Behavior notes:
+
+- `reselect` flattens, strips, stringifies, drops blanks, and de‑duplicates preserving first occurrence. Raises when empty or unknown fields (when attributes are declared).
+- `rewhere` clears both AST and legacy string `filters`, then parses the new input via the Parser. Parser errors surface as‑is.
+- `unscope(:where)` clears all predicates; `:order` clears orders; `:select` clears field selection; `:limit/:offset/:page/:per` clear their counterparts (`per` clears `per_page`).
+
+The compiled params reflect these changes: `include_fields` mirrors `reselect`; `filter_by` is rebuilt from the new AST after `rewhere`; `unscope(:where)` removes `filter_by` entirely until new predicates are added.
+
+```mermaid
+flowchart LR
+  A[Relation State] -->|reselect| B[Replace select]
+  A -->|rewhere| C[Clear AST -> Parse -> New AST]
+  A -->|unscope(:where)| D[Clear AST]
+  A -->|unscope(:order)| E[Clear orders]
+  A -->|unscope(:page/per)| F[Clear pagination]
+```
