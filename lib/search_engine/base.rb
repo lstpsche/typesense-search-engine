@@ -46,13 +46,30 @@ module SearchEngine
         (@attributes || {}).dup.freeze
       end
 
-      # Hook to ensure subclasses inherit attributes from their parent.
+      # Configure schema retention policy for this collection.
+      # @param keep_last [Integer] how many previous physicals to keep after swap
+      # @return [void]
+      def schema_retention(keep_last: nil)
+        return (@schema_retention || {}).dup.freeze if keep_last.nil?
+
+        value = Integer(keep_last)
+        raise ArgumentError, 'keep_last must be >= 0' if value.negative?
+
+        @schema_retention ||= {}
+        @schema_retention[:keep_last] = value
+        nil
+      end
+
+      # Hook to ensure subclasses inherit attributes and schema retention from their parent.
       # @param subclass [Class]
       # @return [void]
       def inherited(subclass)
         super
         parent_attrs = @attributes || {}
         subclass.instance_variable_set(:@attributes, parent_attrs.dup)
+
+        parent_retention = @schema_retention || {}
+        subclass.instance_variable_set(:@schema_retention, parent_retention.dup)
       end
 
       # Return a fresh, immutable relation bound to this model class.

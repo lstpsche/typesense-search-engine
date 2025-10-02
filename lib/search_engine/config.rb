@@ -56,6 +56,26 @@ module SearchEngine
                   :strict_fields,
                   :multi_search_limit
 
+    # Lightweight nested configuration for schema lifecycle.
+    class SchemaConfig
+      # Retention knobs for physical collections
+      class RetentionConfig
+        # @return [Integer] how many previous physical collections to keep after swap (default: 0)
+        attr_accessor :keep_last
+
+        def initialize
+          @keep_last = 0
+        end
+      end
+
+      # @return [SearchEngine::Config::SchemaConfig::RetentionConfig]
+      attr_reader :retention
+
+      def initialize
+        @retention = RetentionConfig.new
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -82,7 +102,14 @@ module SearchEngine
       @strict_fields = default_strict_fields
       @logger = default_logger
       @multi_search_limit = 50
+      @schema = SchemaConfig.new
       nil
+    end
+
+    # Expose schema lifecycle configuration.
+    # @return [SearchEngine::Config::SchemaConfig]
+    def schema
+      @schema ||= SchemaConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -162,7 +189,8 @@ module SearchEngine
         use_cache: use_cache ? true : false,
         cache_ttl_s: cache_ttl_s,
         strict_fields: strict_fields ? true : false,
-        multi_search_limit: multi_search_limit
+        multi_search_limit: multi_search_limit,
+        schema: { retention: { keep_last: schema.retention.keep_last } }
       }
     end
 

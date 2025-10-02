@@ -127,6 +127,83 @@ module SearchEngine
       instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
+    # Upsert an alias to point to the provided physical collection (atomic server-side swap).
+    # @param alias_name [String]
+    # @param physical_name [String]
+    # @return [Hash]
+    def upsert_alias(alias_name, physical_name)
+      a = alias_name.to_s
+      p = physical_name.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/aliases/#{a}"
+
+      result = with_exception_mapping(:put, path, {}, start) do
+        ts.aliases[a].upsert(collection_name: p)
+      end
+
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:put, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # Create a new physical collection with the given schema.
+    # @param schema [Hash] Typesense schema body
+    # @return [Hash] created collection schema
+    def create_collection(schema)
+      ts = typesense
+      start = current_monotonic_ms
+      body = schema.dup
+      path = '/collections'
+
+      result = with_exception_mapping(:post, path, {}, start) do
+        ts.collections.create(body)
+      end
+
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:post, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # Delete a physical collection by name.
+    # @param name [String]
+    # @return [Hash] Typesense delete response
+    def delete_collection(name)
+      n = name.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{n}"
+
+      result = with_exception_mapping(:delete, path, {}, start) do
+        ts.collections[n].delete
+      end
+
+      symbolize_keys_deep(result)
+    rescue Errors::Api => error
+      # If already gone, treat as success for idempotency
+      return { status: 404 } if error.status.to_i == 404
+
+      raise
+    ensure
+      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # List all collections.
+    # @return [Array<Hash>] list of collection metadata
+    def list_collections
+      ts = typesense
+      start = current_monotonic_ms
+      path = '/collections'
+
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.collections.retrieve
+      end
+
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
     private
 
     attr_reader :config
