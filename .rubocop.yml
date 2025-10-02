@@ -79,6 +79,11 @@ Style/NumericLiterals:
 Style/HashSyntax:
   EnforcedShorthandSyntax: either_consistent
 
+Style/Documentation:
+  Exclude:
+    - 'script/dev/**/*'
+    - 'test/**/*'
+
 Layout/SpaceAroundOperators:
   EnforcedStyleForExponentOperator: space
 

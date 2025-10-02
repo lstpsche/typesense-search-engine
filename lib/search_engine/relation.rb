@@ -119,6 +119,100 @@ module SearchEngine
       end
     end
 
+    # Replace the selected fields list (Typesense `include_fields`).
+    #
+    # Immutably replaces the existing selection with the normalized list of
+    # field names. Values are flattened, stripped, coerced to String, blanks
+    # dropped, and duplicates removed (preserving first occurrence).
+    #
+    # @param fields [Array<#to_sym,#to_s>] one or more field identifiers
+    # @return [SearchEngine::Relation] a new relation with replaced selection
+    # @raise [ArgumentError] when the resulting list is empty, a field is blank,
+    #   or a field is unknown for the model when attributes are declared.
+    # @example
+    #   rel.reselect(:id, :name)
+    def reselect(*fields)
+      normalized = normalize_select(fields)
+      raise ArgumentError, 'reselect: provide at least one non-blank field' if normalized.empty?
+
+      spawn { |s| s[:select] = normalized }
+    end
+
+    # Replace all predicates with a new where input.
+    #
+    # Clears prior predicate state (AST and legacy string fragments) and parses
+    # the provided input into a fresh AST using the DSL parser.
+    # Accepts the same input forms as {#where}.
+    #
+    # @param input [Hash, String, Array, Symbol] predicate input
+    # @param args [Array<Object>] arguments for template strings
+    # @return [SearchEngine::Relation] a new relation with replaced predicates
+    # @raise [ArgumentError] when input is missing/blank or produces no predicates
+    # @example
+    #   rel.rewhere(active: true)
+    def rewhere(input, *args)
+      if input.nil? || (input.respond_to?(:empty?) && input.empty?) || (input.is_a?(String) && input.strip.empty?)
+        raise ArgumentError, 'rewhere: provide a new predicate input'
+      end
+
+      nodes = SearchEngine::DSL::Parser.parse(input, klass: @klass, args: args)
+      list = Array(nodes).flatten.compact
+      raise ArgumentError, 'rewhere: produced no predicates' if list.empty?
+
+      spawn do |s|
+        s[:ast] = list
+        s[:filters] = []
+      end
+    end
+
+    # Remove specific pieces of relation state (AR-style unscope).
+    #
+    # Supported parts and their effects:
+    # - :where  => clears AST and legacy filters
+    # - :order  => clears orders
+    # - :select => clears field selection
+    # - :limit  => sets limit to nil
+    # - :offset => sets offset to nil
+    # - :page   => sets page to nil
+    # - :per    => sets per_page to nil
+    #
+    # @param parts [Array<Symbol,String>] one or more parts to remove
+    # @return [SearchEngine::Relation] a new relation with state removed
+    # @raise [ArgumentError] when an unsupported part is provided
+    # @example
+    #   rel.unscope(:order)
+    def unscope(*parts)
+      symbols = Array(parts).flatten.compact.map(&:to_sym)
+      supported = %i[where order select limit offset page per]
+      unknown = symbols - supported
+      unless unknown.empty?
+        raise ArgumentError,
+              "unscope: unknown part #{unknown.first.inspect} (supported: #{supported.map(&:inspect).join(', ')})"
+      end
+
+      spawn do |s|
+        symbols.each do |part|
+          case part
+          when :where
+            s[:ast] = []
+            s[:filters] = []
+          when :order
+            s[:orders] = []
+          when :select
+            s[:select] = []
+          when :limit
+            s[:limit] = nil
+          when :offset
+            s[:offset] = nil
+          when :page
+            s[:page] = nil
+          when :per
+            s[:per_page] = nil
+          end
+        end
+      end
+    end
+
     # Set the maximum number of results.
     # @param n [Integer, #to_i, nil]
     # @return [SearchEngine::Relation]
