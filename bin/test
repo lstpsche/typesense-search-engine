@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'rubygems'
+require 'bundler/setup'
+
+# Fallback to `rake test`
+ARGV.unshift('test')
+load Gem.bin_path('rake', 'rake')
