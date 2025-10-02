@@ -13,6 +13,7 @@ Welcome to the SearchEngine documentation.
 - [Materializers](./materializers.md)
 - [Query DSL](./query_dsl.md)
 - [Compiler](./compiler.md)
+- [Multi-search](./multi_search.md)
 
 ## Overview
 
