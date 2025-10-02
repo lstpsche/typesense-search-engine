@@ -51,11 +51,6 @@ flowchart TD
 
 - `SearchEngine::Indexer.dry_run!(...)` builds JSONL for the first batch only and returns `{ collection, action, bytes_estimate, docs_count, sample_line }`
 
-### FAQ
-
-- **Do I need a mapper?** Not yet; provide Hash documents with at least an `id` field. A DSL may be introduced later.
-- **Timeouts?** You can set `SearchEngine.config.indexer.timeout_ms` to override read timeout during import.
-
 ### Data Sources
 
 Adapters provide batched records for the Indexer in a memory-stable way. Each adapter implements `each_batch(partition:, cursor:)` and yields arrays.
@@ -148,5 +143,38 @@ Notes:
 - `partitions` must return an Enumerable of keys; `partition_fetch` must return an Enumerable of batches (Arrays of records).
 - Hooks are optional; if provided, they must accept exactly one argument (the partition key).
 - When `partition_fetch` is missing, the source adapter is used with the partition passed through; for ActiveRecord sources, provide a `Hash`/`Range` partition or define `partition_fetch`.
+
+### Dispatcher
+
+Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Mapper](./indexer.md#mapper)
+
+```ruby
+SearchEngine.configure do |c|
+  c.indexer.dispatch = :active_job # or :inline
+  c.indexer.queue_name = "search_index"
+end
+```
+
+- **What it does:** routes per-partition rebuilds either synchronously (inline) or via `ActiveJob`.
+- **API:** `SearchEngine::Dispatcher.dispatch!(SearchEngine::Product, partition: key, into: nil, mode: nil, queue: nil, metadata: {})`
+  - Returns an object describing the action: for ActiveJob `{ mode: :active_job, job_id, queue, collection, partition, into }`; for inline `{ mode: :inline, collection, partition, into, indexer_summary, duration_ms }`.
+- **Mode resolution:** `mode || SearchEngine.config.indexer.dispatch` with a fallback to `:inline` if ActiveJob is unavailable.
+- **Queue name:** taken from `queue || SearchEngine.config.indexer.queue_name`.
+
+ActiveJob job: `SearchEngine::IndexPartitionJob`.
+
+- **Args:** `collection_class_name` (String), `partition` (JSON-serializable), optional `into` (String), optional `metadata` (Hash).
+- **Queueing:** `queue_as` resolves at runtime from config; dispatcher may override per enqueue via `set(queue: ...)`.
+- **Retries:** transient errors (timeouts, connection, 429, 5xx) are retried with exponential backoff based on `SearchEngine.config.indexer.retries`.
+
+Instrumentation events (small payloads):
+
+- `search_engine.dispatcher.enqueued` — `{ collection, partition, into, queue, job_id }`
+- `search_engine.dispatcher.job_started` — `{ collection, partition, into, queue, job_id }`
+- `search_engine.dispatcher.job_finished` — `{ collection, partition, into, queue, job_id, duration_ms, status }`
+- `search_engine.dispatcher.job_error` — `{ collection, partition, into, queue, job_id, error_class, message_truncated }`
+- `search_engine.dispatcher.inline_started` / `.inline_finished` / `.inline_error` — analogous fields (no job_id).
+
+Job arguments are JSON-safe; constants are passed as class name strings and reified at runtime.
 
 [← Back to Index](./index.md)
