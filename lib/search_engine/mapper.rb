@@ -12,12 +12,19 @@ module SearchEngine
   module Mapper
     # Simple DSL holder used by Base#index to capture source and map block.
     class Dsl
-      attr_reader :source_def, :map_proc
+      # @return [Hash, nil] original source definition captured from DSL
+      attr_reader :source_def
+      # @return [Proc, nil] mapping proc captured from DSL
+      attr_reader :map_proc
 
       def initialize(klass)
         @klass = klass
         @source_def = nil
         @map_proc = nil
+        @partitions_proc = nil
+        @partition_fetch_proc = nil
+        @before_partition_proc = nil
+        @after_partition_proc = nil
       end
 
       # Declare a source adapter for this collection. Compatible with
@@ -44,10 +51,61 @@ module SearchEngine
         nil
       end
 
+      # Partitioning: declare how to enumerate partitions for full rebuilds.
+      # @yieldreturn [Enumerable] a list/Enumerable of opaque partition keys
+      # @return [void]
+      def partitions(&block)
+        raise ArgumentError, 'partitions requires a block' unless block
+
+        @partitions_proc = block
+        nil
+      end
+
+      # Partitioning: provide a per-partition batch enumerator.
+      # The block receives the partition key and must return an Enumerable of batches (Arrays of records).
+      # @yieldparam partition [Object]
+      # @yieldreturn [Enumerable<Array>] yields Arrays of records per batch
+      # @return [void]
+      def partition_fetch(&block)
+        raise ArgumentError, 'partition_fetch requires a block' unless block
+
+        @partition_fetch_proc = block
+        nil
+      end
+
+      # Hook executed before importing a partition.
+      # The block receives the partition key.
+      # @yieldparam partition [Object]
+      # @return [void]
+      def before_partition(&block)
+        raise ArgumentError, 'before_partition requires a block' unless block
+
+        @before_partition_proc = block
+        nil
+      end
+
+      # Hook executed after importing a partition.
+      # The block receives the partition key.
+      # @yieldparam partition [Object]
+      # @return [void]
+      def after_partition(&block)
+        raise ArgumentError, 'after_partition requires a block' unless block
+
+        @after_partition_proc = block
+        nil
+      end
+
       # Freeze internal state for immutability and return a definition Hash.
       # @return [Hash]
       def to_definition
-        { source: @source_def, map: @map_proc }.freeze
+        {
+          source: @source_def,
+          map: @map_proc,
+          partitions: @partitions_proc,
+          partition_fetch: @partition_fetch_proc,
+          before_partition: @before_partition_proc,
+          after_partition: @after_partition_proc
+        }.freeze
       end
     end
 

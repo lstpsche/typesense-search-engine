@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'timeout'
 
 module SearchEngine
   # Batch importer for streaming JSONL documents into a physical collection.
