@@ -6,7 +6,7 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
 
 - **Events**
   - `search_engine.search` — wraps `SearchEngine::Client#search`
-  - `search_engine.multi_search` — wraps `SearchEngine::Client#multi_search`
+  - `search_engine.multi_search` — wraps the top-level helper around `Client#multi_search`
 
 Duration is available via the event (`ev.duration`).
 
@@ -15,7 +15,7 @@ Duration is available via the event (`ev.duration`).
 - **collection/collections**: String or Array<String> of collections involved
 - **params**: Redacted params excerpt (single: Hash, multi: Array<Hash>)
 - **url_opts**: `{ use_cache: Boolean, cache_ttl: Integer|nil }`
-- **status**: Integer when available, otherwise `:ok`/`:error`
+- **status/http_status**: Integer when available, otherwise `:ok`/`:error`
 - **error_class**: String or nil
 - **retries**: Attempts used (reserved; nil by default)
 
@@ -25,16 +25,18 @@ Redaction rules:
 - `q` is truncated when longer than 128 chars
 - `filter_by` literals are masked while preserving structure (e.g., `price:>10` → `price:>***`)
 
-| Key           | Type                 | Redaction |
-|---------------|----------------------|-----------|
-| `collection`  | String               | N/A |
-| `collections` | Array<String>        | N/A |
-| `params`      | Hash/Array<Hash>     | Whitelisted keys only; `q` truncated; `filter_by` masked |
-| `url_opts`    | Hash                 | Includes only `use_cache` and `cache_ttl` |
-| `status`      | Integer or Symbol    | N/A |
-| `error_class` | String, nil          | N/A |
-| `retries`     | Integer, nil         | Reserved; nil by default |
-| `duration`    | Float (ms) via event | N/A |
+| Key            | Type                 | Redaction |
+|----------------|----------------------|-----------|
+| `collection`   | String               | N/A |
+| `collections`  | Array<String>        | N/A |
+| `labels`       | Array<String>        | N/A |
+| `searches_count` | Integer            | N/A |
+| `params`       | Hash/Array<Hash>     | Whitelisted keys only; `q` truncated; `filter_by` masked |
+| `url_opts`     | Hash                 | Includes only `use_cache` and `cache_ttl` |
+| `status`/`http_status` | Integer or Symbol | N/A |
+| `error_class`  | String, nil          | N/A |
+| `retries`      | Integer, nil         | Reserved; nil by default |
+| `duration`     | Float (ms) via event | N/A |
 
 For URL/cache knobs, see [Configuration](./configuration.md).
 
@@ -60,7 +62,7 @@ Example lines:
 
 ```
 [se.search] collection=products status=200 duration=12.3ms cache=true ttl=60 q="milk" per_page=5
-[se.multi] collections=products,brands status=200 duration=18.6ms searches=2 cache=true ttl=60
+[se.multi] count=2 labels=products,brands status=200 duration=18.6ms cache=true ttl=60
 ```
 
 `filter_by` is never logged raw; when `include_params` is true and `filter_by` is present, it is rendered as `filter_by=***`.

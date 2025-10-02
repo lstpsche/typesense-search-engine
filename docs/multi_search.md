@@ -165,3 +165,30 @@ Helpers:
 - [Client](./client.md) for URL/common params and error mapping
 - [Relation](./relation.md) for query composition and compilation
 - [Configuration](./configuration.md) for cache knobs and `multi_search_limit`
+
+---
+
+## Observability
+
+[← Back to Index](./index.md) · [Client](./client.md) · [Observability](./observability.md)
+
+Multi-search emits a single event around the network call:
+
+- **Event**: `search_engine.multi_search`
+- **Payload**: `{ searches_count, labels, http_status, source: :multi }`
+- **Duration**: available as `ev.duration` for subscribers
+
+Redaction policy: payload does not include per-search bodies, `q`, or `filter_by`. Labels are considered safe.
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant MS as multi_search helper
+  participant Client
+  participant AS as AS::Notifications
+  App->>MS: build + invoke
+  MS->>AS: instrument("search_engine.multi_search", payload)
+  MS->>Client: multi_search(searches[], url_opts)
+  Client-->>MS: raw response
+  AS-->>App: subscribers receive event
+```

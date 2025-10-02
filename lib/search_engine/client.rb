@@ -95,38 +95,9 @@ module SearchEngine
       path = '/multi_search'
       body = { searches: searches }
 
-      # Observability event payload (pre-built; redacted)
-      if defined?(ActiveSupport::Notifications)
-        collections = searches.map { |s| s[:collection].to_s }.reject { |c| c.strip.empty? }.uniq
-        redacted_params = searches.map { |s| Observability.redact(s) }
-        se_payload = {
-          collections: collections,
-          params: redacted_params,
-          url_opts: Observability.filtered_url_opts(cache_params),
-          status: nil,
-          error_class: nil,
-          retries: nil
-        }
-
-        result = nil
-        ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
-          result = with_exception_mapping(:post, path, cache_params, start) do
-            ts.multi_search.perform(body, common_params: cache_params)
-          end
-          se_payload[:status] = :ok
-        rescue Errors::Api => error
-          se_payload[:status] = error.status
-          se_payload[:error_class] = error.class.name
-          raise
-        rescue Errors::Error => error
-          se_payload[:status] = :error
-          se_payload[:error_class] = error.class.name
-          raise
-        end
-      else
-        result = with_exception_mapping(:post, path, cache_params, start) do
-          ts.multi_search.perform(body, common_params: cache_params)
-        end
+      # Helper-level instrumentation emits `search_engine.multi_search`. Keep client thin here.
+      result = with_exception_mapping(:post, path, cache_params, start) do
+        ts.multi_search.perform(body, common_params: cache_params)
       end
 
       duration = current_monotonic_ms - start
@@ -249,44 +220,41 @@ module SearchEngine
         'search_engine.request',
         method: method,
         path: path,
-        status: nil,
         duration_ms: duration_ms,
-        cache: { use_cache: cache_params[:use_cache], cache_ttl: cache_params[:cache_ttl] },
+        url_opts: Observability.filtered_url_opts(cache_params),
         error_class: error_class
       )
-    rescue StandardError
-      nil
     end
 
     def log_success(method, path, start_ms, cache_params)
-      logger = safe_logger
-      return unless logger
+      return unless safe_logger
 
-      duration = current_monotonic_ms - start_ms
-      logger.info(
-        "[search_engine] #{method.to_s.upcase} #{path} duration_ms=#{duration.round} " \
-        "cache.use_cache=#{cache_params[:use_cache]} cache.ttl=#{cache_params[:cache_ttl]}"
-      )
+      elapsed = current_monotonic_ms - start_ms
+      msg = +'search_engine '
+      msg << method.to_s.upcase
+      msg << ' '
+      msg << path
+      msg << ' completed in '
+      msg << elapsed.round(1).to_s
+      msg << 'ms'
+      msg << ' cache='
+      msg << (cache_params[:use_cache] ? 'true' : 'false')
+      msg << ' ttl='
+      msg << cache_params[:cache_ttl].to_s
+      safe_logger.info(msg)
     rescue StandardError
       nil
     end
 
     def parse_error_body(error)
-      raw = if error.respond_to?(:http_body)
-              error.http_body
-            elsif error.respond_to?(:to_s)
-              error.to_s
-            end
-      begin
-        require 'json'
-        JSON.parse(raw)
-      rescue StandardError
-        raw
-      end
+      return error.body if error.respond_to?(:body) && error.body
+      return error.message if error.respond_to?(:message) && error.message
+
+      nil
     end
 
     def current_monotonic_ms
-      Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond).to_i
+      Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
     end
   end
 end
