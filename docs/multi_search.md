@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Materializers](./materializers.md) · [Configuration](./configuration.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Relation](./relation.md) · [Materializers](./materializers.md)
 
-## Multi-search DSL
+## Federated multi-search
+
+### Overview
 
 Federate multiple labeled `Relation`s into a single Typesense multi-search request while preserving order and mapping results back to labels.
 
@@ -42,6 +44,13 @@ res = SearchEngine.multi_search(common: { q: 'milk', per_page: 50 }) do |m|
 end
 ```
 
+### Guardrails
+
+- **Unique labels**: accept `String` or `Symbol`; canonicalization is `label.to_s.downcase.to_sym` and labels must be unique (case-insensitive).
+- **No URL-only knobs in bodies**: `use_cache`, `cache_ttl` are URL opts only and are filtered from both `common:` and per-search bodies.
+- **Actionable errors**: duplicate labels, invalid relation (missing bound collection), or exceeding `SearchEngine.config.multi_search_limit` raise `ArgumentError` before any network call.
+- **Per-search api_key**: unsupported in Typesense multi-search; set `SearchEngine.config.api_key` instead.
+
 ### Mapping (Relation → per-search payload)
 
 | Relation aspect | Per-search key |
@@ -82,7 +91,7 @@ Per-search `api_key` is not supported by the underlying Typesense multi-search A
 
 ### Result mapping
 
-The helper pairs Typesense responses back to the original labels and model classes, returning a `SearchEngine::Multi::ResultSet` by default. For a dedicated wrapper with additional Hash-like APIs, see MultiResult below.
+The helper pairs Typesense responses back to the original labels and model classes, returning a `SearchEngine::Multi::ResultSet` by default. For a dedicated wrapper with additional Hash-like APIs, see [MultiResult](#multiresult) below.
 
 - `#[]` / `#dig(label)` → `SearchEngine::Result`
 - `#labels` → `[:label_a, :label_b, ...]` in insertion order
@@ -112,7 +121,7 @@ flowchart TD
 Usage (shape matches the default helper):
 
 ```ruby
-mr = SearchEngine.multi_search { |m| m.add :products, rel1; m.add :brands, rel2 }
+mr = SearchEngine.multi_search_result { |m| m.add :products, rel1; m.add :brands, rel2 }
 mr[:products].found
 mr.dig(:brands).to_a
 mr.labels # => [:products, :brands]
@@ -178,7 +187,15 @@ Multi-search emits a single event around the network call:
 - **Payload**: `{ searches_count, labels, http_status, source: :multi }`
 - **Duration**: available as `ev.duration` for subscribers
 
+See [Observability](./observability.md) for subscription patterns.
+
 Redaction policy: payload does not include per-search bodies, `q`, or `filter_by`. Labels are considered safe.
+
+Example compact log line shape:
+
+```text
+[se.multi] count=2 labels=products,brands status=200 duration=12.3ms cache=true ttl=60
+```
 
 ```mermaid
 sequenceDiagram
@@ -192,3 +209,9 @@ sequenceDiagram
   Client-->>MS: raw response
   AS-->>App: subscribers receive event
 ```
+
+## FAQ
+
+- **How do `common:` and per-search params interact?** Shallow merge per search: keys from the relation override `common:`. URL-only keys (`use_cache`, `cache_ttl`) are filtered from both. See [Common params merge](#common-params-merge).
+- **Can I run multi-search without `MultiResult`?** Yes. `SearchEngine.multi_search` returns `SearchEngine::Multi::ResultSet` by default. Use `SearchEngine.multi_search_result` to get a `MultiResult`, or `SearchEngine.multi_search_raw` for the raw Typesense response.
+- **How do I debug a failing sub-search?** Use labels from the `search_engine.multi_search` event to identify the failing index, then run each `Relation#explain` individually. Consider subscribing to `SearchEngine::Notifications::CompactLogger` and see [Observability](./observability.md).
