@@ -82,12 +82,43 @@ Per-search `api_key` is not supported by the underlying Typesense multi-search A
 
 ### Result mapping
 
-The helper pairs Typesense responses back to the original labels and model classes, returning a `SearchEngine::Multi::ResultSet`:
+The helper pairs Typesense responses back to the original labels and model classes, returning a `SearchEngine::Multi::ResultSet` by default. For a dedicated wrapper with additional Hash-like APIs, see MultiResult below.
 
 - `#[]` / `#dig(label)` → `SearchEngine::Result`
 - `#labels` → `[:label_a, :label_b, ...]` in insertion order
 - `#to_h` → `{ label: Result, ... }`
 - `#each_pair` → iterate `(label, result)` in order
+
+---
+
+## MultiResult
+
+A lightweight, ordered wrapper over the raw multi-search list that exposes labeled `Result` objects and stable insertion order. Hydration uses:
+
+1. The model class captured alongside each label at request time
+2. Fallback to the collection registry when the raw item exposes a `collection`
+3. Fallback to `OpenStruct` otherwise
+
+```mermaid
+flowchart TD
+  A[raw multi response] --> B[MultiResult]
+  B --> C[:label => Result]
+```
+
+- Accessors: `#[]`, `#dig`, `#labels`, `#keys`, `#to_h`, `#each_label`
+- Label canonicalization: `label.to_s.downcase.to_sym`
+- Order: deterministic and identical to the order of `m.add`
+
+Usage (shape matches the default helper):
+
+```ruby
+mr = SearchEngine.multi_search { |m| m.add :products, rel1; m.add :brands, rel2 }
+mr[:products].found
+mr.dig(:brands).to_a
+mr.labels # => [:products, :brands]
+```
+
+Note: A convenience helper `SearchEngine.multi_search_result` returns a `SearchEngine::MultiResult` directly without changing the default behavior of `SearchEngine.multi_search`.
 
 ### URL opts, caching, and limits
 
