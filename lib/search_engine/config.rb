@@ -76,6 +76,25 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for indexer/import settings.
+    class IndexerConfig
+      # @return [Integer] default batch size when not provided explicitly
+      attr_accessor :batch_size
+      # @return [Integer, nil] optional override for import read timeout (ms)
+      attr_accessor :timeout_ms
+      # @return [Hash] retry policy: { attempts: Integer, base: Float, max: Float, jitter_fraction: Float }
+      attr_accessor :retries
+      # @return [Boolean] whether to gzip JSONL payloads (disabled by default)
+      attr_accessor :gzip
+
+      def initialize
+        @batch_size = 2000
+        @timeout_ms = nil
+        @retries = { attempts: 3, base: 0.5, max: 5.0, jitter_fraction: 0.2 }
+        @gzip = false
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -103,6 +122,7 @@ module SearchEngine
       @logger = default_logger
       @multi_search_limit = 50
       @schema = SchemaConfig.new
+      @indexer = IndexerConfig.new
       nil
     end
 
@@ -110,6 +130,12 @@ module SearchEngine
     # @return [SearchEngine::Config::SchemaConfig]
     def schema
       @schema ||= SchemaConfig.new
+    end
+
+    # Expose indexer/import configuration.
+    # @return [SearchEngine::Config::IndexerConfig]
+    def indexer
+      @indexer ||= IndexerConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -190,7 +216,13 @@ module SearchEngine
         cache_ttl_s: cache_ttl_s,
         strict_fields: strict_fields ? true : false,
         multi_search_limit: multi_search_limit,
-        schema: { retention: { keep_last: schema.retention.keep_last } }
+        schema: { retention: { keep_last: schema.retention.keep_last } },
+        indexer: {
+          batch_size: indexer.batch_size,
+          timeout_ms: indexer.timeout_ms,
+          retries: indexer.retries,
+          gzip: indexer.gzip ? true : false
+        }
       }
     end
 
