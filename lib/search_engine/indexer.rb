@@ -2,6 +2,7 @@
 
 require 'json'
 require 'timeout'
+require 'digest'
 
 module SearchEngine
   # Batch importer for streaming JSONL documents into a physical collection.
@@ -78,6 +79,60 @@ module SearchEngine
       end
 
       summary
+    end
+
+    # Delete stale documents from a physical collection using a developer-provided filter.
+    #
+    # @param klass [Class] a {SearchEngine::Base} subclass
+    # @param partition [Object, nil]
+    # @param into [String, nil]
+    # @param dry_run [Boolean]
+    # @return [Hash]
+    # @raise [SearchEngine::Errors::InvalidParams]
+    def self.delete_stale!(klass, partition: nil, into: nil, dry_run: false)
+      validate_stale_args!(klass)
+
+      cfg = SearchEngine.config
+      sd_cfg = cfg.stale_deletes
+      target_into = resolve_into!(klass, partition: partition, into: into)
+
+      skipped = skip_if_disabled(klass, sd_cfg, target_into, partition)
+      return skipped if skipped
+
+      compiled = SearchEngine::StaleFilter.for(klass)
+      skipped = skip_if_no_filter(compiled, klass, target_into, partition)
+      return skipped if skipped
+
+      filter = compiled.call(partition: partition)
+      skipped = skip_if_empty_filter(filter, klass, target_into, partition)
+      return skipped if skipped
+
+      skipped = skip_if_strict_blocked(filter, sd_cfg, klass, target_into, partition)
+      return skipped if skipped
+
+      fhash = Digest::SHA1.hexdigest(filter)
+      started = monotonic_ms
+      instrument_started(klass: klass, into: target_into, partition: partition, filter_hash: fhash)
+
+      if dry_run
+        estimated = estimate_found_if_enabled(cfg, sd_cfg, target_into, filter)
+        return dry_run_summary(klass, target_into, partition, filter, fhash, started, estimated)
+      end
+
+      deleted_count = perform_delete_and_count(target_into, filter, sd_cfg.timeout_ms)
+      duration = monotonic_ms - started
+      instrument_finished(
+        klass: klass,
+        into: target_into,
+        partition: partition,
+        duration_ms: duration,
+        deleted_count: deleted_count
+      )
+      ok_summary(klass, target_into, partition, filter, fhash, duration, deleted_count)
+    rescue Errors::Error => error
+      duration = monotonic_ms - (started || monotonic_ms)
+      instrument_error(error, klass: klass, into: target_into, partition: partition)
+      failed_summary(klass, target_into, partition, filter, fhash, duration, error)
     end
 
     # Import pre-batched documents using JSONL bulk import.
@@ -170,6 +225,132 @@ module SearchEngine
 
     class << self
       private
+
+      def validate_stale_args!(klass)
+        raise Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
+        return if klass.ancestors.include?(SearchEngine::Base)
+
+        raise Errors::InvalidParams, 'klass must inherit from SearchEngine::Base'
+      end
+
+      def skip_if_disabled(klass, sd_cfg, into, partition)
+        return nil if sd_cfg&.enabled
+
+        instrument_stale(:skipped, reason: :disabled, klass: klass, into: into, partition: partition)
+        skip_summary(klass, into, partition)
+      end
+
+      def skip_if_no_filter(compiled, klass, into, partition)
+        return nil if compiled
+
+        instrument_stale(:skipped, reason: :no_filter_defined, klass: klass, into: into, partition: partition)
+        skip_summary(klass, into, partition)
+      end
+
+      def skip_if_empty_filter(filter, klass, into, partition)
+        return nil if filter && !filter.to_s.strip.empty?
+
+        instrument_stale(:skipped, reason: :empty_filter, klass: klass, into: into, partition: partition)
+        skip_summary(klass, into, partition)
+      end
+
+      def skip_if_strict_blocked(filter, sd_cfg, klass, into, partition)
+        return nil unless sd_cfg.strict_mode && suspicious_filter?(filter)
+
+        instrument_stale(:skipped, reason: :strict_blocked, klass: klass, into: into, partition: partition)
+        {
+          status: :skipped,
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          filter_by: filter,
+          filter_hash: Digest::SHA1.hexdigest(filter),
+          duration_ms: 0.0,
+          deleted_count: 0,
+          estimated_found: nil
+        }
+      end
+
+      def estimate_found_if_enabled(cfg, sd_cfg, into, filter)
+        return nil unless sd_cfg.estimation_enabled && cfg.default_query_by && !cfg.default_query_by.to_s.strip.empty?
+
+        client = SearchEngine::Client.new
+        params = { q: '*', query_by: cfg.default_query_by, per_page: 0, filter_by: filter }
+        res = client.search(collection: into, params: params, url_opts: {})
+        res&.found
+      rescue StandardError
+        nil
+      end
+
+      def perform_delete_and_count(into, filter, timeout_ms)
+        client = SearchEngine::Client.new
+        resp = client.delete_documents_by_filter(
+          collection: into,
+          filter_by: filter,
+          timeout_ms: timeout_ms
+        )
+        (resp && (resp[:num_deleted] || resp[:deleted] || resp[:numDeleted])).to_i
+      end
+
+      def dry_run_summary(klass, into, partition, filter, filter_hash, started, estimated)
+        duration = monotonic_ms - started
+        {
+          status: :ok,
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          filter_by: filter,
+          filter_hash: filter_hash,
+          duration_ms: duration.round(1),
+          deleted_count: 0,
+          estimated_found: estimated,
+          will_delete: true
+        }
+      end
+
+      def ok_summary(klass, into, partition, filter, filter_hash, duration, deleted_count)
+        {
+          status: :ok,
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          filter_by: filter,
+          filter_hash: filter_hash,
+          duration_ms: duration.round(1),
+          deleted_count: deleted_count,
+          estimated_found: nil
+        }
+      end
+
+      def failed_summary(klass, into, partition, filter, filter_hash, duration, error)
+        {
+          status: :failed,
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          filter_by: filter,
+          filter_hash: filter_hash,
+          duration_ms: duration.round(1),
+          deleted_count: 0,
+          estimated_found: nil,
+          error_class: error.class.name,
+          message_truncated: error.message.to_s[0, 200]
+        }
+      end
+
+      def skip_summary(klass, into, partition)
+        {
+          status: :skipped,
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          filter_by: nil,
+          filter_hash: nil,
+          duration_ms: 0.0,
+          deleted_count: 0,
+          estimated_found: nil
+        }
+      end
 
       def rows_enumerator_for(klass, partition:, compiled_partitioner:)
         if compiled_partitioner
@@ -458,6 +639,66 @@ module SearchEngine
         return unless klass.instance_variable_defined?(:@__mapper_dsl__)
 
         klass.instance_variable_get(:@__mapper_dsl__)
+      end
+
+      def instrument_started(klass:, into:, partition:, filter_hash:)
+        return unless defined?(ActiveSupport::Notifications)
+
+        payload = {
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          filter_hash: filter_hash
+        }
+        ActiveSupport::Notifications.instrument('search_engine.stale_deletes.started', payload) {}
+      end
+
+      def instrument_finished(klass:, into:, partition:, duration_ms:, deleted_count:)
+        return unless defined?(ActiveSupport::Notifications)
+
+        payload = {
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          duration_ms: duration_ms.round(1),
+          deleted_count: deleted_count
+        }
+        ActiveSupport::Notifications.instrument('search_engine.stale_deletes.finished', payload) {}
+      end
+
+      def instrument_error(error, klass:, into:, partition:)
+        return unless defined?(ActiveSupport::Notifications)
+
+        payload = {
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition,
+          error_class: error.class.name,
+          message_truncated: error.message.to_s[0, 200]
+        }
+        ActiveSupport::Notifications.instrument('search_engine.stale_deletes.error', payload) {}
+      end
+
+      def instrument_stale(_type, reason:, klass:, into:, partition:)
+        return unless defined?(ActiveSupport::Notifications)
+
+        payload = {
+          reason: reason,
+          collection: klass.respond_to?(:collection) ? klass.collection : klass.name.to_s,
+          into: into,
+          partition: partition
+        }
+        ActiveSupport::Notifications.instrument('search_engine.stale_deletes.skipped', payload) {}
+      end
+
+      def suspicious_filter?(filter)
+        s = filter.to_s
+        return true unless s.include?('=')
+
+        # Contains wildcard star without any field comparator context
+        return true if s.include?('*') && !s.match?(/[a-zA-Z0-9_]+\s*[:><=!]/)
+
+        false
       end
     end
   end
