@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Observability](./observability.md) · [Materializers](./materializers.md)
 
 # Relation
 
@@ -10,7 +10,7 @@ Relation is an immutable, chainable query object bound to a model class. It accu
 class SearchEngine::Product < SearchEngine::Base; end
 
 r1 = SearchEngine::Product.all
-r2 = r1.where(category: 'milk').order(:name).limit(10)
+r2 = r1.where(category: 'milk').order(:name).select(:id, :name).page(2).per(10)
 # r1 is unchanged
 r1.object_id != r2.object_id #=> true
 r1.empty?                    #=> true
@@ -40,16 +40,17 @@ r2.empty?     #=> false
 - **empty?**: true when state equals the default empty state.
 - **inspect**: concise single-line summary; shows only non-empty keys.
 
+See [Materializers](./materializers.md) for execution methods (`to_a`, `each`, `first`, `last`, `take`, `pluck`, `ids`, `count`, `exists?`).
+
 ## Lifecycle
 
 ```mermaid
 flowchart LR
   A[Model.all] --> B[Relation]
-  B --> C[where]
-  C --> D[order]
-  D --> E[limit / offset / page / per]
-  E --> F[Relation (new each step)]
-  F --> G[(Execute via Client)]
+  B --> C[where/order/select]
+  C --> D[Pagination]
+  D --> E[Compiler]
+  E --> F[Typesense params]
 ```
 
 See [Client](./client.md) for execution context.
