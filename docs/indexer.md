@@ -73,4 +73,49 @@ end
 - `partition` and `cursor` are opaque; adapters interpret them per-domain (e.g., id ranges, keyset predicates, external API tokens).
 - Instrumentation: emits `search_engine.source.batch_fetched` and `search_engine.source.error`.
 
-Backlinks: [Schema](./schema.md), [Observability](./observability.md), [Client](./client.md)
+### Mapper
+
+Backlinks: [Sources](./indexer.md#data-sources), [Schema](./schema.md)
+
+```ruby
+class SearchEngine::Product < SearchEngine::Base
+  collection "products"
+  attribute :id, :integer
+  attribute :shop_id, :integer
+  attribute :brand_id, :integer
+  attribute :brand_name, :string
+  attribute :price_cents, :integer
+
+  index do
+    source :active_record, model: ::Product, scope: -> { where(active: true) }
+    map do |r|
+      { id: r.id, shop_id: r.shop_id, brand_id: r.brand_id, brand_name: r.brand&.name, price_cents: r.price_cents }
+    end
+  end
+end
+```
+
+Model → Document mapping:
+
+| Model field | Document field | Transform |
+| --- | --- | --- |
+| `id` | `id` | identity |
+| `shop_id` | `shop_id` | identity |
+| `brand_id` | `brand_id` | identity |
+| `brand.name` | `brand_name` | rename + safe navigation |
+| `price_cents` | `price_cents` | identity |
+
+Validation:
+
+- Missing required fields: errors like `Missing required fields: [:id, :title] for SearchEngine::Product mapper.`
+- Unknown fields: warns by default; set `SearchEngine.config.mapper.strict_unknown_keys = true` to error.
+- Type checks: invalid types reported (e.g., `Invalid type for field :price_cents (expected Integer, got String: "12.3").`).
+- Coercions: enable with `SearchEngine.config.mapper.coercions[:enabled] = true` (safe integer/float/bool only).
+
+Runtime API:
+
+- `mapper = SearchEngine::Mapper.for(SearchEngine::Product)`
+- `docs, report = mapper.map_batch!(rows, batch_index: 1)`
+- Emits `search_engine.mapper.batch_mapped` per batch with: `collection`, `batch_index`, `docs_count`, `duration_ms`, `missing_required_count`, `extra_keys_count`, `invalid_type_count`, `coerced_count`.
+
+Backlinks: [Index](./index.md), [Observability](./observability.md), [Client](./client.md)

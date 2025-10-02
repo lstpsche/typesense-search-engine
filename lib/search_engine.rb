@@ -18,6 +18,7 @@ require 'search_engine/multi_result'
 require 'search_engine/observability'
 require 'search_engine/schema'
 require 'search_engine/indexer'
+require 'search_engine/mapper'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.

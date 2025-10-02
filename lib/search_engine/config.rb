@@ -155,6 +155,22 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for mapper.
+    class MapperConfig
+      # @return [Boolean] when true, unknown keys raise; when false, they are reported as warnings
+      attr_accessor :strict_unknown_keys
+      # @return [Hash] nested coercions config: { enabled: Boolean, rules: Hash }
+      attr_accessor :coercions
+      # @return [Integer] maximum number of error samples to include in reports
+      attr_accessor :max_error_samples
+
+      def initialize
+        @strict_unknown_keys = false
+        @coercions = { enabled: false, rules: {} }
+        @max_error_samples = 5
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -184,6 +200,7 @@ module SearchEngine
       @schema = SchemaConfig.new
       @indexer = IndexerConfig.new
       @sources = SourcesConfig.new
+      @mapper = MapperConfig.new
       nil
     end
 
@@ -203,6 +220,12 @@ module SearchEngine
     # @return [SearchEngine::Config::SourcesConfig]
     def sources
       @sources ||= SourcesConfig.new
+    end
+
+    # Expose mapper configuration.
+    # @return [SearchEngine::Config::MapperConfig]
+    def mapper
+      @mapper ||= MapperConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -283,28 +306,10 @@ module SearchEngine
         cache_ttl_s: cache_ttl_s,
         strict_fields: strict_fields ? true : false,
         multi_search_limit: multi_search_limit,
-        schema: { retention: { keep_last: schema.retention.keep_last } },
-        indexer: {
-          batch_size: indexer.batch_size,
-          timeout_ms: indexer.timeout_ms,
-          retries: indexer.retries,
-          gzip: indexer.gzip ? true : false
-        },
-        sources: {
-          active_record: {
-            batch_size: sources.active_record.batch_size,
-            readonly: sources.active_record.readonly ? true : false,
-            use_transaction: sources.active_record.use_transaction ? true : false
-          },
-          sql: {
-            fetch_size: sources.sql.fetch_size,
-            statement_timeout_ms: sources.sql.statement_timeout_ms,
-            row_shape: sources.sql.row_shape
-          },
-          lambda: {
-            max_batch_size_hint: sources.lambda.max_batch_size_hint
-          }
-        }
+        schema: schema_hash_for_to_h,
+        indexer: indexer_hash_for_to_h,
+        sources: sources_hash_for_to_h,
+        mapper: mapper_hash_for_to_h
       }
     end
 
@@ -317,6 +322,45 @@ module SearchEngine
     end
 
     private
+
+    def schema_hash_for_to_h
+      { retention: { keep_last: schema.retention.keep_last } }
+    end
+
+    def indexer_hash_for_to_h
+      {
+        batch_size: indexer.batch_size,
+        timeout_ms: indexer.timeout_ms,
+        retries: indexer.retries,
+        gzip: indexer.gzip ? true : false
+      }
+    end
+
+    def sources_hash_for_to_h
+      {
+        active_record: {
+          batch_size: sources.active_record.batch_size,
+          readonly: sources.active_record.readonly ? true : false,
+          use_transaction: sources.active_record.use_transaction ? true : false
+        },
+        sql: {
+          fetch_size: sources.sql.fetch_size,
+          statement_timeout_ms: sources.sql.statement_timeout_ms,
+          row_shape: sources.sql.row_shape
+        },
+        lambda: {
+          max_batch_size_hint: sources.lambda.max_batch_size_hint
+        }
+      }
+    end
+
+    def mapper_hash_for_to_h
+      {
+        strict_unknown_keys: mapper.strict_unknown_keys ? true : false,
+        coercions: mapper.coercions,
+        max_error_samples: mapper.max_error_samples
+      }
+    end
 
     def default_strict_fields
       env = if defined?(Rails) && Rails.respond_to?(:env)
@@ -332,9 +376,7 @@ module SearchEngine
         Rails.logger
       else
         require 'logger'
-        l = Logger.new($stdout)
-        l.level = Logger::INFO
-        l
+        Logger.new($stdout).tap { |l| l.level = Logger::INFO }
       end
     end
 
