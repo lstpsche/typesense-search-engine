@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md)
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md) · [Debugging](./debugging.md)
 
 # Query DSL (Predicate AST)
 

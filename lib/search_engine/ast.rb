@@ -29,18 +29,28 @@ module SearchEngine
     # @return [SearchEngine::AST::Eq]
     def eq(field, value) = Eq.new(field, value)
 
+    # @param field [String, Symbol]
+    # @param value [Object]
     # @return [SearchEngine::AST::NotEq]
     def not_eq(field, value) = NotEq.new(field, value)
 
+    # @param field [String, Symbol]
+    # @param value [Object]
     # @return [SearchEngine::AST::Gt]
     def gt(field, value) = Gt.new(field, value)
 
+    # @param field [String, Symbol]
+    # @param value [Object]
     # @return [SearchEngine::AST::Gte]
     def gte(field, value) = Gte.new(field, value)
 
+    # @param field [String, Symbol]
+    # @param value [Object]
     # @return [SearchEngine::AST::Lt]
     def lt(field, value) = Lt.new(field, value)
 
+    # @param field [String, Symbol]
+    # @param value [Object]
     # @return [SearchEngine::AST::Lte]
     def lte(field, value) = Lte.new(field, value)
 
@@ -49,14 +59,18 @@ module SearchEngine
     # @return [SearchEngine::AST::In]
     def in_(field, values) = In.new(field, values)
 
+    # @param field [String, Symbol]
+    # @param values [Array]
     # @return [SearchEngine::AST::NotIn]
     def not_in(field, values) = NotIn.new(field, values)
 
     # -- Pattern
+    # @param field [String, Symbol]
     # @param pattern [String, Regexp]
     # @return [SearchEngine::AST::Matches]
     def matches(field, pattern) = Matches.new(field, pattern)
 
+    # @param field [String, Symbol]
     # @param prefix [String]
     # @return [SearchEngine::AST::Prefix]
     def prefix(field, prefix) = Prefix.new(field, prefix)
@@ -66,14 +80,17 @@ module SearchEngine
     # @return [SearchEngine::AST::And]
     def and_(*nodes) = And.new(*nodes)
 
+    # @param nodes [Array<SearchEngine::AST::Node>]
     # @return [SearchEngine::AST::Or]
     def or_(*nodes) = Or.new(*nodes)
 
     # -- Grouping
+    # @param node [SearchEngine::AST::Node]
     # @return [SearchEngine::AST::Group]
     def group(node) = Group.new(node)
 
     # -- Escape hatch
+    # @param fragment [String]
     # @return [SearchEngine::AST::Raw]
     def raw(fragment) = Raw.new(fragment)
   end

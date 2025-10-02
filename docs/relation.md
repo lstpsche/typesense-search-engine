@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Compiler](./compiler.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Compiler](./compiler.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md) · [Debugging](./debugging.md)
 
 > See also: [Debugging & Explain](./debugging.md)
 
