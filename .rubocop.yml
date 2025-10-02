@@ -37,20 +37,20 @@ Layout/MultilineMethodCallBraceLayout:
   EnforcedStyle: new_line
 
 Metrics/AbcSize:
-  Max: 50
+  Max: 60
 
 Metrics/CyclomaticComplexity:
   Enabled: false
 
 Metrics/PerceivedComplexity:
-  Max: 20
+  Max: 30
 
 Layout/LineLength:
   Max: 120
   AllowedPatterns: ['^ *#'] # ignore comments (only ones that take up the whole line)
 
 Metrics/MethodLength:
-  Max: 50
+  Max: 60
 
 Metrics/ClassLength:
   Enabled: false

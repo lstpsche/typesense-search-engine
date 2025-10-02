@@ -151,3 +151,26 @@ flowchart LR
   A -->|unscope(:order)| E[Clear orders]
   A -->|unscope(:page/per)| F[Clear pagination]
 ```
+
+## Error reference
+
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
+Validation happens primarily in the Parser, with light shape checks in the Compiler. `AST::Raw` deliberately bypasses validation.
+
+| Error | Cause | Typical fix |
+|------|-------|-------------|
+| `SearchEngine::Errors::InvalidField` | Unknown/disallowed field for the model | Fix the field name or declare it with `attribute`; use `raw` to bypass if necessary |
+| `SearchEngine::Errors::InvalidOperator` | Unrecognized operator, or placeholder/arity mismatch | Use one of: `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `MATCHES`, `PREFIX`; fix `?` count |
+| `SearchEngine::Errors::InvalidType` | Value cannot be coerced to the declared type; empty array for membership | Coerce inputs (e.g., strings to integers), supply a non‑empty array |
+
+- `SearchEngine.config.strict_fields` controls field validation only:
+  - When `true` (default in development/test), unknown fields raise `InvalidField`.
+  - When `false`, unknown fields are allowed; operator/shape/type errors are still enforced.
+- `AST::Raw` nodes bypass all field/type checks by design; use sparingly and preferably behind tests.
+
+Allowed example message:
+
+```text
+InvalidField: unknown field :colour for SearchEngine::Product (did you mean :color?)
+```

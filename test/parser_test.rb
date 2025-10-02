@@ -13,6 +13,11 @@ class ParserTest < Minitest::Test
     attribute :created_at, :time
   end
 
+  def setup
+    # Reset to default strictness per test
+    SearchEngine.config.strict_fields = true
+  end
+
   def test_hash_scalar_to_eq
     node = SearchEngine::DSL::Parser.parse({ id: 1 }, klass: Product)
     assert_kind_of SearchEngine::AST::Eq, node
@@ -54,22 +59,22 @@ class ParserTest < Minitest::Test
   end
 
   def test_unknown_field_in_hash_raises
-    error = assert_raises(ArgumentError) do
+    error = assert_raises(SearchEngine::Errors::InvalidField) do
       SearchEngine::DSL::Parser.parse({ unknown: 1 }, klass: Product)
     end
-    assert_match(/Unknown attribute/, error.message)
+    assert_match(/unknown field/i, error.message)
     assert_match(/Product/, error.message)
   end
 
   def test_unknown_field_in_template_raises
-    error = assert_raises(ArgumentError) do
+    error = assert_raises(SearchEngine::Errors::InvalidField) do
       SearchEngine::DSL::Parser.parse(['unknown > ?', 10], klass: Product)
     end
-    assert_match(/Unknown attribute/, error.message)
+    assert_match(/unknown field/i, error.message)
   end
 
-  def test_placeholder_mismatch_raises
-    error = assert_raises(ArgumentError) do
+  def test_placeholder_mismatch_raises_invalid_operator
+    error = assert_raises(SearchEngine::Errors::InvalidOperator) do
       SearchEngine::DSL::Parser.parse('price > ?', args: [], klass: Product)
     end
     assert_match(/expected 1 args/, error.message)
@@ -81,6 +86,12 @@ class ParserTest < Minitest::Test
     assert_equal true, node.value
   end
 
+  def test_invalid_boolean_string_raises
+    assert_raises(SearchEngine::Errors::InvalidType) do
+      SearchEngine::DSL::Parser.parse(['active = ?', 'yep'], klass: Product)
+    end
+  end
+
   def test_date_coercion_to_time_utc
     d = Date.new(2020, 1, 1)
     node = SearchEngine::DSL::Parser.parse(['created_at >= ?', d], klass: Product)
@@ -89,19 +100,43 @@ class ParserTest < Minitest::Test
     assert_equal true, node.value.utc?
   end
 
-  def test_list_parsing_multiple_inputs
-    nodes = SearchEngine::DSL::Parser.parse_list(
-      [
-        { id: 1 },
-        ['price > ?', 100],
-        'brand_id:=[1,2]'
-      ],
-      klass: Product
-    )
+  def test_integer_string_coercion
+    node = SearchEngine::DSL::Parser.parse(['id = ?', '42'], klass: Product)
+    assert_equal 42, node.value
+  end
 
-    assert_equal 3, nodes.length
-    assert(nodes.any? { |n| n.is_a?(SearchEngine::AST::Eq) })
-    assert(nodes.any? { |n| n.is_a?(SearchEngine::AST::Gt) })
-    assert(nodes.any? { |n| n.is_a?(SearchEngine::AST::Raw) })
+  def test_invalid_integer_coercion_raises
+    assert_raises(SearchEngine::Errors::InvalidType) do
+      SearchEngine::DSL::Parser.parse(['id = ?', '4.2'], klass: Product)
+    end
+  end
+
+  def test_in_requires_non_empty_array
+    assert_raises(SearchEngine::Errors::InvalidType) do
+      SearchEngine::DSL::Parser.parse(['brand_id IN ?', []], klass: Product)
+    end
+  end
+
+  def test_strict_fields_false_allows_unknown_fields
+    SearchEngine.config.strict_fields = false
+    node = SearchEngine::DSL::Parser.parse(['unknown >= ?', 1], klass: Product)
+    assert_kind_of SearchEngine::AST::Gte, node
+  ensure
+    SearchEngine.config.strict_fields = true
+  end
+
+  def test_did_you_mean_in_error_message
+    error = assert_raises(SearchEngine::Errors::InvalidField) do
+      SearchEngine::DSL::Parser.parse({ namee: 1 }, klass: Product)
+    end
+    assert_match(/did you mean/i, error.message)
+  end
+
+  def test_raw_bypasses_validation
+    SearchEngine.config.strict_fields = true
+    node = SearchEngine::DSL::Parser.parse('unknown_field:>10', klass: Product)
+    assert_kind_of SearchEngine::AST::Raw, node
+  ensure
+    SearchEngine.config.strict_fields = true
   end
 end

@@ -48,5 +48,19 @@ module SearchEngine
     # Use this for actionable, developer-facing messages that indicate a caller
     # constructed an invalid request (e.g., blank collection name).
     class InvalidParams < Error; end
+
+    # Raised when a provided field name is unknown or disallowed for a model.
+    #
+    # Typical cause: a typo or using a field that is not declared via
+    # {SearchEngine::Base.attribute}.
+    class InvalidField < Error; end
+
+    # Raised when an operator or fragment token is not recognized by the SQL-ish
+    # grammar accepted by the Parser.
+    class InvalidOperator < Error; end
+
+    # Raised when a value cannot be coerced to the declared attribute type, or
+    # when its shape is incompatible (e.g., empty array for IN/NOT IN).
+    class InvalidType < Error; end
   end
 end

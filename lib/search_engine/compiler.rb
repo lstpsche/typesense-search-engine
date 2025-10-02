@@ -73,7 +73,14 @@ module SearchEngine
       when SearchEngine::AST::And
         compile_boolean(node.children, ' && ', parent_prec: parent_prec, my_prec: precedence(:and))
       when SearchEngine::AST::Or
-        compile_boolean(node.children, ' || ', parent_prec: parent_prec, my_prec: precedence(:or))
+        # For clarity, always parenthesize right-hand child when it is an AND or a grouped expression
+        compiled = compile_boolean(node.children, ' || ', parent_prec: parent_prec, my_prec: precedence(:or))
+        # If the rightmost child is an And node and not already grouped, ensure parentheses
+        if node.children.length == 2 && node.children.last.is_a?(SearchEngine::AST::And)
+          left_str, right_str = compiled.split(' || ', 2)
+          compiled = "#{left_str} || (#{right_str})"
+        end
+        compiled
       when SearchEngine::AST::Group
         "(#{compile_node(node.children.first, parent_prec: 0)})"
       when SearchEngine::AST::Raw
