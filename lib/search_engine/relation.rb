@@ -19,6 +19,7 @@ module SearchEngine
       ast:     [].freeze, # Predicate AST nodes (authoritative)
       orders:  [].freeze,
       select:  [].freeze,
+      joins:   [].freeze,
       limit:   nil,
       offset:  nil,
       page:    nil,
@@ -512,6 +513,37 @@ module SearchEngine
       fetch_found_only.positive?
     end
 
+    # Join association names to include in server-side join compilation.
+    #
+    # Validates each provided association against the model's `joins_config` and
+    # appends the normalized names to the relation state in order. The relation
+    # is immutable; a new instance is returned with copy-on-write semantics.
+    #
+    # @param assocs [Array<#to_sym,#to_s>] one or more association names
+    # @return [SearchEngine::Relation]
+    # @raise [SearchEngine::Errors::UnknownJoin] when an association is not declared
+    # @raise [ArgumentError] when inputs are not Symbols/Strings
+    # @example
+    #   SearchEngine::Book
+    #     .joins(:authors)
+    #     .where(orders: { total_price: 12.34 })
+    def joins(*assocs)
+      names = normalize_joins(assocs)
+      return self if names.empty?
+
+      spawn do |s|
+        existing = Array(s[:joins])
+        s[:joins] = existing + names
+      end
+    end
+
+    # Read-only list of join association names accumulated on this relation.
+    # @return [Array<Symbol>] a frozen array
+    def joins_list
+      list = Array(@state[:joins])
+      list.frozen? ? list : list.dup.freeze
+    end
+
     protected
 
     # Spawn a new relation with a deep-duplicated mutable state.
@@ -553,7 +585,7 @@ module SearchEngine
       s.gsub(':!=[', ' NOT IN [')
     end
 
-    def normalize_initial_state(state)
+    def normalize_initial_state(state) # rubocop:disable Metrics/AbcSize
       return {} if state.nil? || state.empty?
       raise ArgumentError, 'state must be a Hash' unless state.is_a?(Hash)
 
@@ -583,6 +615,8 @@ module SearchEngine
           normalized[:orders] = normalize_order(value)
         when :select
           normalized[:select] = normalize_select(Array(value))
+        when :joins
+          normalized[:joins] = normalize_joins(Array(value))
         when :limit
           normalized[:limit] = coerce_integer_min(value, :limit, 1)
         when :offset
@@ -970,6 +1004,25 @@ module SearchEngine
       elsif per
         lines << "  page/per: /#{per}"
       end
+    end
+
+    # Normalize and validate join names, preserving order and duplicates.
+    def normalize_joins(values)
+      list = Array(values).flatten.compact
+      return [] if list.empty?
+
+      names = list.map do |v|
+        case v
+        when Symbol, String
+          v.to_sym
+        else
+          raise ArgumentError, "joins: expected symbols/strings (got #{v.class})"
+        end
+      end
+
+      # Validate against declared joins; rely on join_for to raise with suggestions
+      names.each { |name| @klass.join_for(name) }
+      names
     end
   end
 end

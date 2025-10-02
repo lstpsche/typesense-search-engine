@@ -31,6 +31,29 @@ end
 
 The registry is per‑class, immutable to callers, and uses copy‑on‑write for safe updates. Subclasses inherit parent declarations and may add new ones; duplicate names raise.
 
+## Relation Usage
+
+Use `Relation#joins(*assocs)` to select join associations on a query. Names are validated against the model’s `joins_config` and stored in the relation’s immutable state in the order provided. Multiple calls append:
+
+```ruby
+SearchEngine::Book
+  .joins(:authors)
+  .where(orders: { total_price: 12.34 })
+```
+
+```mermaid
+flowchart LR
+  R[Relation] -- joins(:authors) --> S[State joins=[authors]]
+  S -- joins(:orders) --> S2[joins=[authors, orders]]
+```
+
+- `joins` accepts symbols/strings; inputs are normalized to symbols.
+- Unknown names raise `SearchEngine::Errors::UnknownJoin` with an actionable message that lists available associations.
+- Order is preserved and duplicates are not deduped by default; explicit chaining is honored.
+- For debugging, `rel.joins_list` returns the frozen array of association names in state.
+
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
 ## Association Table Pattern
 
 Render declared joins for a model to reason about relationships:
