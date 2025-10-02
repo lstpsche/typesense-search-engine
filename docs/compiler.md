@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Query DSL](./query_dsl.md)
+[← Back to Index](./index.md) · [Query DSL](./query_dsl.md) · [Relation](./relation.md) · [Debugging](./debugging.md)
 
 > Instrumentation: `search_engine.compile` is emitted by the compiler. See [Debugging](./debugging.md).
 
