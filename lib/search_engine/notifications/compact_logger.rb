@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'logger'
 require 'active_support/notifications'
 
@@ -12,8 +14,8 @@ module SearchEngine
     #   SearchEngine::Notifications::CompactLogger.subscribe
     #   SearchEngine::Notifications::CompactLogger.unsubscribe
     class CompactLogger
-      EVENT_SEARCH = 'search_engine.search'.freeze
-      EVENT_MULTI  = 'search_engine.multi_search'.freeze
+      EVENT_SEARCH = 'search_engine.search'
+      EVENT_MULTI  = 'search_engine.multi_search'
 
       # Subscribe to SearchEngine notifications.
       #

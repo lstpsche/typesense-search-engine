@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Public error hierarchy for the SearchEngine client wrapper.
   #

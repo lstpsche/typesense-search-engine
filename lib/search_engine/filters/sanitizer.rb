@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   module Filters
     # Sanitizer utilities for Typesense-compatible filters.

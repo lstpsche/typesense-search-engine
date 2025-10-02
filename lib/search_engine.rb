@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'search_engine/version'
 require 'search_engine/engine'
 require 'search_engine/config'
@@ -6,6 +8,7 @@ require 'search_engine/relation'
 require 'search_engine/base'
 require 'search_engine/result'
 require 'search_engine/filters/sanitizer'
+require 'search_engine/ast'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Rails engine for the SearchEngine gem.
   # Configures autoloading and eager-loading paths.

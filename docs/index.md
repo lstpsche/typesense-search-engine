@@ -11,6 +11,7 @@ Welcome to the SearchEngine documentation.
 - [Relation](./relation.md)
 - [Observability](./observability.md)
 - [Materializers](./materializers.md)
+- [Query DSL](./query_dsl.md)
 
 ## Overview
 

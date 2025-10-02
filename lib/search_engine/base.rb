@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module SearchEngine
   # Base class for SearchEngine models.
   #

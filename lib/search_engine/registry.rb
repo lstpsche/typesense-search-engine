@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 # Internal SearchEngine registry and APIs for model mapping.
 module SearchEngine
   # Internal registry for mapping Typesense collection names to model classes.
