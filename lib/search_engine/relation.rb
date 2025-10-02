@@ -19,6 +19,9 @@ module SearchEngine
       ast:     [].freeze, # Predicate AST nodes (authoritative)
       orders:  [].freeze,
       select:  [].freeze,
+      # Nested include_fields selection state
+      select_nested: {}.freeze,           # { assoc(Symbol) => [field(String), ...] }
+      select_nested_order: [].freeze,     # [assoc(Symbol), ...] first-mention order
       joins:   [].freeze,
       limit:   nil,
       offset:  nil,
@@ -105,19 +108,64 @@ module SearchEngine
       end
     end
 
-    # Select a subset of fields. De-duplicates and preserves order of first appearance.
+    # Select a subset of fields for Typesense `include_fields`.
     #
-    # @param fields [Array<#to_sym,#to_s>]
+    # Accepts a mix of base fields and nested association fields using a Ruby-ish shape.
+    #
+    # - Base fields: symbols/strings, e.g. `:id, "title"`
+    # - Nested: a Hash mapping association name => field list, e.g. `{ authors: [:first_name, :last_name] }`
+    # - Arrays are flattened; blanks are dropped; duplicates are removed preserving first occurrence order
+    # - Associations are validated against the model's `joins_config`
+    #
+    # Multiple calls merge:
+    # - Base fields: first-mention order wins; later calls append new unique fields only
+    # - Nested per-association: first-mention order wins; later calls append new unique fields only
+    # - Association emission order is by first mention across calls
+    #
+    # The relation is immutable; a new instance is returned.
+    #
+    # @param fields [Array<Symbol,String,Hash,Array>]
     # @return [SearchEngine::Relation]
-    # @raise [ArgumentError] when fields are blank or unknown for the model
+    # @raise [ArgumentError] when inputs are invalid or field names are blank
+    # @raise [SearchEngine::Errors::UnknownJoin] when a nested association is not declared
     def select(*fields)
-      normalized = normalize_select(fields)
+      normalized = normalize_select_input(fields)
       spawn do |s|
-        existing = Array(s[:select])
-        s[:select] = (existing + normalized).each_with_object([]) do |f, acc|
+        # Merge base fields with first-wins semantics
+        existing_base = Array(s[:select])
+        merged_base = (existing_base + normalized[:base]).each_with_object([]) do |f, acc|
           acc << f unless acc.include?(f)
         end
+        s[:select] = merged_base
+
+        # Merge nested selections preserving association first-mention order
+        existing_nested = s[:select_nested] || {}
+        existing_order = Array(s[:select_nested_order])
+
+        normalized[:nested_order].each do |assoc|
+          new_fields = Array(normalized[:nested][assoc])
+          next if new_fields.empty?
+
+          old_fields = Array(existing_nested[assoc])
+          merged_fields = (old_fields + new_fields).each_with_object([]) do |name, acc|
+            acc << name unless acc.include?(name)
+          end
+          existing_nested = existing_nested.merge(assoc => merged_fields)
+          existing_order << assoc unless existing_order.include?(assoc)
+        end
+
+        s[:select_nested] = existing_nested
+        s[:select_nested_order] = existing_order
       end
+    end
+
+    # Convenience alias for `select` supporting nested include_fields input.
+    #
+    # @see #select
+    # @param fields [Array]
+    # @return [SearchEngine::Relation]
+    def include_fields(*fields)
+      select(*fields)
     end
 
     # Replace the selected fields list (Typesense `include_fields`).
@@ -133,10 +181,17 @@ module SearchEngine
     # @example
     #   rel.reselect(:id, :name)
     def reselect(*fields)
-      normalized = normalize_select(fields)
-      raise ArgumentError, 'reselect: provide at least one non-blank field' if normalized.empty?
+      normalized = normalize_select_input(fields)
 
-      spawn { |s| s[:select] = normalized }
+      base_empty = Array(normalized[:base]).empty?
+      nested_empty = normalized[:nested_order].all? { |a| Array(normalized[:nested][a]).empty? }
+      raise ArgumentError, 'reselect: provide at least one non-blank field' if base_empty && nested_empty
+
+      spawn do |s|
+        s[:select] = normalized[:base]
+        s[:select_nested] = normalized[:nested]
+        s[:select_nested_order] = normalized[:nested_order]
+      end
     end
 
     # Replace all predicates with a new where input.
@@ -201,6 +256,8 @@ module SearchEngine
             s[:orders] = []
           when :select
             s[:select] = []
+            s[:select_nested] = {}
+            s[:select_nested_order] = []
           when :limit
             s[:limit] = nil
           when :offset
@@ -340,9 +397,9 @@ module SearchEngine
       orders = Array(@state[:orders])
       params[:sort_by] = orders.join(',') unless orders.empty?
 
-      # Field selection
-      selected = Array(@state[:select])
-      params[:include_fields] = selected.join(',') unless selected.empty?
+      # Field selection (nested first, then base)
+      include_str = compile_include_fields_string
+      params[:include_fields] = include_str unless include_str.to_s.strip.empty?
 
       # Pagination
       pagination = compute_pagination
@@ -544,6 +601,20 @@ module SearchEngine
       list.frozen? ? list : list.dup.freeze
     end
 
+    # Read-only selected fields state for debugging (base + nested).
+    # @return [Hash]
+    def selected_fields_state
+      base = Array(@state[:select])
+      nested = @state[:select_nested] || {}
+      order = Array(@state[:select_nested_order])
+
+      {
+        base: base.dup.freeze,
+        nested: nested.transform_values { |arr| Array(arr).dup.freeze }.freeze,
+        nested_order: order.dup.freeze
+      }.freeze
+    end
+
     protected
 
     # Spawn a new relation with a deep-duplicated mutable state.
@@ -615,6 +686,10 @@ module SearchEngine
           normalized[:orders] = normalize_order(value)
         when :select
           normalized[:select] = normalize_select(Array(value))
+        when :select_nested
+          normalized[:select_nested] = (value || {})
+        when :select_nested_order
+          normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
         when :joins
           normalized[:joins] = normalize_joins(Array(value))
         when :limit
@@ -663,20 +738,7 @@ module SearchEngine
           fragments.concat(SearchEngine::Filters::Sanitizer.build_from_hash(entry, known_attrs))
           i += 1
         when String
-          if entry.match?(/(?<!\\)\?/) # has unescaped placeholders
-            tail = list[(i + 1)..] || []
-            needed = SearchEngine::Filters::Sanitizer.count_placeholders(entry)
-            args_for_template = tail.first(needed)
-            if args_for_template.length != needed # rubocop:disable Metrics/BlockNesting
-              raise ArgumentError, "expected #{needed} args for #{needed} placeholders, got #{args_for_template.length}"
-            end
-
-            fragments << SearchEngine::Filters::Sanitizer.apply_placeholders(entry, args_for_template)
-            i += 1 + needed
-          else
-            fragments << entry.to_s
-            i += 1
-          end
+          i = normalize_where_process_string!(fragments, entry, list, i)
         when Symbol
           # Treat symbol as raw string fragment for compatibility
           fragments << entry.to_s
@@ -692,6 +754,23 @@ module SearchEngine
       end
 
       fragments
+    end
+
+    def normalize_where_process_string!(fragments, entry, list, i)
+      if entry.match?(/(?<!\\)\?/) # has unescaped placeholders
+        tail = list[(i + 1)..] || []
+        needed = SearchEngine::Filters::Sanitizer.count_placeholders(entry)
+        args_for_template = tail.first(needed)
+        if args_for_template.length != needed
+          raise ArgumentError, "expected #{needed} args for #{needed} placeholders, got #{args_for_template.length}"
+        end
+
+        fragments << SearchEngine::Filters::Sanitizer.apply_placeholders(entry, args_for_template)
+        i + 1 + needed
+      else
+        fragments << entry.to_s
+        i + 1
+      end
     end
 
     # Parse and normalize order input into an array of "field:dir" strings.
@@ -752,6 +831,7 @@ module SearchEngine
       last_by_field.values.sort_by { |h| h[:idx] }.map { |h| h[:str] }
     end
 
+    # Base-only normalization used internally and for legacy callers.
     def normalize_select(fields)
       list = Array(fields).flatten.compact
       return [] if list.empty?
@@ -773,6 +853,58 @@ module SearchEngine
         ordered << name unless ordered.include?(name)
       end
       ordered
+    end
+
+    # Extended normalization supporting nested association selections.
+    # Returns a Hash with keys: :base (Array<String>), :nested (Hash<Symbol,Array<String>>), :nested_order (Array<Symbol>).
+    def normalize_select_input(fields)
+      list = Array(fields).flatten.compact
+      return { base: [], nested: {}, nested_order: [] } if list.empty?
+
+      base = []
+      nested = {}
+      nested_order = []
+
+      add_base = ->(val) { base.concat(normalize_select([val])) }
+
+      add_nested = lambda do |assoc, values|
+        key = assoc.to_sym
+        @klass.join_for(key)
+
+        items = case values
+                when Array then values
+                when nil then []
+                else [values]
+                end
+        names = items.flatten.compact.map(&:to_s).map(&:strip).reject(&:empty?)
+        return if names.empty?
+
+        existing = Array(nested[key])
+        merged = (existing + names).each_with_object([]) { |n, acc| acc << n unless acc.include?(n) }
+        nested[key] = merged
+        nested_order << key unless nested_order.include?(key)
+      end
+
+      i = 0
+      while i < list.length
+        entry = list[i]
+        case entry
+        when Hash
+          entry.each { |k, v| add_nested.call(k, v) }
+          i += 1
+        when Symbol, String
+          add_base.call(entry)
+          i += 1
+        when Array
+          inner = Array(entry).flatten.compact
+          inner.each { |el| list << el }
+          i += 1
+        else
+          raise ArgumentError, "select/include_fields: unsupported input #{entry.class}"
+        end
+      end
+
+      { base: base.uniq, nested: nested, nested_order: nested_order }
     end
 
     def coerce_integer_min(value, name, min)
@@ -831,19 +963,36 @@ module SearchEngine
       unknown = hash.keys.map(&:to_sym) - known
       return if unknown.empty?
 
-      # Respect strict_fields toggle: when false, allow unknown fields here to avoid
-      # duplicating parser-time validation and to keep Relation tolerant in relaxed mode.
       begin
         cfg = SearchEngine.config
         return unless cfg.respond_to?(:strict_fields) ? cfg.strict_fields : true
       rescue StandardError
-        # fall through to strict behavior
+        # Intentionally ignore config access errors and fall back to strict behavior
       end
 
       klass_name = klass_name_for_inspect
       known_list = known.map(&:to_s).sort.join(', ')
       unknown_name = unknown.first.inspect
       raise ArgumentError, "Unknown attribute #{unknown_name} for #{klass_name}. Known: #{known_list}"
+    end
+
+    # Build include_fields string with nested association segments first, then base fields.
+    def compile_include_fields_string
+      nested_order = Array(@state[:select_nested_order])
+      nested_map = @state[:select_nested] || {}
+
+      segments = []
+      nested_order.each do |assoc|
+        fields = Array(nested_map[assoc]).map(&:to_s).reject(&:empty?)
+        next if fields.empty?
+
+        segments << "$#{assoc}(#{fields.join(',')})"
+      end
+
+      base = Array(@state[:select])
+      segments.concat(base) unless base.empty?
+
+      segments.join(',')
     end
 
     # Ensure the relation has executed the search and memoized the Result.
