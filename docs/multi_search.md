@@ -139,6 +139,27 @@ end
 
 Errors are mapped to `SearchEngine::Errors` and, when available, the first failing label and status are included in the error message.
 
+### Memoization & Ergonomics
+
+- Single roundtrip: the HTTP request is performed exactly once by `Client#multi_search`.
+- The raw response array is stored privately inside `MultiResult` and hydration into `{ label => Result }` occurs once.
+- All accessors and helpers operate purely in-memory and never perform HTTP.
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Client
+  Caller->>Client: multi_search(searches[])
+  Client-->>Caller: raw response
+  Caller->>Caller: hydrate once into MultiResult
+```
+
+Helpers:
+
+- `#to_h` returns a shallow copy of the mapping; insertion order preserved
+- `#each_label` yields `(label, result)` in order; returns Enumerator without a block
+- `#map_labels` is a convenience implemented via `each_label` and is equally pure
+
 ### See also
 
 - [Client](./client.md) for URL/common params and error mapping

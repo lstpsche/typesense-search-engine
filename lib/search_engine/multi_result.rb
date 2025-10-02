@@ -14,6 +14,10 @@ module SearchEngine
   # falls back to the collection registry if the raw result exposes a
   # collection name; otherwise OpenStruct is used.
   #
+  # Network calls are performed only once by the caller (e.g.,
+  # {SearchEngine.multi_search_result}). This wrapper operates purely
+  # in-memory and will never make HTTP requests.
+  #
   # @example
   #   mr = SearchEngine::MultiResult.new(
   #     labels: [:products, :brands],
@@ -34,12 +38,15 @@ module SearchEngine
       @labels = canonicalize_labels(labels)
       @map = {}
 
-      validate_sizes!(@labels, raw_results, klasses)
+      # Store the raw array privately to document the one-time network call and hydration
+      @raw_results = Array(raw_results).freeze
+
+      validate_sizes!(@labels, @raw_results, klasses)
 
       klass_by_index = build_klass_index(@labels, klasses)
 
       @labels.each_with_index do |label, index|
-        raw = raw_results[index]
+        raw = @raw_results[index]
         kls = klass_by_index[index] || infer_klass_from_raw(raw)
         @map[label] = SearchEngine::Result.new(raw, klass: kls)
       end
@@ -76,6 +83,7 @@ module SearchEngine
     end
 
     # Shallow Hash mapping labels to results.
+    # Pure helper: returns a shallow copy and never performs HTTP.
     # @return [Hash{Symbol=>SearchEngine::Result}]
     def to_h
       @map.dup
@@ -83,12 +91,26 @@ module SearchEngine
 
     # Iterate over (label, result) in insertion order.
     # Yields a two-element array to support destructuring via `|(label, result)|`.
+    # Pure helper: operates on cached hydration and never performs HTTP.
     # @yieldparam pair [Array(Symbol, SearchEngine::Result)]
     # @return [Enumerator] when no block is given
     def each_label
       return enum_for(:each_label) unless block_given?
 
       @labels.each { |l| yield([l, @map[l]]) }
+    end
+
+    # Convenience to map over (label, result) pairs.
+    # Implemented via {#each_label}, purely in-memory.
+    # @yieldparam label [Symbol]
+    # @yieldparam result [SearchEngine::Result]
+    # @return [Enumerator, Array] Enumerator when no block is given; otherwise the mapped Array
+    # @example
+    #   mr.map_labels { |label, result| [label, result.found] }
+    def map_labels
+      return each_label.map unless block_given?
+
+      each_label.map { |(label, result)| yield(label, result) }
     end
 
     private
