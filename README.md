@@ -3,7 +3,7 @@
 Mountless Rails::Engine wrapping Typesense with idiomatic Rails integration and AR-like querying.
 
 ## Docs
-See [docs/index.md](./docs/index.md) for the full documentation set (Installation, Configuration, Client, Models, Observability).
+See [docs/index.md](./docs/index.md) for the full documentation set. Direct links: [Relation](./docs/relation.md), [Materializers](./docs/materializers.md).
 
 ## Quick Start
 

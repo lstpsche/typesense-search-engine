@@ -1,6 +1,6 @@
 [← Back to Index](./index.md)
 
-[Client](./client.md) · [Relation](./relation.md)
+[Client](./client.md) · [Relation](./relation.md) · [Observability](./observability.md)
 
 ## Result materialization and hydration
 
@@ -83,6 +83,8 @@ flowchart TD
 - `count` → if loaded, uses memoized `found`; otherwise performs a minimal request
 - `exists?` → if loaded, uses memoized `found`; otherwise performs a minimal request
 
+Concurrency: first load is synchronized across threads; subsequent materializer calls reuse the memo without locking.
+
 ### Minimal request for `count` / `exists?`
 
 When the relation has no memo yet, `count`/`exists?` issue a minimal search using the same compiled filters/sort and query defaults, but forcing:
@@ -96,9 +98,10 @@ The response’s `found` is returned and no full `Result` is memoized.
 
 ```ruby
 rel = SearchEngine::Product.where(active: true).limit(10)
-rel.to_a   # triggers fetch and memoizes
-rel.count  # uses memoized found
-rel.ids    # plucks id from cached hits
+rel.to_a         # triggers fetch and memoizes
+rel.count        # uses memoized found
+rel.ids          # plucks id from cached hits
+rel.pluck(:name) # plucks a single field
 ```
 
 Callouts:
