@@ -1,0 +1,69 @@
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
+# Join Declarations on Base
+
+Server‑side joins require lightweight association metadata declared on your model class. This page documents the model‑level DSL, the per‑class registry, and how the compiler/validator will consume this metadata.
+
+## DSL
+
+Declare joinable associations on your model using `join`:
+
+```ruby
+class SearchEngine::Book < SearchEngine::Base
+  collection "books"
+  attribute :id, :integer
+  attribute :author_id, :integer
+
+  join :authors, collection: "authors", local_key: :author_id, foreign_key: :id
+  join :orders,  collection: "orders",  local_key: :id,        foreign_key: :book_id
+end
+```
+
+- `name` (Symbol): logical association name.
+- `collection` (String): target Typesense collection name.
+- `local_key` (Symbol): local attribute used as the join key.
+- `foreign_key` (Symbol): foreign key in the target collection.
+
+## Registry and Read APIs
+
+- `joins_config` returns a frozen mapping `{ name(Symbol) => JoinConfig(Hash) }`.
+- `join_for(name)` returns a single normalized config or raises `SearchEngine::Errors::UnknownJoin` with suggestions.
+
+The registry is per‑class, immutable to callers, and uses copy‑on‑write for safe updates. Subclasses inherit parent declarations and may add new ones; duplicate names raise.
+
+## Association Table Pattern
+
+Render declared joins for a model to reason about relationships:
+
+| Name    | Target collection | Local key   | Foreign key | Notes |
+|---------|-------------------|-------------|-------------|-------|
+| authors | authors           | author_id   | id          | one‑to‑many by author_id |
+| orders  | orders            | id          | book_id     | order items linked to book |
+
+## Mermaid Overview
+
+```mermaid
+flowchart LR
+  subgraph Collections
+    B[books]
+    A[authors]
+    O[orders]
+  end
+
+  B -- author_id = id --> A
+  B -- id = book_id --> O
+```
+
+## Validation & Errors
+
+- Missing or blank `collection` → `ArgumentError`.
+- Unknown `local_key` (not declared via `attribute`) → `SearchEngine::Errors::InvalidField` with a hint.
+- Duplicate `join` name → `ArgumentError` indicating the conflict.
+- Unknown lookup via `join_for(:name)` → `SearchEngine::Errors::UnknownJoin` listing available names.
+
+## FAQ
+
+- Inheritance: subclasses start with a snapshot of parent joins and can add their own. Overriding an existing name raises to avoid ambiguity.
+- Types: the normalized record stores `:name, :collection, :local_key, :foreign_key`. Future compiler passes may add type hints; the DSL remains unchanged.
+- Compiler usage: the compiler reads `joins_config`/`join_for` to determine target collection and key mapping for server‑side joins without loading foreign models.
+
