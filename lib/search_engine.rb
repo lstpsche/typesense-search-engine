@@ -19,6 +19,8 @@ require 'search_engine/observability'
 require 'search_engine/schema'
 require 'search_engine/indexer'
 require 'search_engine/mapper'
+require 'search_engine/sources'
+require 'search_engine/partitioner'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
@@ -259,38 +261,45 @@ module SearchEngine
     # @param error [SearchEngine::Errors::Api]
     # @param labels [Array<Symbol>] ordered labels for the search list
     # @return [SearchEngine::Errors::Api]
-    def augment_multi_api_error(error, labels)
-      label_msg = nil
-      if error.respond_to?(:body) && error.body.is_a?(Hash)
-        results = error.body['results'] || error.body[:results]
+    def augment_multi_api_error(error, labels) # rubocop:disable Metrics/PerceivedComplexity
+      body = error.body
+      failing_index = nil
+      failing_status = nil
+
+      if body.is_a?(Hash)
+        results = body['results'] || body[:results]
         if results.is_a?(Array)
-          failing_index = nil
-          failing_status = nil
           results.each_with_index do |item, idx|
-            code = item.is_a?(Hash) ? (item['status'] || item[:status] || item['code'] || item[:code]) : nil
-            next if code.nil? || code.to_i == 200
+            status = item.is_a?(Hash) ? (item['status'] || item[:status] || item['code'] || item[:code]) : nil
+            next if status.nil? || status.to_i == 200
 
             failing_index = idx
-            failing_status = code.to_i
+            failing_status = status.to_i
             break
-          end
-          if !failing_index.nil? && labels[failing_index]
-            label_msg = " for label :#{labels[failing_index]} (status #{failing_status})"
           end
         end
       end
 
-      base = error.message.to_s
-      suffix = if label_msg
-                 " Multi-search failed#{label_msg}."
-               else
-                 " Multi-search failed for #{labels.size} searches (status " \
-                 "#{error.status}). Label-level context unavailable."
-               end
+      if failing_index && labels[failing_index]
+        label = labels[failing_index]
+        msg = "Multi-search failed for label :#{label} (status #{failing_status})."
+        return Errors::Api.new(msg, status: error.status, body: error.body)
+      end
 
-      Errors::Api.new("#{base}#{suffix}", status: error.status, body: error.body)
-    rescue StandardError
-      error
+      # Fallback: summarize
+      codes = []
+      if body.is_a?(Hash)
+        res = body['results'] || body[:results]
+        if res.is_a?(Array)
+          res.each do |item|
+            c = item.is_a?(Hash) ? (item['status'] || item[:status] || item['code'] || item[:code]) : nil
+            codes << c.to_i if c
+          end
+        end
+      end
+      msg = "multi_search failed for #{labels.size} searches (status #{error.status})."
+      msg += " Codes=#{codes}." unless codes.empty?
+      Errors::Api.new(msg, status: error.status, body: error.body)
     end
   end
 end

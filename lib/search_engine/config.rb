@@ -171,6 +171,25 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for partitioning.
+    class PartitioningConfig
+      # @return [Proc, nil] optional resolver for default physical collection
+      attr_accessor :default_into_resolver
+      # @return [Integer, nil] timeout in ms for before hook
+      attr_accessor :before_hook_timeout_ms
+      # @return [Integer, nil] timeout in ms for after hook
+      attr_accessor :after_hook_timeout_ms
+      # @return [Integer] maximum error samples to include in payloads
+      attr_accessor :max_error_samples
+
+      def initialize
+        @default_into_resolver = nil
+        @before_hook_timeout_ms = nil
+        @after_hook_timeout_ms = nil
+        @max_error_samples = 5
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -201,6 +220,7 @@ module SearchEngine
       @indexer = IndexerConfig.new
       @sources = SourcesConfig.new
       @mapper = MapperConfig.new
+      @partitioning = PartitioningConfig.new
       nil
     end
 
@@ -226,6 +246,12 @@ module SearchEngine
     # @return [SearchEngine::Config::MapperConfig]
     def mapper
       @mapper ||= MapperConfig.new
+    end
+
+    # Expose partitioning configuration.
+    # @return [SearchEngine::Config::PartitioningConfig]
+    def partitioning
+      @partitioning ||= PartitioningConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -309,7 +335,8 @@ module SearchEngine
         schema: schema_hash_for_to_h,
         indexer: indexer_hash_for_to_h,
         sources: sources_hash_for_to_h,
-        mapper: mapper_hash_for_to_h
+        mapper: mapper_hash_for_to_h,
+        partitioning: partitioning_hash_for_to_h
       }
     end
 
@@ -359,6 +386,14 @@ module SearchEngine
         strict_unknown_keys: mapper.strict_unknown_keys ? true : false,
         coercions: mapper.coercions,
         max_error_samples: mapper.max_error_samples
+      }
+    end
+
+    def partitioning_hash_for_to_h
+      {
+        before_hook_timeout_ms: partitioning.before_hook_timeout_ms,
+        after_hook_timeout_ms: partitioning.after_hook_timeout_ms,
+        max_error_samples: partitioning.max_error_samples
       }
     end
 

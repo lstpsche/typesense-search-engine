@@ -118,4 +118,35 @@ Runtime API:
 - `docs, report = mapper.map_batch!(rows, batch_index: 1)`
 - Emits `search_engine.mapper.batch_mapped` per batch with: `collection`, `batch_index`, `docs_count`, `duration_ms`, `missing_required_count`, `extra_keys_count`, `invalid_type_count`, `coerced_count`.
 
-Backlinks: [Index](./index.md), [Observability](./observability.md), [Client](./client.md)
+### Partitioning
+
+Backlinks: [Index](./index.md), [Sources](./indexer.md#data-sources), [Mapper](./indexer.md#mapper)
+
+```ruby
+index do
+  partitions { Shop.pluck(:id) }
+  partition_fetch { |shop_id| ::Product.where(shop_id: shop_id).in_batches(of: 2000) }
+  before_partition { |shop_id| delete_by filter_by: "shop_id:=#{shop_id}" }
+  after_partition  { |shop_id| # custom metrics }
+end
+```
+
+```ruby
+SearchEngine::Indexer.rebuild_partition!(SearchEngine::Product, partition: shop_id)
+```
+
+```mermaid
+sequenceDiagram
+  participant Orchestrator
+  participant Partition
+  Orchestrator->>Partition: before_partition
+  Orchestrator->>Partition: import batches
+  Orchestrator->>Partition: after_partition
+```
+
+Notes:
+- `partitions` must return an Enumerable of keys; `partition_fetch` must return an Enumerable of batches (Arrays of records).
+- Hooks are optional; if provided, they must accept exactly one argument (the partition key).
+- When `partition_fetch` is missing, the source adapter is used with the partition passed through; for ActiveRecord sources, provide a `Hash`/`Range` partition or define `partition_fetch`.
+
+[← Back to Index](./index.md)
