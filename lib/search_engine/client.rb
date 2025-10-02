@@ -79,31 +79,52 @@ module SearchEngine
       SearchEngine::Result.new(result, klass: klass)
     end
 
-    # Execute a federated multi-search request.
+    # Resolve a logical collection name that might be an alias to the physical collection name.
     #
-    # @param searches [Array<Hash>] each item includes at least :collection and query params
-    # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
-    # @return [Hash] Parsed response from Typesense multi-search
-    # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
-    def multi_search(searches:, url_opts: {})
-      validate_multi!(searches)
-
-      cache_params = derive_cache_opts(url_opts)
+    # @param logical_name [String]
+    # @return [String, nil] physical collection name when alias exists; nil when alias not found
+    # @raise [SearchEngine::Errors::*] on network or API errors other than 404
+    def resolve_alias(logical_name)
+      name = logical_name.to_s
       ts = typesense
-
       start = current_monotonic_ms
-      path = '/multi_search'
-      body = { searches: searches }
+      path = "/aliases/#{name}"
 
-      # Helper-level instrumentation emits `search_engine.multi_search`. Keep client thin here.
-      result = with_exception_mapping(:post, path, cache_params, start) do
-        ts.multi_search.perform(body, common_params: cache_params)
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.aliases[name].retrieve
       end
 
-      duration = current_monotonic_ms - start
-      instrument(:post, path, duration, cache_params)
-      log_success(:post, path, start, cache_params)
-      result
+      (result && (result['collection_name'] || result[:collection_name])).to_s
+    rescue Errors::Api => error
+      return nil if error.status.to_i == 404
+
+      raise
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # Retrieve the live schema for a physical collection name.
+    #
+    # @param collection_name [String]
+    # @return [Hash, nil] schema hash when found; nil when collection not found (404)
+    # @raise [SearchEngine::Errors::*] on other network or API errors
+    def retrieve_collection_schema(collection_name)
+      name = collection_name.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{name}"
+
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.collections[name].retrieve
+      end
+
+      symbolize_keys_deep(result)
+    rescue Errors::Api => error
+      return nil if error.status.to_i == 404
+
+      raise
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
     private
@@ -255,6 +276,19 @@ module SearchEngine
 
     def current_monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+    end
+
+    def symbolize_keys_deep(obj)
+      case obj
+      when Hash
+        obj.each_with_object({}) do |(k, v), h|
+          h[k.to_sym] = symbolize_keys_deep(v)
+        end
+      when Array
+        obj.map { |e| symbolize_keys_deep(e) }
+      else
+        obj
+      end
     end
   end
 end

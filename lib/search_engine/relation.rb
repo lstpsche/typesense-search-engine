@@ -386,20 +386,7 @@ module SearchEngine
         lines << "  select: #{params[:include_fields]}"
       end
 
-      pagination = {}
-      pagination[:page] = params[:page] if params.key?(:page)
-      pagination[:per_page] = params[:per_page] if params.key?(:per_page)
-      if pagination.key?(:page) || pagination.key?(:per_page)
-        p = pagination[:page]
-        per = pagination[:per_page]
-        if p && per
-          lines << "  page/per: #{p}/#{per}"
-        elsif p && !per
-          lines << "  page/per: #{p}/"
-        elsif per && !p
-          lines << "  page/per: /#{per}"
-        end
-      end
+      add_pagination_line!(lines, params)
 
       out = lines.join("\n")
       puts(out) if to == :stdout
@@ -969,6 +956,20 @@ module SearchEngine
       return str if str.length <= max
 
       "#{str[0, max]}..."
+    end
+
+    def add_pagination_line!(lines, params)
+      page = params[:page]
+      per = params[:per_page]
+      return unless page || per
+
+      if page && per
+        lines << "  page/per: #{page}/#{per}"
+      elsif page
+        lines << "  page/per: #{page}/"
+      elsif per
+        lines << "  page/per: /#{per}"
+      end
     end
   end
 end

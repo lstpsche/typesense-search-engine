@@ -37,13 +37,13 @@ Layout/MultilineMethodCallBraceLayout:
   EnforcedStyle: new_line
 
 Metrics/AbcSize:
-  Max: 60
+  Max: 50
 
 Metrics/CyclomaticComplexity:
   Enabled: false
 
 Metrics/PerceivedComplexity:
-  Max: 30
+  Max: 20
 
 Layout/LineLength:
   Max: 120
