@@ -70,6 +70,10 @@ module SearchEngine
 
         parent_retention = @schema_retention || {}
         subclass.instance_variable_set(:@schema_retention, parent_retention.dup)
+
+        # Inherit joins registry via copy-on-write snapshot
+        parent_joins = @joins_config || {}
+        subclass.instance_variable_set(:@joins_config, parent_joins.dup.freeze)
       end
 
       # Return a fresh, immutable relation bound to this model class.
@@ -123,6 +127,90 @@ module SearchEngine
 
         instance_variable_set(:@__stale_filter_proc__, block)
         nil
+      end
+
+      # Declare a joinable association for server-side joins.
+      #
+      # Registers a normalized, immutable configuration record under the provided
+      # name. Duplicate names raise with an actionable message. Validation ensures
+      # collection is present and local_key is a declared attribute (when available).
+      #
+      # @param name [#to_sym] logical association name
+      # @param collection [#to_s] target collection name
+      # @param local_key [#to_sym] local attribute used for join key
+      # @param foreign_key [#to_sym] foreign key name in the target collection
+      # @return [void]
+      # @raise [ArgumentError] when inputs are invalid or duplicate name
+      def join(name, collection:, local_key:, foreign_key:)
+        assoc_name = name.to_sym
+        raise ArgumentError, 'join name must be non-empty' if assoc_name.to_s.strip.empty?
+
+        coll = collection.to_s
+        raise ArgumentError, 'collection must be a non-empty String' if coll.strip.empty?
+
+        lk = local_key.to_sym
+        fk = foreign_key.to_sym
+
+        # Validate local_key against declared attributes when available
+        if instance_variable_defined?(:@attributes) && !(@attributes || {}).key?(lk)
+          raise SearchEngine::Errors::InvalidField,
+                "Unknown local_key :#{lk} for #{self}. Declare 'attribute :#{lk}, :integer' first."
+        end
+
+        rec = {
+          name: assoc_name,
+          collection: coll,
+          local_key: lk,
+          foreign_key: fk
+        }.freeze
+
+        current = @joins_config || {}
+        if current.key?(assoc_name)
+          raise ArgumentError,
+                "Join :#{assoc_name} already defined for #{self}. " \
+                'Use a different name or remove the previous declaration.'
+        end
+
+        # copy-on-write write path
+        new_map = current.dup
+        new_map[assoc_name] = rec
+        @joins_config = new_map.freeze
+
+        # lightweight instrumentation (no-op if AS::N is unavailable)
+        if defined?(SearchEngine::Instrumentation)
+          SearchEngine::Instrumentation.instrument(
+            'search_engine.joins.declared',
+            model: self.name, name: assoc_name, collection: coll
+          )
+        end
+
+        nil
+      end
+
+      # Read-only view of join declarations for this class.
+      #
+      # Returns a frozen Hash mapping association name => configuration record.
+      # Inheritance uses a snapshot copy-on-write strategy: subclasses start with
+      # the parent's snapshot and subsequent writes do not mutate the parent.
+      #
+      # @return [Hash{Symbol=>Hash}]
+      def joins_config
+        (@joins_config || {}).dup.freeze
+      end
+
+      # Lookup a single join configuration by name.
+      #
+      # @param name [#to_sym]
+      # @return [Hash] normalized configuration record
+      # @raise [SearchEngine::Errors::UnknownJoin]
+      def join_for(name)
+        key = name.to_sym
+        cfg = (@joins_config || {})[key]
+        return cfg if cfg
+
+        available = (@joins_config || {}).keys
+        raise SearchEngine::Errors::UnknownJoin,
+              "Unknown join :#{key} for #{self}. Available: #{available.inspect}."
       end
     end
 

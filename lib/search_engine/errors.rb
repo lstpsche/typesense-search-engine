@@ -62,5 +62,11 @@ module SearchEngine
     # Raised when a value cannot be coerced to the declared attribute type, or
     # when its shape is incompatible (e.g., empty array for IN/NOT IN).
     class InvalidType < Error; end
+
+    # Raised when a requested join association is not declared for a model.
+    #
+    # Typical cause: a typo or referencing an association that has not been
+    # registered via {SearchEngine::Base.join}.
+    class UnknownJoin < Error; end
   end
 end
