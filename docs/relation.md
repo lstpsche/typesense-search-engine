@@ -1,5 +1,7 @@
 [← Back to Index](./index.md) · [Client](./client.md) · [Compiler](./compiler.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md)
 
+> See also: [Debugging & Explain](./debugging.md)
+
 # Relation
 
 Relation is an immutable, chainable query object bound to a model class. It accumulates normalized query state without mutating previous instances.

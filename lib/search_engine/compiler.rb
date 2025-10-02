@@ -24,13 +24,32 @@ module SearchEngine
     # - Raw fragments are passed-through
     #
     # @param ast [SearchEngine::AST::Node, Array<SearchEngine::AST::Node>, nil]
-    # @param klass [Class] optional model class for future type hints (unused)
+    # @param klass [Class] optional model class for context (used for observability)
     # @return [String]
-    def compile(ast, klass: nil) # rubocop:disable Lint/UnusedMethodArgument
+    # @note Emits "search_engine.compile" via ActiveSupport::Notifications with
+    #   payload: { collection, klass, node_count, duration_ms, source: :ast }
+    def compile(ast, klass: nil)
       root = coerce_root(ast)
       return '' unless root
 
-      compile_node(root, parent_prec: 0)
+      compiled = nil
+      if defined?(ActiveSupport::Notifications)
+        start_ms = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+        payload = {
+          collection: safe_collection_for_klass(klass),
+          klass: safe_klass_name(klass),
+          node_count: count_nodes(root),
+          duration_ms: nil,
+          source: :ast
+        }
+        ActiveSupport::Notifications.instrument('search_engine.compile', payload) do
+          compiled = compile_node(root, parent_prec: 0)
+          payload[:duration_ms] = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond) - start_ms
+        end
+        compiled
+      else
+        compile_node(root, parent_prec: 0)
+      end
     end
 
     # --- Internals ---------------------------------------------------------
@@ -152,5 +171,27 @@ module SearchEngine
       end
     end
     private_class_method :precedence
+
+    def count_nodes(node)
+      return 0 unless node.is_a?(SearchEngine::AST::Node)
+
+      1 + Array(node.children).sum { |child| count_nodes(child) }
+    end
+    private_class_method :count_nodes
+
+    def safe_klass_name(klass)
+      return nil unless klass
+
+      klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
+    end
+    private_class_method :safe_klass_name
+
+    def safe_collection_for_klass(klass)
+      return nil unless klass
+      return klass.collection if klass.respond_to?(:collection) && klass.collection
+
+      nil
+    end
+    private_class_method :safe_collection_for_klass
   end
 end
