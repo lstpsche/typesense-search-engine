@@ -74,32 +74,25 @@ module SearchEngine
     def compile_node(node, parent_prec:)
       case node
       when SearchEngine::AST::Eq
-        binary(node.field, ':=', quote(node.value))
+        compile_binary(node.field, ':=', node.value)
       when SearchEngine::AST::NotEq
-        binary(node.field, ':!=', quote(node.value))
+        compile_binary(node.field, ':!=', node.value)
       when SearchEngine::AST::Gt
-        binary(node.field, ':>', quote(node.value))
+        compile_binary(node.field, ':>', node.value)
       when SearchEngine::AST::Gte
-        binary(node.field, ':>=', quote(node.value))
+        compile_binary(node.field, ':>=', node.value)
       when SearchEngine::AST::Lt
-        binary(node.field, ':<', quote(node.value))
+        compile_binary(node.field, ':<', node.value)
       when SearchEngine::AST::Lte
-        binary(node.field, ':<=', quote(node.value))
+        compile_binary(node.field, ':<=', node.value)
       when SearchEngine::AST::In
-        binary(node.field, ':=', quote(node.values))
+        compile_binary(node.field, ':=', node.values)
       when SearchEngine::AST::NotIn
-        binary(node.field, ':!=', quote(node.values))
+        compile_binary(node.field, ':!=', node.values)
       when SearchEngine::AST::And
         compile_boolean(node.children, ' && ', parent_prec: parent_prec, my_prec: precedence(:and))
       when SearchEngine::AST::Or
-        # For clarity, always parenthesize right-hand child when it is an AND or a grouped expression
-        compiled = compile_boolean(node.children, ' || ', parent_prec: parent_prec, my_prec: precedence(:or))
-        # If the rightmost child is an And node and not already grouped, ensure parentheses
-        if node.children.length == 2 && node.children.last.is_a?(SearchEngine::AST::And)
-          left_str, right_str = compiled.split(' || ', 2)
-          compiled = "#{left_str} || (#{right_str})"
-        end
-        compiled
+        compile_or(node, parent_prec)
       when SearchEngine::AST::Group
         "(#{compile_node(node.children.first, parent_prec: 0)})"
       when SearchEngine::AST::Raw
@@ -113,6 +106,21 @@ module SearchEngine
       end
     end
     private_class_method :compile_node
+
+    def compile_or(node, parent_prec)
+      compiled = compile_boolean(node.children, ' || ', parent_prec: parent_prec, my_prec: precedence(:or))
+      if node.children.length == 2 && node.children.last.is_a?(SearchEngine::AST::And)
+        left_str, right_str = compiled.split(' || ', 2)
+        compiled = "#{left_str} || (#{right_str})"
+      end
+      compiled
+    end
+    private_class_method :compile_or
+
+    def compile_binary(field, op, value)
+      binary(field, op, quote(value))
+    end
+    private_class_method :compile_binary
 
     def binary(field, op, rhs)
       "#{field}#{op}#{rhs}"

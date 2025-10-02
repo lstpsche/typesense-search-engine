@@ -65,47 +65,71 @@ module SearchEngine
 
         parts = []
         if multi
-          parts << '[se.multi]'
-          # Prefer new helper-level payload keys; fallback to older client-level shape
-          labels = Array(p[:labels]).map(&:to_s)
-          labels = Array(p[:collections]).map(&:to_s) if labels.empty? || labels.all?(&:empty?)
-          count = p[:searches_count]
-          count ||= (p[:params].is_a?(Array) ? p[:params].size : nil)
-
-          parts << "count=#{count}" if count
-          parts << "labels=#{labels.join(',')}" unless labels.empty?
+          parts.concat(multi_parts(p))
         else
-          parts << '[se.search]'
-          parts << "collection=#{p[:collection]}" if p[:collection]
+          parts.concat(single_parts(p))
         end
 
-        status_val = p.key?(:http_status) ? p[:http_status] : (p[:status] || 'ok')
-        parts << "status=#{status_val}"
-        parts << "duration=#{duration_ms}ms"
+        parts.concat(status_parts(p, duration_ms))
+        parts.concat(url_parts(p))
 
-        url = p[:url_opts]
-        if url.is_a?(Hash)
-          parts << "cache=#{url[:use_cache] ? true : false}" if url.key?(:use_cache)
-          parts << "ttl=#{url[:cache_ttl]}" if url.key?(:cache_ttl)
-        end
-
-        if include_params && !multi
-          # Only include whitelisted keys for single searches
-          params_hash = p[:params].is_a?(Hash) ? p[:params] : {}
-          %i[q query_by per_page page infix].each do |key|
-            next unless params_hash.key?(key)
-
-            parts << format_param(key, params_hash[key])
-          end
-          parts << 'filter_by=***' if params_hash.key?(:filter_by)
-        end
+        parts.concat(param_parts(p)) if include_params && !multi
 
         line = parts.join(' ')
         log_with_level(logger, severity, line)
       rescue StandardError
         nil
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
+
+      def self.multi_parts(payload)
+        labels = Array(payload[:labels]).map(&:to_s)
+        labels = Array(payload[:collections]).map(&:to_s) if labels.empty? || labels.all?(&:empty?)
+        count = payload[:searches_count]
+        count ||= (payload[:params].is_a?(Array) ? payload[:params].size : nil)
+
+        parts = ['[se.multi]']
+        parts << "count=#{count}" if count
+        parts << "labels=#{labels.join(',')}" unless labels.empty?
+        parts
+      end
+      private_class_method :multi_parts
+
+      def self.single_parts(payload)
+        parts = ['[se.search]']
+        parts << "collection=#{payload[:collection]}" if payload[:collection]
+        parts
+      end
+      private_class_method :single_parts
+
+      def self.status_parts(payload, duration_ms)
+        status_val = payload.key?(:http_status) ? payload[:http_status] : (payload[:status] || 'ok')
+        ["status=#{status_val}", "duration=#{duration_ms}ms"]
+      end
+      private_class_method :status_parts
+
+      def self.url_parts(payload)
+        url = payload[:url_opts]
+        return [] unless url.is_a?(Hash)
+
+        results = []
+        results << "cache=#{url[:use_cache] ? true : false}" if url.key?(:use_cache)
+        results << "ttl=#{url[:cache_ttl]}" if url.key?(:cache_ttl)
+        results
+      end
+      private_class_method :url_parts
+
+      def self.param_parts(payload)
+        params_hash = payload[:params].is_a?(Hash) ? payload[:params] : {}
+        parts = []
+        %i[q query_by per_page page infix].each do |key|
+          next unless params_hash.key?(key)
+
+          parts << format_param(key, params_hash[key])
+        end
+        parts << 'filter_by=***' if params_hash.key?(:filter_by)
+        parts
+      end
+      private_class_method :param_parts
 
       # Map a Symbol severity to Logger integer constant.
       def self.map_level(level)
@@ -118,16 +142,30 @@ module SearchEngine
         end
       end
 
-      # Should we log at this severity for the given logger?
+      # Minimal check for logger level
       def self.allow_log?(logger, severity)
         return true unless logger.respond_to?(:level)
 
         logger.level <= severity
-      rescue StandardError
-        true
+      end
+      private_class_method :allow_log?
+
+      def self.format_param(key, value)
+        case key
+        when :q then %(q="#{SearchEngine::Observability.truncate_q(value)}")
+        else "#{key}=#{value}"
+        end
+      end
+      private_class_method :format_param
+
+      def self.default_logger
+        if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+          Rails.logger
+        else
+          ::Logger.new($stdout)
+        end
       end
 
-      # Log a message honoring the requested severity.
       def self.log_with_level(logger, severity, line)
         case severity
         when Logger::DEBUG then logger.debug(line)
@@ -136,31 +174,7 @@ module SearchEngine
         else logger.error(line)
         end
       end
-
-      # Format key=value, quoting strings when they include spaces.
-      def self.format_param(key, value)
-        if value.is_a?(String)
-          %(#{key}="#{value}")
-        else
-          %(#{key}=#{value})
-        end
-      end
-
-      # Default logger to stdout when config logger is unavailable.
-      def self.default_logger
-        cfg_logger = begin
-          SearchEngine.config.logger
-        rescue StandardError
-          nil
-        end
-        return cfg_logger if cfg_logger
-
-        l = Logger.new($stdout)
-        l.level = Logger::INFO
-        l
-      end
-
-      private_class_method :emit_line, :map_level, :allow_log?, :log_with_level, :format_param, :default_logger
+      private_class_method :log_with_level
     end
   end
 end

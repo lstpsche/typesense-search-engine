@@ -278,24 +278,35 @@ module SearchEngine
       end
 
       def coerce_value(value, type_hint: nil, field: nil, klass: nil)
-        # Booleans from strings when type is boolean
-        if type_boolean?(type_hint) && value.is_a?(String)
-          lc = value.strip.downcase
-          return true if lc == 'true'
-          return false if lc == 'false'
+        coerced_bool = coerce_boolean(value, type_hint)
+        return coerced_bool unless coerced_bool.equal?(:__no_coercion__)
 
-          raise SearchEngine::Errors::InvalidType,
-                invalid_type_message(field: field, klass: klass, expectation: 'boolean', got: value)
-        end
+        coerced_time = coerce_time(value, type_hint, field: field, klass: klass)
+        return coerced_time unless coerced_time.equal?(:__no_coercion__)
 
-        # Date/DateTime/Time normalization
+        coerced_number = coerce_numeric(value, type_hint, field: field, klass: klass)
+        return coerced_number unless coerced_number.equal?(:__no_coercion__)
+
+        value
+      end
+
+      def coerce_boolean(value, type_hint)
+        return :__no_coercion__ unless type_boolean?(type_hint) && value.is_a?(String)
+
+        lc = value.strip.downcase
+        return true if lc == 'true'
+        return false if lc == 'false'
+
+        raise SearchEngine::Errors::InvalidType,
+              invalid_type_message(field: nil, klass: nil, expectation: 'boolean', got: value)
+      end
+      private_class_method :coerce_boolean
+
+      def coerce_time(value, type_hint, field:, klass:)
         case value
-        when DateTime
-          return value.to_time.utc
-        when Date
-          return value.to_time.utc
-        when Time
-          return value.utc? ? value : value.utc
+        when DateTime then return value.to_time.utc
+        when Date then return value.to_time.utc
+        when Time then return (value.utc? ? value : value.utc)
         else
           if type_time?(type_hint) && value.is_a?(String)
             begin
@@ -308,7 +319,11 @@ module SearchEngine
           end
         end
 
-        # Numeric coercion
+        :__no_coercion__
+      end
+      private_class_method :coerce_time
+
+      def coerce_numeric(value, type_hint, field:, klass:)
         if type_integer?(type_hint)
           return value if value.is_a?(Integer)
 
@@ -321,13 +336,16 @@ module SearchEngine
                     invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value)
             end
           end
-          # Reject non-integer numerics (e.g., Float)
+
           if value.is_a?(Numeric)
             raise SearchEngine::Errors::InvalidType,
                   invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value)
           end
-        elsif type_float?(type_hint)
-          # Preserve Integer literal when provided to keep stable filter rendering
+
+          return :__no_coercion__
+        end
+
+        if type_float?(type_hint)
           return value if value.is_a?(Integer)
           return value.to_f if value.is_a?(Numeric)
 
@@ -342,8 +360,9 @@ module SearchEngine
           end
         end
 
-        value
+        :__no_coercion__
       end
+      private_class_method :coerce_numeric
 
       def type_boolean?(hint)
         case hint

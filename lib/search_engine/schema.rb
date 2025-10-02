@@ -1,0 +1,294 @@
+# frozen_string_literal: true
+
+module SearchEngine
+  # Schema utilities to compile model DSL into a Typesense-compatible schema
+  # hash and to diff it against a live collection.
+  #
+  # Public API:
+  # - {.compile(klass)} => Hash
+  # - {.diff(klass, client: SearchEngine::Client.new)} => { diff: Hash, pretty: String }
+  module Schema
+    # Deterministic mapping from DSL types to Typesense field types.
+    #
+    # Policy:
+    # - :integer -> "int64" (consistent; prefer wider range)
+    # - :float/:decimal -> "float"
+    # - :string -> "string"
+    # - :boolean -> "bool"
+    # - :time/:datetime -> "string" (ISO8601 serialized timestamps)
+    # - Array types (e.g. [:string]) -> "string[]" (when present)
+    TYPE_MAPPING = {
+      string: 'string',
+      integer: 'int64',
+      float: 'float',
+      decimal: 'float',
+      boolean: 'bool',
+      time: 'string',
+      datetime: 'string'
+    }.freeze
+
+    FIELD_COMPARE_KEYS = %i[type].freeze
+
+    class << self
+      # Build a Typesense-compatible schema hash from a model class DSL.
+      #
+      # The output includes only keys that are supported and declared via the DSL.
+      # Since attribute-level flags (facet/index/optional/sort) are not supported
+      # by the current DSL, they are omitted to avoid noisy diffs.
+      #
+      # @param klass [Class] model class inheriting from {SearchEngine::Base}
+      # @return [Hash] frozen schema hash with symbol keys
+      # @raise [ArgumentError] if the class has no collection name defined
+      def compile(klass)
+        collection_name = klass.respond_to?(:collection) ? klass.collection : nil
+        if collection_name.nil? || collection_name.to_s.strip.empty?
+          raise ArgumentError,
+                'klass must define a collection name'
+        end
+
+        attributes_map = klass.respond_to?(:attributes) ? klass.attributes : {}
+        fields_array = []
+        attributes_map.each do |attribute_name, type_descriptor|
+          ts_type = typesense_type_for(type_descriptor)
+          fields_array << { name: attribute_name.to_s, type: ts_type }
+        end
+
+        schema = { name: collection_name.to_s, fields: fields_array }
+        deep_freeze(schema)
+      end
+
+      # Diff the compiled schema for +klass+ against the live physical collection
+      # in Typesense, resolving aliases when present. Returns both a structured
+      # diff Hash and a compact human-readable summary string.
+      #
+      # @param klass [Class] model class inheriting from {SearchEngine::Base}
+      # @param client [SearchEngine::Client] optional client wrapper (for tests)
+      # @return [Hash] { diff: Hash, pretty: String }
+      def diff(klass, client: SearchEngine::Client.new)
+        compiled = compile(klass)
+        logical_name = compiled[:name]
+
+        physical_name = client.resolve_alias(logical_name) || logical_name
+        live_schema = client.retrieve_collection_schema(physical_name)
+
+        if live_schema.nil?
+          diff_hash = {
+            collection: { name: logical_name, physical: physical_name },
+            added_fields: compiled[:fields].dup,
+            removed_fields: [],
+            changed_fields: {},
+            collection_options: { live: :missing }
+          }
+          return { diff: diff_hash, pretty: pretty_print(diff_hash) }
+        end
+
+        normalized_compiled = normalize_schema(compiled)
+        normalized_live = normalize_schema(live_schema)
+
+        added, removed, changed = diff_fields(normalized_compiled[:fields], normalized_live[:fields])
+        collection_opts_changes = diff_collection_options(normalized_compiled, normalized_live)
+
+        diff_hash = {
+          collection: { name: logical_name, physical: physical_name },
+          added_fields: added,
+          removed_fields: removed,
+          changed_fields: changed,
+          collection_options: collection_opts_changes
+        }
+
+        { diff: diff_hash, pretty: pretty_print(diff_hash) }
+      end
+
+      private
+
+      def typesense_type_for(type_descriptor)
+        # Array types (e.g., [:string]) => "string[]"; support nested symbol or string
+        if type_descriptor.is_a?(Array) && type_descriptor.size == 1
+          inner = type_descriptor.first
+          mapped = TYPE_MAPPING[inner.to_s.downcase.to_sym] || inner.to_s
+          return "#{mapped}[]"
+        end
+
+        TYPE_MAPPING[type_descriptor.to_s.downcase.to_sym] || type_descriptor.to_s
+      end
+
+      def normalize_schema(schema)
+        # Accept either compiled or live schema; return shape with symbol keys
+        name = (schema[:name] || schema['name']).to_s
+        fields = Array(schema[:fields] || schema['fields'])
+
+        normalized_fields = {}
+        fields.each do |field|
+          fname = (field[:name] || field['name']).to_s
+          ftype = (field[:type] || field['type']).to_s
+          normalized_fields[fname] = { name: fname, type: normalize_type(ftype) }
+        end
+
+        {
+          name: name,
+          fields: normalized_fields,
+          default_sorting_field: schema[:default_sorting_field] || schema['default_sorting_field'],
+          token_separators: schema[:token_separators] || schema['token_separators'],
+          symbols_to_index: schema[:symbols_to_index] || schema['symbols_to_index']
+        }
+      end
+
+      def normalize_type(type_string)
+        s = type_string.to_s
+        return 'string[]' if s.casecmp('string[]').zero?
+        return 'int64' if s.casecmp('int64').zero?
+        return 'int32' if s.casecmp('int32').zero?
+        return 'float' if s.casecmp('float').zero?
+        return 'bool' if %w[bool boolean].include?(s.downcase)
+        return 'string' if s.casecmp('string').zero?
+
+        # Fallback: return as-is
+        s
+      end
+
+      def diff_fields(compiled_fields_by_name, live_fields_by_name)
+        compiled_names = compiled_fields_by_name.keys
+        live_names = live_fields_by_name.keys
+
+        added_names = compiled_names - live_names
+        removed_names = live_names - compiled_names
+        shared_names = compiled_names & live_names
+
+        added = added_names.map { |n| compiled_fields_by_name[n] }
+        removed = removed_names.map { |n| live_fields_by_name[n] }
+
+        changed = {}
+        shared_names.each do |name|
+          compiled_field = compiled_fields_by_name[name]
+          live_field = live_fields_by_name[name]
+
+          field_changes = {}
+          FIELD_COMPARE_KEYS.each do |key|
+            cval = compiled_field[key]
+            lval = live_field[key]
+            next if values_equal?(cval, lval)
+
+            field_changes[key.to_s] = [cval, lval]
+          end
+
+          changed[name] = field_changes unless field_changes.empty?
+        end
+
+        [added, removed, changed]
+      end
+
+      def diff_collection_options(compiled, live)
+        # Compare only keys present in compiled to avoid noisy diffs when DSL
+        # does not declare collection-level options.
+        keys = %i[default_sorting_field token_separators symbols_to_index]
+        differences = {}
+        keys.each do |key|
+          cval = compiled[key]
+          next if cval.nil?
+
+          lval = live[key]
+          next if values_equal?(cval, lval)
+
+          differences[key] = [cval, lval]
+        end
+        differences
+      end
+
+      def values_equal?(a, b)
+        if a.is_a?(Array) && b.is_a?(Array)
+          a == b
+        else
+          a.to_s == b.to_s
+        end
+      end
+
+      def deep_freeze(object)
+        case object
+        when Hash
+          object.each_value { |v| deep_freeze(v) }
+        when Array
+          object.each { |v| deep_freeze(v) }
+        end
+        object.freeze
+      end
+
+      def pretty_print(diff)
+        lines = []
+        lines << format_header(diff[:collection] || {})
+
+        added = diff[:added_fields] || []
+        removed = diff[:removed_fields] || []
+        changed = diff[:changed_fields] || {}
+        coll_opts = diff[:collection_options] || {}
+
+        if added.empty? && removed.empty? && changed.empty? && (coll_opts.nil? || coll_opts.empty?)
+          lines << 'No changes'
+          return lines.join("\n")
+        end
+
+        lines.concat(format_added_fields(added)) unless added.empty?
+        lines.concat(format_removed_fields(removed)) unless removed.empty?
+        lines.concat(format_changed_fields(changed)) unless changed.empty?
+        lines.concat(format_collection_options(coll_opts)) unless coll_opts.empty?
+
+        lines.join("\n")
+      end
+
+      def format_header(collection)
+        logical = collection[:name]
+        physical = collection[:physical]
+        if physical && physical != logical
+          "Collection: #{logical} -> #{physical}"
+        else
+          "Collection: #{logical}"
+        end
+      end
+      private :format_header
+
+      def format_added_fields(list)
+        lines = ['+ Added fields:']
+        list.each do |f|
+          lines << "  - #{f[:name]}:#{f[:type]}"
+        end
+        lines
+      end
+      private :format_added_fields
+
+      def format_removed_fields(list)
+        lines = ['- Removed fields:']
+        list.each do |f|
+          lines << "  - #{f[:name]}:#{f[:type]}"
+        end
+        lines
+      end
+      private :format_removed_fields
+
+      def format_changed_fields(map)
+        lines = ['~ Changed fields:']
+        map.keys.sort.each do |fname|
+          pairs = map[fname]
+          pairs.each do |attr, (cval, lval)|
+            lines << "  - #{fname}.#{attr}: #{cval} -> #{lval}"
+          end
+        end
+        lines
+      end
+      private :format_changed_fields
+
+      def format_collection_options(opts)
+        lines = ['~ Collection options:']
+        opts.each do |key, (cval, lval)|
+          next if key == :live && cval.nil? && lval.nil?
+
+          lines << if key == :live && (cval == :missing || lval == :missing)
+                     "  - live: #{cval || lval}"
+                   else
+                     "  - #{key}: #{cval} -> #{lval}"
+                   end
+        end
+        lines
+      end
+      private :format_collection_options
+    end
+  end
+end
