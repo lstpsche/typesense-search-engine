@@ -169,4 +169,92 @@ class MultiTest < Minitest::Test
     refute_includes p.keys, :sort_by
     assert_equal 10, p[:per_page]
   end
+
+  def test_limit_enforced_before_network_call
+    original = SearchEngine.config.multi_search_limit
+    SearchEngine.configure { |c| c.multi_search_limit = 1 }
+
+    # Stub to ensure client is not called
+    client = Minitest::Mock.new
+    SearchEngine::Client.stub(:new, client) do
+      error = assert_raises(ArgumentError) do
+        SearchEngine.multi_search(common: {}) do |m|
+          m.add :products, build_relation(Product)
+          m.add :brands,   build_relation(Brand)
+        end
+      end
+      assert_match(/exceed limit/, error.message)
+    end
+  ensure
+    SearchEngine.configure { |c| c.multi_search_limit = original }
+  end
+
+  def test_helper_builds_url_opts_from_config
+    # Ensure cache_ttl gets passed through URL opts
+    ttl = 123
+    SearchEngine.configure { |c| c.cache_ttl_s = ttl }
+
+    client = Minitest::Mock.new
+    raw = { 'results' => [] }
+    client.expect(:multi_search, raw) do |searches:, url_opts:|
+      assert_equal ttl, url_opts[:cache_ttl]
+      assert_equal true, [true, false].include?(url_opts[:use_cache])
+      assert searches.is_a?(Array)
+      true
+    end
+
+    SearchEngine::Client.stub(:new, client) do
+      SearchEngine.multi_search(common: {}) do |m|
+        m.add :products, build_relation(Product)
+      end
+    end
+
+    client.verify
+  end
+
+  def test_multi_search_raw_returns_raw
+    client = Minitest::Mock.new
+    raw = { 'results' => [{ 'found' => 0, 'hits' => [] }] }
+    client.expect(:multi_search, raw) do |searches:, url_opts:|
+      assert_equal 1, searches.size
+      assert url_opts.key?(:use_cache)
+      true
+    end
+
+    SearchEngine::Client.stub(:new, client) do
+      res = SearchEngine.multi_search_raw(common: {}) do |m|
+        m.add :products, build_relation(Product)
+      end
+      assert_equal raw, res
+    end
+
+    client.verify
+  end
+
+  def test_api_error_augmentation_includes_label_when_available
+    body = {
+      'results' => [
+        { 'status' => 200 },
+        { 'status' => 422 }
+      ]
+    }
+    error = SearchEngine::Errors::Api.new('typesense api error: 422', status: 422, body: body)
+
+    client = Object.new
+    def client.multi_search(*)
+      raise @error_to_raise
+    end
+    client.instance_variable_set(:@error_to_raise, error)
+
+    SearchEngine::Client.stub(:new, client) do
+      raised = assert_raises(SearchEngine::Errors::Api) do
+        SearchEngine.multi_search_raw(common: {}) do |m|
+          m.add :products, build_relation(Product)
+          m.add :brands,   build_relation(Brand)
+        end
+      end
+      assert_match(/:brands/, raised.message)
+      assert_match(/422/, raised.message)
+    end
+  end
 end

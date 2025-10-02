@@ -16,8 +16,14 @@ client.multi_search(
     { collection: "products", q: "milk", query_by: "name", per_page: 5 },
     { collection: "brands",   q: "mil",  query_by: "name", per_page: 3 }
   ],
-  url_opts: { use_cache: true, cache_ttl: 60 }
+  url_opts: { use_cache: true, cache_ttl: 30 }
 )
+
+# Top-level convenience returning raw
+SearchEngine.multi_search_raw(common: { query_by: SearchEngine.config.default_query_by }) do |m|
+  m.add :products, Product.per(5)
+  m.add :brands,   Brand.per(3)
+end
 ```
 
 ### Request flow
