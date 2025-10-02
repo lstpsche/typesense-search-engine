@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Indexer](./indexer.md)
+[← Back to Index](./index.md) · [Indexer](./indexer.md) · [CLI](./cli.md)
 
 # Schema Compiler & Diff
 
