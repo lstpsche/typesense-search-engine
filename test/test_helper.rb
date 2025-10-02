@@ -6,3 +6,10 @@ require 'rails'
 require 'minitest/autorun'
 require 'set'
 require 'search_engine'
+
+# Reset registry to avoid cross-test contamination of collection mappings
+begin
+  SearchEngine.send(:__reset_registry_for_tests!)
+rescue StandardError
+  nil
+end

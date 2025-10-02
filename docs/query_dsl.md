@@ -87,11 +87,29 @@ Ergonomic constructors are exposed as module functions on `SearchEngine::AST`:
 
 ## Where it fits
 
-Future `Relation#where` can construct an AST internally and delegate to a compiler that produces Typesense `filter_by`. Today, `Relation` stores sanitized string fragments; the AST provides a safe intermediate representation the compiler can consume.
+`Relation#where` accepts Hash, raw String, and SQL‑ish fragment+args. The parser converts these inputs into AST nodes and stores them alongside legacy string filters. A later compiler pass will prefer AST when present.
 
-Example narrative:
+### Parsing examples
 
-- Build: `And( Eq(:active, true), In(:brand_id, [1,2]), Or( Gt(:price, 100), Lt(:price, 10) ) )`
-- Compile: a dedicated compiler walks the tree via `#type` and accessors, generating a `filter_by` string.
+```ruby
+Parser.parse({ id: 1 }, klass: Product)              # => AST.eq(:id, 1)
+Parser.parse(["price > ?", 100], klass: Product)    # => AST.gt(:price, 100)
+Parser.parse("brand_id:=[1,2,3]", klass: Product)   # => AST::Raw("brand_id:=[1,2,3]")
+```
+
+### Input → AST flow
+
+```mermaid
+flowchart LR
+  A[where input] --> B[Parser]
+  B -->|hash| C[Eq / In nodes]
+  B -->|fragment+args| D[Gt/Gte/Lt/Lte/In/NotIn/Matches/Prefix]
+  B -->|raw string| E[Raw]
+  C --> F[filters_ast]
+  D --> F[filters_ast]
+  E --> F[filters_ast]
+```
+
+Note: field names are validated against the model's declared `attributes`. Raw strings are accepted as an escape hatch and bypass validation.
 
 See also: [Relation](./relation.md) · [Materializers](./materializers.md)

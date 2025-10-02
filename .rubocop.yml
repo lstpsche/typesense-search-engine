@@ -55,7 +55,11 @@ Metrics/MethodLength:
 Metrics/ClassLength:
   Enabled: false
 
+Metrics/ModuleLength:
+  Enabled: false
+
 Metrics/BlockLength:
+  Max: 40
   Exclude:
     - spec/**/*
     - lib/tasks/**/*
