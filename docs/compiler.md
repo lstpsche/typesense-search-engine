@@ -70,16 +70,9 @@ Compiler.compile([AST.eq(:x, 1), AST.eq(:y, 2)])
 # => "x:=1 && y:=2"
 ```
 
-Allowed example:
-
-```ruby
-Compiler.compile(AST.and(AST.eq(:active, true), AST.in(:brand_id, [1,2])), klass: Product)
-# => "active:=true && brand_id:=[1,2]"
-```
-
 ## Integration
 
-- `Relation#to_typesense_params` prefers compiling `filters_ast` when present, falling back to legacy string fragments for backward compatibility.
+- `Relation#to_typesense_params` prefers compiling `ast` when present, falling back to legacy string `filters` for backward compatibility.
 - `Raw` fragments are preserved through the pipeline.
 
 See also: [Relation](./relation.md) · [Query DSL](./query_dsl.md)

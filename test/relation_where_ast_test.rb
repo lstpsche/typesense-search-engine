@@ -11,7 +11,7 @@ class RelationWhereASTTest < Minitest::Test
     attribute :brand_id, :integer
   end
 
-  def test_where_populates_filters_ast_and_strings
+  def test_where_populates_ast_and_strings
     r1 = Product.all
     r2 = r1.where({ id: 1 }, ['price > ?', 100], 'brand_id:=[1,2]')
 
@@ -22,16 +22,17 @@ class RelationWhereASTTest < Minitest::Test
     params = r2.to_typesense_params
     assert_match(/id:=/, params[:filter_by])
     # When using template with placeholders, current sanitizer keeps operator tokens
-    assert_match(/price > \d+/, params[:filter_by])
+    assert_match(/price:>\d+/, params[:filter_by])
 
-    # AST side-channel present in internal state
+    # AST present in internal state and public reader
     state = r2.instance_variable_get(:@state)
-    ast = Array(state[:filters_ast])
-    assert_equal 3, ast.length
+    ast_state = Array(state[:ast])
+    assert_equal 3, ast_state.length
+    assert_equal 3, r2.ast.length
 
     # No-op chain preserves AST state
     r3 = r2.where
     state3 = r3.instance_variable_get(:@state)
-    assert_equal ast, state3[:filters_ast]
+    assert_equal ast_state, state3[:ast]
   end
 end

@@ -105,11 +105,16 @@ flowchart LR
   B -->|hash| C[Eq / In nodes]
   B -->|fragment+args| D[Gt/Gte/Lt/Lte/In/NotIn/Matches/Prefix]
   B -->|raw string| E[Raw]
-  C --> F[filters_ast]
-  D --> F[filters_ast]
-  E --> F[filters_ast]
+  C --> F[relation.ast]
+  D --> F[relation.ast]
+  E --> F[relation.ast]
 ```
 
 Note: field names are validated against the model's declared `attributes`. Raw strings are accepted as an escape hatch and bypass validation.
+
+### Integration with Relation
+
+- `Relation#where` parses inputs into AST and appends to `relation.ast`.
+- `Relation#to_typesense_params` compiles `relation.ast` via the [Compiler](./compiler.md) when present; otherwise falls back to legacy string `filters`.
 
 See also: [Relation](./relation.md) · [Materializers](./materializers.md)
