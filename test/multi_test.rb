@@ -51,6 +51,7 @@ class MultiTest < Minitest::Test
     assert_equal 'name', p[:query_by]
   end
 
+  # Re-introduced: per-search api_key is unsupported and should raise
   def test_api_key_unsupported_raises
     m = SearchEngine::Multi.new
     rel = build_relation(Product)
@@ -89,5 +90,83 @@ class MultiTest < Minitest::Test
     end
 
     client.verify
+  end
+
+  def test_to_payloads_filters_url_only_options
+    m = SearchEngine::Multi.new
+    rel = Product.all.select(:id).per(1)
+    # Inject URL-only keys into per-search params by stubbing
+    def rel.to_typesense_params
+      { q: '*', per_page: 1, use_cache: true, cache_ttl: 42 }
+    end
+    m.add(:products, rel)
+
+    payloads = m.to_payloads(common: { use_cache: false, cache_ttl: 5, q: 'override' })
+    p = payloads.first
+    refute_includes p.keys, :use_cache
+    refute_includes p.keys, :cache_ttl
+    # ensure other keys remain intact and per-search q wins
+    assert_equal '*', p[:q]
+    assert_equal 1, p[:per_page]
+  end
+
+  def test_to_payloads_preserves_entry_order
+    m = SearchEngine::Multi.new
+    m.add(:products, build_relation(Product))
+    m.add(:brands, build_relation(Brand))
+    payloads = m.to_payloads(common: {})
+    assert_equal(%w[products_multi brands_multi], payloads.map { |h| h[:collection] })
+  end
+
+  def test_to_payloads_invalid_common_type_raises
+    m = SearchEngine::Multi.new
+    m.add(:products, build_relation(Product))
+    error = assert_raises(ArgumentError) { m.to_payloads(common: 'oops') }
+    assert_match(/common must be a Hash/i, error.message)
+  end
+
+  def test_to_payloads_detects_duplicate_labels_during_compile
+    m = SearchEngine::Multi.new
+    m.add(:products, build_relation(Product))
+    m.add(:brands, build_relation(Brand))
+
+    # Corrupt internal state to simulate external mutation causing duplicate labels
+    entries = m.instance_variable_get(:@entries)
+    entries[1].key = entries[0].key
+
+    error = assert_raises(ArgumentError) { m.to_payloads(common: {}) }
+    assert_match(/duplicate label/i, error.message)
+  end
+
+  def test_to_payloads_invalid_relation_raises
+    m = SearchEngine::Multi.new
+    rel = build_relation(Product)
+    m.add(:products, rel)
+
+    # Replace relation with an invalid duck to trigger validation during compile
+    invalid = Object.new
+    entries = m.instance_variable_get(:@entries)
+    entries[0].relation = invalid
+
+    error = assert_raises(ArgumentError) { m.to_payloads(common: {}) }
+    assert_match(/invalid relation/i, error.message)
+  end
+
+  def test_to_payloads_omits_empty_values
+    m = SearchEngine::Multi.new
+    rel = Product.all
+    # Stub params to include empty strings/arrays
+    def rel.to_typesense_params
+      { q: '*', include_fields: '', filter_by: nil, page: nil, per_page: 10, sort_by: [] }
+    end
+    m.add(:products, rel)
+
+    payloads = m.to_payloads(common: {})
+    p = payloads.first
+    refute_includes p.keys, :include_fields
+    refute_includes p.keys, :filter_by
+    refute_includes p.keys, :page
+    refute_includes p.keys, :sort_by
+    assert_equal 10, p[:per_page]
   end
 end

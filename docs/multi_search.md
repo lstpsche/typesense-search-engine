@@ -32,6 +32,7 @@ res.labels #=> [:products, :brands]
 ### Common params merge
 
 - Merge precedence: per-search params override `common:` keys
+- URL-only keys filtered from bodies: `use_cache`, `cache_ttl` (these live in URL opts)
 - Example:
 
 ```ruby
@@ -39,6 +40,40 @@ res = SearchEngine.multi_search(common: { q: 'milk', per_page: 50 }) do |m|
   m.add :products, Product.all.per(10) # per_page: 10 overrides common 50
   m.add :brands,   Brand.all           # per_page not present, inherits 50
 end
+```
+
+### Mapping (Relation → per-search payload)
+
+| Relation aspect | Per-search key |
+| --- | --- |
+| query (`q`, default `*`) | `q` |
+| fields to search | `query_by` |
+| filters (AST / `where`) | `filter_by` |
+| order (`order`) | `sort_by` |
+| select (`select`) | `include_fields` |
+| pagination (`page`/`per`) | `page`, `per_page` |
+| infix (config or override) | `infix` |
+
+Example payload shape:
+
+```ruby
+{
+  collection: "products",
+  q: "*",
+  query_by: SearchEngine.config.default_query_by,
+  filter_by: "category_id:=5",
+  include_fields: "id,name",
+  per_page: 10
+}
+```
+
+### Compile flow
+
+```mermaid
+flowchart LR
+  A[Relations] --> B[Params compile]
+  B --> C[Merge common]
+  C --> D[searches[] payload]
 ```
 
 ### Per-search API key policy

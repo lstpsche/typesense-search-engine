@@ -17,6 +17,9 @@ module SearchEngine
     # Lightweight internal entry
     Entry = Struct.new(:label, :key, :relation, :api_key, keyword_init: true)
 
+    # URL-level options that must never appear in request bodies.
+    URL_ONLY_KEYS = %i[use_cache cache_ttl].freeze
+
     # Canonicalize a label into a case-insensitive Symbol key.
     # @param label [String, Symbol]
     # @return [Symbol]
@@ -69,20 +72,49 @@ module SearchEngine
     # Build per-search payloads (order preserved), merging common params.
     #
     # For each entry, the payload is:
-    #   { collection: <String>, **common, **relation.to_typesense_params }
+    #   { collection: <String>, **common_filtered, **per_search_params_filtered }
     # Per-search values win over +common+ on shallow merge.
+    # URL-only options (:use_cache, :cache_ttl) are filtered from both sources.
+    # Empty values are omitted for cleanliness.
     #
     # @param common [Hash] optional parameters applied to each per-search payload
     # @return [Array<Hash>] array of request bodies suitable for Client#multi_search
+    # @raise [ArgumentError] when +common+ is not a Hash, when duplicate labels are detected,
+    #   or when a relation is invalid / lacks a bound collection
+    # @example
+    #   m = SearchEngine::Multi.new
+    #   m.add(:products, Product.all.per(10))
+    #   m.to_payloads(common: { query_by: SearchEngine.config.default_query_by })
+    #   # => [{ collection: "products", q: "*", query_by: "name", per_page: 10 }]
     def to_payloads(common: {})
       raise ArgumentError, 'common must be a Hash' unless common.is_a?(Hash)
 
+      filtered_common = filter_url_only_keys(common)
+
+      seen = Set.new
       @entries.map do |e|
-        params = e.relation.to_typesense_params
+        # Guard against external mutation that might have introduced duplicates
+        raise ArgumentError, "duplicate label: #{e.label.inspect}" if seen.include?(e.key)
+
+        seen << e.key
+
+        # Validate relation contract at compile time (in case of external mutation)
+        begin
+          validate_relation!(e.relation)
+        rescue ArgumentError
+          raise ArgumentError,
+                "invalid relation for label #{e.label.inspect}: expected a Relation with a bound collection"
+        end
+
+        per_search = e.relation.to_typesense_params
+        per_search = filter_url_only_keys(per_search)
+
         collection = collection_name_for_relation(e.relation)
+
         # Shallow-merge with per-search winning
-        merged = common.merge(params)
-        { collection: collection }.merge(merged)
+        merged = filtered_common.merge(per_search)
+        payload = { collection: collection }.merge(merged)
+        prune_empty_values(payload)
       end
     end
 
@@ -172,6 +204,31 @@ module SearchEngine
 
       name = k.respond_to?(:name) && k.name ? k.name : k.to_s
       raise ArgumentError, "Unknown collection for #{name}"
+    end
+
+    # Remove URL-only options to avoid leaking them into request bodies.
+    # Returns a new Hash.
+    def filter_url_only_keys(hash)
+      return {} unless hash.is_a?(Hash)
+
+      hash.reject { |k, _| URL_ONLY_KEYS.include?(k.is_a?(Symbol) ? k : k.to_s.to_sym) }
+    end
+
+    # Remove empty/nil values from the payload for a clean body.
+    # Returns a new Hash preserving insertion order.
+    def prune_empty_values(hash)
+      out = {}
+      hash.each do |k, v|
+        next if v.nil?
+
+        if v.is_a?(String)
+          next if v.strip.empty?
+        elsif v.respond_to?(:empty?)
+          next if v.empty?
+        end
+        out[k] = v
+      end
+      out
     end
   end
 end

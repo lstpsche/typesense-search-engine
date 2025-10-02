@@ -17,4 +17,4 @@ jobs:
           bundler-cache: true
 
       - name: Test code
-        run: bundle exec bin/rake test
+        run: bundle exec bin/test
