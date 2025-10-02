@@ -23,6 +23,7 @@ This engine centralizes all knobs under `SearchEngine.config`. These values driv
 | `use_cache`        | Boolean              | `true`         | URL-level option only |
 | `cache_ttl_s`      | Integer              | `60`           | URL-level option: TTL seconds -> `cache_ttl` |
 | `strict_fields`    | Boolean              | `true` in development/test; else `false` | Parser validates unknown fields when `true`; see [Query DSL](./query_dsl.md#error-reference) |
+| `multi_search_limit` | Integer            | `50`           | Hard cap on searches per multi-search; validated before network call |
 
 ## ENV mapping
 
@@ -56,6 +57,7 @@ SearchEngine.configure do |c|
   c.cache_ttl_s      = 60
   c.strict_fields    = Rails.env.development? || Rails.env.test?
   c.logger           = Rails.logger
+  c.multi_search_limit = 50
 end
 ```
 

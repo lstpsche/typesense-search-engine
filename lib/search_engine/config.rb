@@ -39,6 +39,8 @@ module SearchEngine
     #   @return [Boolean] when true, the Parser validates field names/types and raises
     #     friendly errors; when false, unknown fields are allowed (operators and shapes
     #     are still validated). Defaults to true in development/test.
+    # @!attribute [rw] multi_search_limit
+    #   @return [Integer] maximum number of searches allowed in a single multi-search call (default: 50)
     attr_accessor :api_key,
                   :host,
                   :port,
@@ -51,7 +53,8 @@ module SearchEngine
                   :default_infix,
                   :use_cache,
                   :cache_ttl_s,
-                  :strict_fields
+                  :strict_fields,
+                  :multi_search_limit
 
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
@@ -78,6 +81,7 @@ module SearchEngine
       @cache_ttl_s = 60
       @strict_fields = default_strict_fields
       @logger = default_logger
+      @multi_search_limit = 50
       nil
     end
 
@@ -112,6 +116,7 @@ module SearchEngine
       errors.concat(validate_timeouts)
       errors.concat(validate_retries)
       errors.concat(validate_cache)
+      errors.concat(validate_multi_search_limit)
 
       raise ArgumentError, "SearchEngine::Config invalid: #{errors.join(', ')}" unless errors.empty?
 
@@ -156,7 +161,8 @@ module SearchEngine
         default_infix: default_infix,
         use_cache: use_cache ? true : false,
         cache_ttl_s: cache_ttl_s,
-        strict_fields: strict_fields ? true : false
+        strict_fields: strict_fields ? true : false,
+        multi_search_limit: multi_search_limit
       }
     end
 
@@ -263,6 +269,12 @@ module SearchEngine
       return [] if cache_ttl_s.is_a?(Integer) && !cache_ttl_s.negative?
 
       ['cache_ttl_s must be a non-negative Integer']
+    end
+
+    def validate_multi_search_limit
+      return [] if multi_search_limit.is_a?(Integer) && !multi_search_limit.negative?
+
+      ['multi_search_limit must be a non-negative Integer']
     end
   end
 end

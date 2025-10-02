@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Materializers](./materializers.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Materializers](./materializers.md) · [Configuration](./configuration.md)
 
 ## Multi-search DSL
 
@@ -89,7 +89,27 @@ The helper pairs Typesense responses back to the original labels and model class
 - `#to_h` → `{ label: Result, ... }`
 - `#each_pair` → iterate `(label, result)` in order
 
+### URL opts, caching, and limits
+
+- URL-level caching knobs are passed as URL options only and never included in per-search bodies.
+- `url_opts` are built from config: `{ use_cache: SearchEngine.config.use_cache, cache_ttl: SearchEngine.config.cache_ttl_s }`.
+- A hard cap on the number of searches is enforced via `SearchEngine.config.multi_search_limit` (default: 50). Exceeding this limit raises before any network call.
+
+### Raw response helper
+
+If you prefer the raw response returned by the Typesense client, use:
+
+```ruby
+raw = SearchEngine.multi_search_raw(common: { query_by: SearchEngine.config.default_query_by }) do |m|
+  m.add :products, Product.where(category_id: 5).per(10)
+  m.add :brands,   Brand.where('name:~rud').per(5)
+end
+```
+
+Errors are mapped to `SearchEngine::Errors` and, when available, the first failing label and status are included in the error message.
+
 ### See also
 
 - [Client](./client.md) for URL/common params and error mapping
 - [Relation](./relation.md) for query composition and compilation
+- [Configuration](./configuration.md) for cache knobs and `multi_search_limit`
