@@ -9,6 +9,7 @@ require 'search_engine/base'
 require 'search_engine/result'
 require 'search_engine/filters/sanitizer'
 require 'search_engine/ast'
+require 'search_engine/dsl/parser'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.

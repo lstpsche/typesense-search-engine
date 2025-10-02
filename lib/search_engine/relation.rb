@@ -16,6 +16,7 @@ module SearchEngine
     # Internal normalized state keys
     DEFAULT_STATE = {
       filters: [].freeze,
+      filters_ast: [].freeze, # AST side-channel for predicates parsed from where inputs (non-breaking)
       orders:  [].freeze,
       select:  [].freeze,
       limit:   nil,
@@ -62,8 +63,11 @@ module SearchEngine
     # @return [SearchEngine::Relation]
     def where(*args)
       fragments = normalize_where(args)
+      # Build AST nodes in parallel to string fragments for future compiler use
+      ast_nodes = SearchEngine::DSL::Parser.parse_list(args, klass: @klass)
       spawn do |s|
         s[:filters] = Array(s[:filters]) + fragments
+        s[:filters_ast] = Array(s[:filters_ast]) + Array(ast_nodes)
       end
     end
 
@@ -414,6 +418,14 @@ module SearchEngine
         case k
         when :filters
           normalized[:filters] = normalize_where(Array(value))
+        when :filters_ast
+          nodes = Array(value).flatten.compact
+          # Accept pre-built nodes or inputs to parse
+          normalized[:filters_ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                                       nodes
+                                     else
+                                       SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                                     end
         when :orders
           normalized[:orders] = normalize_order(value)
         when :select
