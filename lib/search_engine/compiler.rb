@@ -34,17 +34,14 @@ module SearchEngine
 
       compiled = nil
       if defined?(ActiveSupport::Notifications)
-        start_ms = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
         payload = {
           collection: safe_collection_for_klass(klass),
           klass: safe_klass_name(klass),
           node_count: count_nodes(root),
-          duration_ms: nil,
           source: :ast
         }
-        ActiveSupport::Notifications.instrument('search_engine.compile', payload) do
+        SearchEngine::Instrumentation.instrument('search_engine.compile', payload) do |_ctx|
           compiled = compile_node(root, parent_prec: 0)
-          payload[:duration_ms] = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond) - start_ms
         end
         compiled
       else

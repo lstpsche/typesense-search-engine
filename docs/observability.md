@@ -20,13 +20,35 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
 
 Duration is available via the event (`ev.duration`).
 
+#### Unified helper (example)
+
+```ruby
+SearchEngine::Instrumentation.instrument("search_engine.search", collection: col) do |ctx|
+  ctx[:params_preview] = SearchEngine::Instrumentation.redact(params)
+  client.search(...)
+end
+```
+
+#### Event flow (unified)
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Instr as Instrumentation
+  participant Sink as Subscribers
+  Caller->>Instr: instrument(name, payload)
+  Instr-->>Caller: yield
+  Instr->>Sink: event(name, payload + duration)
+```
+
 ### Payload reference
 
 - **collection/collections**: String or Array<String> of collections involved
-- **params**: Redacted params excerpt (single: Hash, multi: Array<Hash>)
+- **params_preview**: Redacted params excerpt (single: Hash, multi: Array<Hash>)
 - **url_opts**: `{ use_cache: Boolean, cache_ttl: Integer|nil }`
 - **status/http_status**: Integer when available, otherwise `:ok`/`:error`
-- **error_class**: String or nil
+- **error_class/error_message**: Short error metadata when status is error
+- **correlation_id**: Short token propagated across a request/thread
 - **retries**: Attempts used (reserved; nil by default)
 - **partition/partition_hash**: Numeric raw key or short hash for strings
 - **into**: Physical collection name
@@ -47,11 +69,11 @@ Redaction rules:
 | `collections`  | Array<String>        | N/A |
 | `labels`       | Array<String>        | N/A |
 | `searches_count` | Integer            | N/A |
-| `params`       | Hash/Array<Hash>     | Whitelisted keys only; `q` truncated; `filter_by` masked |
+| `params_preview` | Hash/Array<Hash>   | Whitelisted keys only; `q` truncated; `filter_by` masked |
 | `url_opts`     | Hash                 | Includes only `use_cache` and `cache_ttl` |
 | `status`/`http_status` | Integer or Symbol | N/A |
-| `error_class`  | String, nil          | N/A |
-| `retries`      | Integer, nil         | Reserved; nil by default |
+| `error_class`/`error_message` | String, nil | Truncated to config max |
+| `correlation_id` | String             | N/A |
 | `duration`     | Float (ms) via event | N/A |
 | `partition`    | Numeric or hidden    | Hidden for strings; use `partition_hash` |
 | `partition_hash` | String (sha1 prefix) | N/A |
@@ -119,7 +141,7 @@ flowchart TD
 Execution initiated by `SearchEngine::Relation` results in a single client call and emits `search_engine.search` with a compact, redacted payload. When a preset is applied, compile also emits `search_engine.preset.apply`. See [Presets](./presets.md#observability).
 
 - **Event**: `search_engine.search`
-- **Payload**: `{ collection, params: Observability.redact(params), url_opts: { use_cache, cache_ttl }, status, error_class }`
+- **Payload**: `{ collection, params_preview: Instrumentation.redact(params), url_opts: { use_cache, cache_ttl }, status, error_class }`
 - **Source**: `SearchEngine::Client#search` (Relation delegates execution to the client)
 
 ```mermaid

@@ -476,19 +476,13 @@ module SearchEngine
             retry_after_s: nil,
             error_sample: nil
           }
-          ActiveSupport::Notifications.instrument('search_engine.indexer.batch_import', se_payload) do
+          SearchEngine::Instrumentation.instrument('search_engine.indexer.batch_import', se_payload) do |ctx|
             raw = client.import_documents(collection: collection, jsonl: jsonl, action: action)
             success_count, failure_count, error_sample = parse_import_response(raw)
             http_status = 200
-            se_payload[:success_count] = success_count
-            se_payload[:failure_count] = failure_count
-            se_payload[:http_status] = http_status
-          rescue Errors::Api => error
-            se_payload[:success_count] = 0
-            se_payload[:failure_count] = docs_count
-            se_payload[:http_status] = error.status.to_i
-            se_payload[:error_sample] = [safe_error_excerpt(error)]
-            raise
+            ctx[:success_count] = success_count
+            ctx[:failure_count] = failure_count
+            ctx[:http_status] = http_status
           end
         else
           raw = client.import_documents(collection: collection, jsonl: jsonl, action: action)
@@ -670,7 +664,7 @@ module SearchEngine
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.started', payload) {}
         pf = SearchEngine::Observability.partition_fields(partition)
-        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'started')) {}
+        SearchEngine::Instrumentation.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'started')) {}
       end
 
       def instrument_finished(klass:, into:, partition:, duration_ms:, deleted_count:)
@@ -685,7 +679,7 @@ module SearchEngine
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.finished', payload) {}
         pf = SearchEngine::Observability.partition_fields(partition)
-        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'ok')) {}
+        SearchEngine::Instrumentation.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'ok')) {}
       end
 
       def instrument_error(error, klass:, into:, partition:)
@@ -700,7 +694,7 @@ module SearchEngine
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.error', payload) {}
         pf = SearchEngine::Observability.partition_fields(partition)
-        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'failed')) {}
+        SearchEngine::Instrumentation.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'failed')) {}
       end
 
       def instrument_stale(_type, reason:, klass:, into:, partition:)
@@ -714,7 +708,7 @@ module SearchEngine
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.skipped', payload) {}
         pf = SearchEngine::Observability.partition_fields(partition)
-        ActiveSupport::Notifications.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'skipped')) {}
+        SearchEngine::Instrumentation.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'skipped')) {}
       end
 
       def suspicious_filter?(filter)

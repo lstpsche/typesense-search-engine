@@ -121,9 +121,7 @@ module SearchEngine
     end
 
     def instrument(event, payload)
-      return unless defined?(ActiveSupport::Notifications)
-
-      ActiveSupport::Notifications.instrument(event, payload) {}
+      SearchEngine::Instrumentation.instrument(event, payload) {}
     end
 
     def retry_settings

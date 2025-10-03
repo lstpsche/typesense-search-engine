@@ -346,7 +346,7 @@ module SearchEngine
           invalid_type_count: invalid_type_count,
           coerced_count: coerced_count
         }
-        ActiveSupport::Notifications.instrument('search_engine.mapper.batch_mapped', payload) {}
+        SearchEngine::Instrumentation.instrument('search_engine.mapper.batch_mapped', payload) {}
       end
 
       def instrument_error(error_class:, message:)
@@ -357,7 +357,7 @@ module SearchEngine
           error_class: error_class,
           message: message.to_s[0, 200]
         }
-        ActiveSupport::Notifications.instrument('search_engine.mapper.error', payload) {}
+        SearchEngine::Instrumentation.instrument('search_engine.mapper.error', payload) {}
       end
 
       def monotonic_ms

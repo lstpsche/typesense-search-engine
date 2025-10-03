@@ -40,18 +40,19 @@ module SearchEngine
         se_payload = build_search_event_payload(collection: collection, params: params, cache_params: cache_params)
 
         result = nil
-        ActiveSupport::Notifications.instrument('search_engine.search', se_payload) do
+        SearchEngine::Instrumentation.instrument('search_engine.search', se_payload) do |ctx|
+          ctx[:params_preview] = SearchEngine::Instrumentation.redact(params)
           result = with_exception_mapping(:post, path, cache_params, start) do
             ts.collections[collection].documents.search(payload, common_params: cache_params)
           end
-          se_payload[:status] = :ok
+          ctx[:status] = :ok
         rescue Errors::Api => error
-          se_payload[:status] = error.status
-          se_payload[:error_class] = error.class.name
+          ctx[:status] = error.status
+          ctx[:error_class] = error.class.name
           raise
         rescue Errors::Error => error
-          se_payload[:status] = :error
-          se_payload[:error_class] = error.class.name
+          ctx[:status] = :error
+          ctx[:error_class] = error.class.name
           raise
         end
       else
