@@ -32,8 +32,29 @@ module SearchEngine
       page:    nil,
       per_page: nil,
       grouping: nil,
-      options: {}.freeze
+      options: {}.freeze,
+      # Presets: immutable relation-level preset state
+      preset_name: nil,
+      preset_mode: nil
     }.freeze
+
+    # Keys considered essential for :only preset mode.
+    # Intentionally minimal: query basics and pagination; other keys are dropped.
+    ESSENTIAL_PARAM_KEYS = %i[q query_by page per_page infix].freeze
+
+    # Keys managed by preset in :lock mode. When present on the compiled params,
+    # they will be dropped and recorded as conflicts.
+    PRESET_MANAGED_PARAM_KEYS = %i[
+      filter_by
+      sort_by
+      include_fields
+      exclude_fields
+      facet_by
+      max_facet_values
+      group_by
+      group_limit
+      group_missing_values
+    ].freeze
 
     # @return [Class] bound model class (typically a SearchEngine::Base subclass)
     attr_reader :klass
@@ -172,6 +193,57 @@ module SearchEngine
     # @return [SearchEngine::Relation]
     def include_fields(*fields)
       select(*fields)
+    end
+
+    # Apply a server-side preset with a specified merge strategy.
+    #
+    # Computes the effective preset name using global presets configuration.
+    # When presets are enabled and a namespace is present, prefixes the name
+    # with "#{SearchEngine.config.presets.namespace}_"; otherwise uses the
+    # provided token as a String.
+    #
+    # Modes:
+    # - :merge (default): emit preset and all chain params; chain wins on overlaps
+    # - :only: emit preset and only essential params (q, query_by, page, per_page, infix)
+    # - :lock: emit preset and all chain params, but drop chain keys managed by preset
+    #
+    # @param name [#to_s, #to_sym] preset token (without namespace)
+    # @param mode [Symbol] one of :merge, :only, :lock
+    # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] on invalid name or mode
+    # @example
+    #   # Merge (default)
+    #   SearchEngine::Product.preset(:popular_products)
+    #     .where(active: true)
+    #     .order(updated_at: :desc)
+    #
+    #   # Only preset
+    #   SearchEngine::Product.preset(:aggressive_sale, mode: :only).page(1).per(24)
+    #
+    #   # Locked preset (chain cannot override preset filters/sorts)
+    #   SearchEngine::Product.preset(:brand_curated, mode: :lock).order(price: :asc) # order will be dropped
+    def preset(name, mode: :merge)
+      raise ArgumentError, 'preset requires a name' if name.nil?
+
+      token = name.to_s.strip
+      raise ArgumentError, 'preset name must be non-empty' if token.empty?
+
+      sym_mode = mode.to_sym
+      unless %i[merge only lock].include?(sym_mode)
+        raise ArgumentError, "preset mode must be one of :merge, :only, :lock (got #{mode.inspect})"
+      end
+
+      cfg = SearchEngine.config.presets
+      effective = if cfg.enabled && cfg.namespace
+                    +"#{cfg.namespace}_#{token}"
+                  else
+                    token.dup
+                  end
+
+      spawn do |s|
+        s[:preset_name] = effective
+        s[:preset_mode] = sym_mode
+      end
     end
 
     # Exclude a subset of fields from the final selection.
@@ -432,6 +504,11 @@ module SearchEngine
       parts = []
       parts << "Model=#{klass_name_for_inspect}"
 
+      if (pn = @state[:preset_name])
+        pm = @state[:preset_mode] || :merge
+        parts << %(preset=#{pn}(mode=#{pm}))
+      end
+
       filters = Array(@state[:filters])
       parts << "filters=#{filters.length}" unless filters.empty?
 
@@ -555,6 +632,33 @@ module SearchEngine
       join_ctx = build_join_context(ast_nodes: ast_nodes, orders: orders)
       params[:_join] = join_ctx unless join_ctx.nil? || join_ctx.empty?
 
+      # Preset emission and merge strategies
+      if (pn = @state[:preset_name])
+        pmode = (@state[:preset_mode] || :merge).to_sym
+        params[:preset] = pn
+
+        case pmode
+        when :only
+          allowed = ESSENTIAL_PARAM_KEYS
+          minimal = {}
+          (allowed + [:preset]).each do |k|
+            minimal[k] = params[k] if params.key?(k)
+          end
+          # Preserve internal join context if present for observability
+          minimal[:_join] = params[:_join] if params.key?(:_join)
+          params = minimal
+        when :lock
+          conflicts = []
+          PRESET_MANAGED_PARAM_KEYS.each do |k|
+            next unless params.key?(k)
+
+            params.delete(k)
+            conflicts << k
+          end
+          params[:_preset_conflicts] = conflicts unless conflicts.empty?
+        end
+      end
+
       # Emit compile-time JOINs event summarizing usage (no raw strings)
       if defined?(SearchEngine::Instrumentation)
         begin
@@ -606,6 +710,8 @@ module SearchEngine
       header = "#{klass_name_for_inspect} Relation"
       lines << header
 
+      append_preset_explain_line(lines, params)
+
       if params[:filter_by] && !params[:filter_by].to_s.strip.empty?
         where_str = friendly_where(params[:filter_by].to_s)
         lines << "  where: #{where_str}"
@@ -621,6 +727,7 @@ module SearchEngine
       end
 
       append_selection_explain_lines(lines, params)
+      add_effective_selection_tokens!(lines)
 
       add_pagination_line!(lines, params)
 
@@ -953,6 +1060,10 @@ module SearchEngine
         normalized[:options] = (value || {}).dup
       when :grouping
         normalized[:grouping] = normalize_grouping(value)
+      when :preset_name
+        normalized[:preset_name] = value&.to_s&.strip
+      when :preset_mode
+        normalized[:preset_mode] = value&.to_sym
       end
     end
 
@@ -1167,14 +1278,10 @@ module SearchEngine
         names = items.flatten.compact.map(&:to_s).map(&:strip).reject(&:empty?)
         return if names.empty?
 
-        # Optional: validate joined field names if target collection model is available
-        begin
-          cfg = @klass.join_for(key)
-          names.each do |fname|
-            SearchEngine::Joins::Guard.validate_joined_field!(cfg, fname)
-          end
-        rescue StandardError
-          # Best-effort only; skip strict validation if registry or attributes unavailable
+        # Validate joined field names against target collection metadata
+        cfg = @klass.join_for(key)
+        names.each do |fname|
+          SearchEngine::Joins::Guard.validate_joined_field!(cfg, fname, source_klass: @klass)
         end
 
         existing = Array(nested[key])
@@ -1836,6 +1943,19 @@ module SearchEngine
 
     def selection_maps_all_empty?(map)
       Array(map.values).all? { |v| Array(v).empty? }
+    end
+
+    def append_preset_explain_line(lines, params)
+      return lines unless @state[:preset_name]
+
+      mode = @state[:preset_mode] || :merge
+      if (conf = Array(params[:_preset_conflicts])) && !conf.empty?
+        keys = conf.map(&:to_s).sort
+        lines << "  preset: #{@state[:preset_name]} (mode=#{mode} dropped: #{keys.join(',')})"
+      else
+        lines << "  preset: #{@state[:preset_name]} (mode=#{mode})"
+      end
+      lines
     end
   end
 end

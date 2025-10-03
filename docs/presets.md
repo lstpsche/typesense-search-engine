@@ -1,72 +1,68 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Multi-search](./multi_search.md)
+# Presets: Relation#preset and Merge Strategies
 
-## Presets
+Back to: [Index](./index.md) · See also: [Relation](./relation.md) · Multi-search: [Multi](./multi_search.md)
 
-Default presets are logical names you can assign per collection to represent a configuration profile (e.g., popular_products). This task introduces a global configuration for presets and a Base-level DSL to declare a per-collection default preset token. Resolution is deterministic and side‑effect‑free.
+## Overview
 
-### Global configuration
+Apply a server-side preset to a relation with a selectable merge strategy using `Relation#preset(name, mode: :merge)`.
 
-`SearchEngine.config.presets` holds:
-
-- **enabled**: Boolean, default `true`. When `false`, namespacing is ignored but declared tokens are still returned.
-- **namespace**: String, optional. When present and `enabled`, the effective name is `"#{namespace}_#{name}"`.
-
-Validation rules:
-
-- `enabled` must be a Boolean
-- `namespace` must be a non-empty String or `nil` (whitespace-only treated as `nil`)
-
-Example (initializer snippet, verbatim):
+### Examples
 
 ```ruby
-# config/initializers/search_engine.rb
-SearchEngine.configure do |c|
-  c.presets = OpenStruct.new(namespace: "prod", enabled: true)
-end
+# Merge (default)
+SearchEngine::Product.preset(:popular_products)
+  .where(active: true)
+  .order(updated_at: :desc)
 
-class SearchEngine::Product < SearchEngine::Base
-  default_preset :popular_products
-end
+# Only preset
+SearchEngine::Product.preset(:aggressive_sale, mode: :only).page(1).per(24)
+
+# Locked preset (chain cannot override preset filters/sorts)
+SearchEngine::Product.preset(:brand_curated, mode: :lock).order(price: :asc) # order will be dropped
 ```
 
-### Per‑collection defaults
+## Namespacing
 
-On a model subclassing `SearchEngine::Base`:
+Effective preset name is computed using global presets configuration (`SearchEngine.config.presets`). When enabled and a non-empty `namespace` is present, the effective name is `"#{namespace}_#{token}"`; otherwise the token is used as-is.
 
-- **DSL**: `default_preset :name` declares the preset token (stored as a Symbol without namespace)
-- **Reader**: `self.default_preset_name` returns the effective name (String)
+- **Enabled + namespace:** `prod_popular_products`
+- **Disabled or no namespace:** `popular_products`
 
-Resolution:
+## Strategies
 
-- If presets `enabled` and `namespace` present → `"#{namespace}_#{declared}"`
-- If presets `enabled` and no namespace → `"#{declared}"`
-- If presets `disabled` → `"#{declared}"` (namespace ignored)
+- **mode=:merge (default)**: preset is emitted along with all chain-derived params; on key overlaps, chain wins (Typesense semantics). No conflicts recorded.
+- **mode=:only**: preset is emitted and only essential params are kept from the chain. Optional params like `filter_by`, `sort_by`, `include_fields` are dropped. No conflicts recorded.
+- **mode=:lock**: preset is emitted and chain params are kept except those managed by preset (`filter_by`, `sort_by`, `include_fields`, etc.). Dropped keys are recorded and surfaced by `explain`.
 
-### Namespacing rule
+### Strategy comparison
 
-When `namespace` is present and presets are enabled, the effective name is `"#{namespace}_#{name}"`. This prepends the namespace once; the declared token is stored without namespace to avoid double‑namespacing.
+| Mode  | What is sent | Who wins on overlaps | Conflicts recorded |
+|------|---------------|----------------------|--------------------|
+| merge | preset + all chain params | chain | no |
+| only  | preset + essentials (q, query_by, page, per_page, infix) | n/a (others dropped) | no |
+| lock  | preset + chain minus preset-managed keys | preset | yes (dropped keys) |
 
-### Resolution diagram
+## Explain & Inspect
+
+- `inspect` adds a compact token, e.g., `preset=prod_popular_products(mode=lock)` when applied.
+- `explain` prints a `preset:` line and, for `mode: :lock`, includes `dropped:` keys, e.g. `preset: prod_popular_products (mode=lock dropped: filter_by,sort_by)`.
+
+## Mermaid: strategy flow
 
 ```mermaid
 flowchart TD
-  A[Declared preset token on model] --> B[Global presets config]
-  B -->|enabled & namespace present| C[Effective name = namespace + '_' + token]
-  B -->|enabled & no namespace| D[Effective name = token]
-  B -->|disabled| E[Effective name = token (namespace ignored)]
-  C --> F[Reader: default_preset_name]
-  D --> F
-  E --> F
+  A[Relation#preset(name, mode)] --> B[Compute effective preset name (namespace?)]
+  B --> C{mode}
+  C -- merge --> D[Emit preset + all chain params; chain wins on overlaps]
+  C -- only --> E[Emit preset + ESSENTIAL params only]
+  C -- lock --> F[Emit preset + chain params; drop chain keys in PRESET_MANAGED; record conflicts]
+  D --> G[Final Typesense params]
+  E --> G
+  F --> G
 ```
 
-### FAQ & Edge cases
+## Notes
 
-- **No declared preset**: `default_preset_name` returns `nil`.
-- **Blank namespace**: treated as `nil`.
-- **Disable globally**: set `SearchEngine.config.presets.enabled = false`; `default_preset_name` ignores namespace.
-
-### See also
-
-- [Index](./index.md)
-- [Relation](./relation.md)
-- [Multi-search](./multi_search.md)
+- Essential params include: `q`, `query_by`, `page`, `per_page`, `infix`.
+- Preset-managed keys include: `filter_by`, `sort_by`, `include_fields`, `exclude_fields`, `facet_by`, `max_facet_values`, `group_by`, `group_limit`, `group_missing_values`.
+- The API is immutable and copy-on-write; invalid mode or name raises `ArgumentError`.
