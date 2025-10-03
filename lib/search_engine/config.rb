@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module SearchEngine
   # Central configuration container for the engine.
   #
@@ -272,9 +274,15 @@ module SearchEngine
       # @return [String, nil] optional namespace prepended to preset names when enabled
       attr_accessor :namespace
 
+      # @return [Array<Symbol>] list of request param keys that presets manage in :lock mode
+      #   Any matching keys will be pruned from chain-compiled params. Defaults to
+      #   %i[filter_by sort_by include_fields exclude_fields].
+
       def initialize
         @enabled = true
         @namespace = nil
+        @locked_domains = %i[filter_by sort_by include_fields exclude_fields]
+        @locked_domains_set = nil
       end
 
       # Normalize a Boolean-like value.
@@ -308,6 +316,35 @@ module SearchEngine
         end
 
         value
+      end
+
+      # Assign locked domains; accepts Array/Set or a single value. Values are
+      # normalized to Symbols. Internal membership checks use a frozen Set.
+      # @param value [Array<#to_sym>, Set<#to_sym>, #to_sym, nil]
+      # @return [void]
+      def locked_domains=(value)
+        list =
+          case value
+          when nil then []
+          when Set then value.to_a
+          when Array then value
+          else Array(value)
+          end
+        syms = list.compact.map { |k| k.respond_to?(:to_sym) ? k.to_sym : k }.grep(Symbol)
+        @locked_domains = syms
+        @locked_domains_set = syms.to_set.freeze
+      end
+
+      # Return the locked domains as an Array of Symbols.
+      # @return [Array<Symbol>]
+      def locked_domains
+        Array(@locked_domains).map(&:to_sym)
+      end
+
+      # Return a frozen Set of locked domains for fast membership checks.
+      # @return [Set<Symbol>]
+      def locked_domains_set
+        @locked_domains_set ||= locked_domains.to_set.freeze
       end
     end
 
@@ -428,6 +465,7 @@ module SearchEngine
                  hash = {}
                  hash[:enabled] = value.enabled if value.respond_to?(:enabled)
                  hash[:namespace] = value.namespace if value.respond_to?(:namespace)
+                 hash[:locked_domains] = value.locked_domains if value.respond_to?(:locked_domains)
                  hash
                end
 
@@ -436,9 +474,10 @@ module SearchEngine
         cfg.enabled = normalized
       end
 
-      return unless source.key?(:namespace)
+      return unless source.key?(:namespace) || source.key?(:locked_domains)
 
-      cfg.namespace = PresetsConfig.normalize_namespace(source[:namespace])
+      cfg.namespace = PresetsConfig.normalize_namespace(source[:namespace]) if source.key?(:namespace)
+      cfg.locked_domains = source[:locked_domains] if source.key?(:locked_domains)
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -609,7 +648,8 @@ module SearchEngine
     def presets_hash_for_to_h
       {
         enabled: presets.enabled ? true : false,
-        namespace: presets.namespace
+        namespace: presets.namespace,
+        locked_domains: presets.locked_domains
       }
     end
 
@@ -716,11 +756,16 @@ module SearchEngine
       errors = []
       en = presets.enabled
       ns = presets.namespace
+      ld = Array(presets.locked_domains)
 
       errors << 'presets.enabled must be a Boolean' unless [true, false].include?(en)
 
       unless ns.nil? || (ns.is_a?(String) && !ns.strip.empty?)
         errors << 'presets.namespace must be a non-empty String or nil'
+      end
+
+      unless ld.is_a?(Array) && ld.all? { |k| k.is_a?(Symbol) }
+        errors << 'presets.locked_domains must be an Array of Symbols'
       end
 
       errors
