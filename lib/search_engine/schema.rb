@@ -164,19 +164,19 @@ module SearchEngine
 
         if defined?(ActiveSupport::Notifications)
           # Preserve legacy payload shape while adding canonical keys expected by the subscriber
-          ActiveSupport::Notifications.instrument('search_engine.schema.apply',
-                                                  logical: logical,
-                                                  new_physical: new_physical,
-                                                  previous_physical: current_target,
-                                                  dropped_count: dropped.size,
-                                                  # canonical keys
-                                                  collection: klass.name.to_s,
-                                                  physical_new: new_physical,
-                                                  alias_swapped: swapped,
-                                                  retention_deleted_count: dropped.size,
-                                                  status: :ok,
-                                                  duration_ms: (monotonic_ms - start_ms)
-                                                 )
+          SearchEngine::Instrumentation.instrument('search_engine.schema.apply',
+                                                   logical: logical,
+                                                   new_physical: new_physical,
+                                                   previous_physical: current_target,
+                                                   dropped_count: dropped.size,
+                                                   # canonical keys
+                                                   collection: klass.name.to_s,
+                                                   physical_new: new_physical,
+                                                   alias_swapped: swapped,
+                                                   retention_deleted_count: dropped.size,
+                                                   status: :ok,
+                                                   duration_ms: (monotonic_ms - start_ms)
+                                                  ) {}
         end
 
         {
@@ -217,12 +217,12 @@ module SearchEngine
         client.upsert_alias(logical, previous) unless current_target == previous
 
         if defined?(ActiveSupport::Notifications)
-          ActiveSupport::Notifications.instrument('search_engine.schema.rollback',
-                                                  logical: logical,
-                                                  new_target: previous,
-                                                  previous_target: current_target,
-                                                  duration_ms: (monotonic_ms - start_ms)
-                                                 )
+          SearchEngine::Instrumentation.instrument('search_engine.schema.rollback',
+                                                   logical: logical,
+                                                   new_target: previous,
+                                                   previous_target: current_target,
+                                                   duration_ms: (monotonic_ms - start_ms)
+                                                  ) {}
         end
 
         { logical: logical, new_target: previous, previous_target: current_target }

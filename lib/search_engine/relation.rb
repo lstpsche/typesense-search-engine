@@ -697,6 +697,29 @@ module SearchEngine
         params[:hidden_hits] = hidden.join(',') if hidden.any?
         params[:override_tags] = tags.join(',') if tags.any?
         params[:filter_curated_hits] = fch unless fch.nil?
+
+        # Emit curation compile event (counts/flags only)
+        if defined?(SearchEngine::Instrumentation)
+          begin
+            c_payload = {
+              pinned_count: pinned.size.positive? ? pinned.size : nil,
+              hidden_count: hidden.size.positive? ? hidden.size : nil,
+              has_override_tags: tags.any? || nil,
+              filter_curated_hits: (cur.key?(:filter_curated_hits) ? fch : nil)
+            }.compact
+            SearchEngine::Instrumentation.instrument('search_engine.curation.compile', c_payload) {}
+
+            overlap = (pinned & hidden)
+            if overlap.any?
+              SearchEngine::Instrumentation.instrument(
+                'search_engine.curation.conflict',
+                { type: :overlap, count: overlap.size }
+              ) {}
+            end
+          rescue StandardError
+            # swallow observability errors
+          end
+        end
       end
 
       # Pagination

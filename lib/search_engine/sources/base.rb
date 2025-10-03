@@ -28,7 +28,7 @@ module SearchEngine
         if defined?(SearchEngine::Observability)
           payload[:adapter_options] = SearchEngine::Observability.redact(adapter_options)
         end
-        ActiveSupport::Notifications.instrument('search_engine.source.batch_fetched', payload) {}
+        SearchEngine::Instrumentation.instrument('search_engine.source.batch_fetched', payload) {}
       end
 
       def instrument_error(source:, error:, partition: nil, cursor: nil, adapter_options: {})
@@ -44,7 +44,7 @@ module SearchEngine
         if defined?(SearchEngine::Observability)
           payload[:adapter_options] = SearchEngine::Observability.redact(adapter_options)
         end
-        ActiveSupport::Notifications.instrument('search_engine.source.error', payload) {}
+        SearchEngine::Instrumentation.instrument('search_engine.source.error', payload) {}
       end
 
       def enum_for_each_batch(partition:, cursor:)

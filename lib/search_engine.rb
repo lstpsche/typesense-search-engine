@@ -98,11 +98,11 @@ module SearchEngine
           url_opts: Observability.filtered_url_opts(url_opts)
         }
         begin
-          ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+          SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
             raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
-            se_payload[:http_status] = 200
+            ctx[:http_status] = 200
           rescue Errors::Api => error
-            se_payload[:http_status] = error.status
+            ctx[:http_status] = error.status
             raise
           end
         rescue Errors::Api => error
@@ -175,11 +175,11 @@ module SearchEngine
           url_opts: Observability.filtered_url_opts(url_opts)
         }
         begin
-          ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+          SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
             raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
-            se_payload[:http_status] = 200
+            ctx[:http_status] = 200
           rescue Errors::Api => error
-            se_payload[:http_status] = error.status
+            ctx[:http_status] = error.status
             raise
           end
         rescue Errors::Api => error
@@ -237,12 +237,12 @@ module SearchEngine
           url_opts: Observability.filtered_url_opts(url_opts)
         }
         begin
-          ActiveSupport::Notifications.instrument('search_engine.multi_search', se_payload) do
+          SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
             SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts).tap do
-              se_payload[:http_status] = 200
+              ctx[:http_status] = 200
             end
           rescue Errors::Api => error
-            se_payload[:http_status] = error.status
+            ctx[:http_status] = error.status
             raise
           end
         rescue Errors::Api => error

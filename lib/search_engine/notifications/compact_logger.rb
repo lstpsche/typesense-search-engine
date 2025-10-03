@@ -392,7 +392,13 @@ module SearchEngine
       private_class_method :url_parts
 
       def self.param_parts(payload)
-        params_hash = payload[:params].is_a?(Hash) ? payload[:params] : {}
+        params_hash = if payload[:params_preview].is_a?(Hash)
+                        payload[:params_preview]
+                      elsif payload[:params].is_a?(Hash)
+                        payload[:params]
+                      else
+                        {}
+                      end
         parts = []
         %i[q query_by per_page page infix].each do |key|
           next unless params_hash.key?(key)
@@ -532,7 +538,13 @@ module SearchEngine
             'ttl' => extract_ttl(payload[:url_opts])
           }.compact
         else
-          params_hash = payload[:params].is_a?(Hash) ? payload[:params] : {}
+          params_hash = if payload[:params_preview].is_a?(Hash)
+                          payload[:params_preview]
+                        elsif payload[:params].is_a?(Hash)
+                          payload[:params]
+                        else
+                          {}
+                        end
           h = {
             'event' => 'search',
             'collection' => payload[:collection],
