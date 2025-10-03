@@ -699,9 +699,11 @@ module SearchEngine
     def pluck(*fields)
       raise ArgumentError, 'pluck requires at least one field' if fields.nil? || fields.empty?
 
-      ensure_loaded!
-      names = fields.flatten.compact.map(&:to_s)
+      # Validate against effective root selection BEFORE loading
+      names = coerce_pluck_field_names(fields)
+      validate_pluck_fields_allowed!(names)
 
+      ensure_loaded!
       raw_hits = Array(@__result_memo.raw['hits'])
       objects = @__result_memo.to_a
 
@@ -728,6 +730,52 @@ module SearchEngine
           end
         end
       end
+    end
+
+    # Build a concise InvalidSelection message with prescriptive guidance.
+    # - Prefer `reselect` suggestion when includes are present and the field isn't excluded
+    # - Prefer `Remove exclude(:field)` when the field is explicitly excluded
+    def build_invalid_selection_message_for_pluck(missing:, requested:, include_base:, exclude_base:)
+      field = missing.map(&:to_s).min
+      if exclude_base.include?(field)
+        "InvalidSelection: field :#{field} not in effective selection. Remove exclude(:#{field})."
+      else
+        # Suggest reselect with current includes plus missing requested, de-duped and stable
+        suggestion_fields = include_base.dup
+        requested.each { |f| suggestion_fields << f unless suggestion_fields.include?(f) }
+        symbols = suggestion_fields.map { |t| ":#{t}" }.join(',')
+        "InvalidSelection: field :#{field} not in effective selection. Use `reselect(#{symbols})`."
+      end
+    end
+
+    # Normalize field inputs for pluck to deterministic string tokens.
+    def coerce_pluck_field_names(fields)
+      Array(fields).flatten.compact.map(&:to_s).map(&:strip).reject(&:empty?)
+    end
+
+    # Validate requested names against effective root selection and raise when any are missing.
+    def validate_pluck_fields_allowed!(names)
+      include_base = Array(@state[:select]).map(&:to_s)
+      exclude_base = Array(@state[:exclude]).map(&:to_s)
+
+      missing =
+        if include_base.empty?
+          # All fields allowed except explicit excludes
+          names & exclude_base
+        else
+          allowed = include_base - exclude_base
+          names - allowed
+        end
+
+      return if missing.empty?
+
+      msg = build_invalid_selection_message_for_pluck(
+        missing: missing,
+        requested: names,
+        include_base: include_base,
+        exclude_base: exclude_base
+      )
+      raise SearchEngine::Errors::InvalidSelection, msg
     end
 
     # Return total number of matching documents.

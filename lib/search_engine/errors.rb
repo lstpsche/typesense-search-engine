@@ -107,5 +107,12 @@ module SearchEngine
     # selection (select/exclude/reselect), relax strictness, or ensure the
     # upstream Typesense include/exclude mapping includes the fields.
     class MissingField < Error; end
+
+    # Raised when a materializer requests fields that are not permitted by the
+    # relation's effective selection (include − exclude, with exclude taking precedence).
+    #
+    # Used by selection-aware materializers like {SearchEngine::Relation#pluck}
+    # and {SearchEngine::Relation#ids} to fail fast before any network call.
+    class InvalidSelection < Error; end
   end
 end
