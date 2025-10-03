@@ -18,6 +18,7 @@ Welcome to the SearchEngine documentation.
 - [Grouping](./grouping.md)
 - [Multi-search](./multi_search.md)
 - [Indexer](./indexer.md)
+- [Presets](./presets.md)
 
 ## Overview
 
