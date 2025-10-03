@@ -145,6 +145,7 @@ module SearchEngine
         parts.concat(status_parts(p, duration_ms))
         parts.concat(url_parts(p))
         parts.concat(selection_parts(p)) unless multi
+        parts.concat(preset_parts(p)) unless multi
 
         parts.concat(param_parts(p)) if include_params && !multi
 
@@ -410,6 +411,43 @@ module SearchEngine
       end
       private_class_method :selection_parts
 
+      # Compact preset parts for text logs (single-line, allocation-light)
+      def self.preset_parts(payload)
+        name = payload[:preset_name] || (payload[:params].is_a?(Hash) ? payload[:params][:preset] : nil)
+        return [] unless name
+
+        mode = payload[:preset_mode]
+        pk_count = (payload[:preset_pruned_keys_count] || Array(payload[:preset_pruned_keys]).size).to_i
+        ld_count = payload[:preset_locked_domains_count]
+        if ld_count.nil?
+          begin
+            ld_count = SearchEngine.config.presets.locked_domains.size
+          rescue StandardError
+            ld_count = 0
+          end
+        end
+        ld_count = ld_count.to_i
+
+        # Token: pz=<name>|m=<mode>|pk=<count>|ld=<count>
+        # Truncate name conservatively to keep line short
+        shown_name = name.to_s
+        shown_name = shown_name.length > 64 ? "#{shown_name[0, 64]}…" : shown_name
+
+        parts = ["pz=#{shown_name}"]
+        parts << "m=#{mode}" if mode
+        parts << "pk=#{pk_count}" if pk_count.positive?
+        parts << "ld=#{ld_count}" if ld_count.positive?
+
+        # Optionally include small list of pruned keys when small (<=3)
+        keys = Array(payload[:preset_pruned_keys]).map { |k| k.respond_to?(:to_sym) ? k.to_sym : k }.grep(Symbol)
+        parts << "pk=[#{keys.map(&:to_s).join(',')}]" if keys.size.positive? && keys.size <= 3
+
+        [parts.join('|')]
+      rescue StandardError
+        []
+      end
+      private_class_method :preset_parts
+
       # Map a Symbol severity to Logger integer constant.
       def self.map_level(level)
         case level.to_s
@@ -480,7 +518,15 @@ module SearchEngine
             'ttl' => extract_ttl(payload[:url_opts]),
             'selection_include_count' => (payload[:selection_include_count] || 0).to_i,
             'selection_exclude_count' => (payload[:selection_exclude_count] || 0).to_i,
-            'selection_nested_assoc_count' => (payload[:selection_nested_assoc_count] || 0).to_i
+            'selection_nested_assoc_count' => (payload[:selection_nested_assoc_count] || 0).to_i,
+            'preset_name' => payload[:preset_name],
+            'preset_mode' => payload[:preset_mode],
+            'preset_pruned_keys_count' => payload[:preset_pruned_keys_count],
+            'preset_locked_domains_count' => payload[:preset_locked_domains_count],
+            'preset_pruned_keys' => begin
+              arr = Array(payload[:preset_pruned_keys])
+              arr.empty? ? nil : arr.map(&:to_s)
+            end
           }
           # Grouping fields at top-level when present
           h['group_by'] = params_hash[:group_by] if params_hash.key?(:group_by)

@@ -9,6 +9,7 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
   - `search_engine.multi_search` — wraps the top-level helper around `Client#multi_search`
   - `search_engine.schema.diff` — around schema diffing
   - `search_engine.schema.apply` — around schema apply lifecycle (create → reindex → swap → retention)
+  - `search_engine.preset.apply` — emitted during compile when a preset is applied (keys-only payload)
   - `search_engine.indexer.partition_start` — partition processing started (inline or ActiveJob)
   - `search_engine.indexer.partition_finish` — partition processing finished with summary
   - `search_engine.indexer.batch_import` — each bulk import attempt
@@ -115,7 +116,7 @@ flowchart TD
 
 ## Relation execution events
 
-Execution initiated by `SearchEngine::Relation` results in a single client call and emits `search_engine.search` with a compact, redacted payload.
+Execution initiated by `SearchEngine::Relation` results in a single client call and emits `search_engine.search` with a compact, redacted payload. When a preset is applied, compile also emits `search_engine.preset.apply`. See [Presets](./presets.md#observability).
 
 - **Event**: `search_engine.search`
 - **Payload**: `{ collection, params: Observability.redact(params), url_opts: { use_cache, cache_ttl }, status, error_class }`
