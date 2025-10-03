@@ -20,7 +20,7 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_merge_ordering_and_dedupe
-    r1 = Book.all.include_fields(:id, authors: %i[a])
+    r1 = Book.all.joins(:authors).include_fields(:id, authors: %i[a])
     r2 = r1.include_fields(:title, authors: %i[b a])
 
     params = r2.to_typesense_params
@@ -43,7 +43,7 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_reselect_replaces_both_base_and_nested
-    r1 = Book.all.include_fields(:id, authors: [:a])
+    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:a])
     r2 = r1.reselect(:title, authors: [:b])
 
     p1 = r1.to_typesense_params
@@ -54,7 +54,7 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_unscope_select_clears_both
-    r1 = Book.all.include_fields(:id, authors: [:a])
+    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:a])
     r2 = r1.unscope(:select)
 
     p1 = r1.to_typesense_params

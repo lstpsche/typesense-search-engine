@@ -130,6 +130,15 @@ module SearchEngine
             value.each do |inner_field, inner_value|
               field_sym = inner_field.to_sym
               path = "$#{key_sym}.#{field_sym}"
+              SearchEngine::Joins::Guard.ensure_single_hop_path!(path)
+
+              # Best-effort validate joined fields
+              begin
+                cfg = klass.join_for(key_sym)
+                SearchEngine::Joins::Guard.validate_joined_field!(cfg, field_sym)
+              rescue StandardError
+                # skip strictly when registry/attributes missing or join missing
+              end
 
               if array_like?(inner_value)
                 values = normalize_array_values(inner_value, field: field_sym, klass: klass)
@@ -473,8 +482,15 @@ module SearchEngine
       end
 
       def validate_assoc_and_join!(klass, assoc_name, joins)
-        # Validate association exists (raises UnknownJoin with suggestions)
-        klass.join_for(assoc_name)
+        # Validate association exists and config completeness
+        begin
+          SearchEngine::Joins::Guard.ensure_config_complete!(klass, assoc_name)
+        rescue SearchEngine::Errors::InvalidJoin
+          # Provide high-level guidance with suggestions if available
+          model_name = klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
+          msg = "association :#{assoc_name} is not declared on #{model_name} (declare with `join :#{assoc_name}, ...`)"
+          raise SearchEngine::Errors::InvalidJoin, msg
+        end
 
         # When enforcing applied joins, ensure relation has the association
         return if joins.nil? || Array(joins).include?(assoc_name)
