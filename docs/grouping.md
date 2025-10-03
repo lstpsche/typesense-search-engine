@@ -39,6 +39,38 @@ flowchart LR
 { group_by, group_limit, group_missing_values }]
 ```
 
+## Working with groups
+
+```ruby
+result = SearchEngine::Product.group_by(:brand_id, limit: 2).to_a
+# result is an Array of first hit per group
+res = SearchEngine::Product.group_by(:brand_id, limit: 2).execute
+res.grouped?       #=> true
+res.groups.first.key   #=> { "brand_id" => 12 }
+res.groups.first.hits  #=> [<Product ...>, <Product ...>] # hydrated
+```
+
+- **key**: Hash mapping field name → value, e.g., `{ "brand_id" => 12 }`. Missing values are represented as `nil`.
+- **hits**: Hydrated objects in backend order within the group.
+- **size**: Number of hits in the group (alias to `hits.length`).
+
+`Result#hits` / `to_a` remain ergonomic: when grouped, they return the first hydrated hit from each group (skipping empty groups). When not grouped, they return all hydrated hits as before.
+
+### Response flow
+
+```mermaid
+flowchart TD
+  A[Typesense grouped response] -->|grouped_hits| B[Result shaping]
+  B --> C[Groups array (Result::Group)]
+  C --> D[First-hit list for hits/to_a]
+```
+
+### Gotchas
+
+- **Ordering**: Group order and within-group hit order are preserved.
+- **Large groups**: Accessing `groups` hydrates hits per group; be mindful of memory for very large `group_limit`.
+- **Access patterns**: Use `#groups` / `#each_group` to iterate all hits; use `#to_a` / `#hits` when only the first hit per group is needed.
+
 ## Pagination interaction
 
 When grouping is enabled, Typesense applies `per_page` to the number of groups returned. `group_limit` caps the number of hits within each group. For example, `per(10)` returns up to 10 groups; with `group_limit: 3`, each group contains at most 3 hits.
