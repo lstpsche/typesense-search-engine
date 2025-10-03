@@ -55,3 +55,46 @@ flowchart TD
   B --> C[Curation state on Relation]
   C --> D[inspect/explain summaries]
 ```
+
+### Mapping to Typesense params
+
+| State key             | Example value             | Param key             | Encoded value         |
+| --------------------- | ------------------------- | --------------------- | --------------------- |
+| `pinned`              | `["p1","p2"]`             | `pinned_hits`         | `"p1,p2"`             |
+| `hidden`              | `[`"p9"`]`                  | `hidden_hits`         | `"p9"`                |
+| `override_tags`       | `["homepage","campaign"]` | `override_tags`       | `"homepage,campaign"` |
+| `filter_curated_hits` | `true`                    | `filter_curated_hits` | `true`                |
+
+- Keys are omitted when arrays are empty or when `filter_curated_hits` is `nil`.
+- Ordering is deterministic; `pinned` preserves first-occurrence order.
+
+### Mermaid — Curation State → Params
+
+```mermaid
+flowchart TD
+  A[Relation.curation state] --> B[Compiler encoder]
+  B --> C{present?}
+  C -- pinned --> D[pinned_hits: join(',')]
+  C -- hidden --> E[hidden_hits: join(',')]
+  C -- tags --> F[override_tags: join(',')]
+  C -- filter flag --> G[filter_curated_hits: boolean]
+  D --> H[Body params]
+  E --> H
+  F --> H
+  G --> H
+```
+
+### Example (verbatim)
+
+```ruby
+rel = SearchEngine::Product
+        .curate(pin: %w[p1 p2], hide: %w[p9], override_tags: %w[homepage], filter_curated_hits: true)
+rel.to_typesense_params
+# => {
+#   q: "*", query_by: "name, description",
+#   pinned_hits: "p1,p2", hidden_hits: "p9",
+#   filter_curated_hits: true, override_tags: "homepage"
+# }
+```
+
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)

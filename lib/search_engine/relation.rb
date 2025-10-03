@@ -682,6 +682,19 @@ module SearchEngine
       exclude_str = compile_exclude_fields_string
       params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
 
+      # Curation (body params only)
+      if (cur = @state[:curation])
+        pinned = Array(cur[:pinned]).map(&:to_s).reject(&:empty?)
+        hidden = Array(cur[:hidden]).map(&:to_s).reject(&:empty?)
+        tags   = Array(cur[:override_tags]).map(&:to_s).reject(&:empty?)
+        fch    = cur[:filter_curated_hits]
+
+        params[:pinned_hits] = pinned.join(',') if pinned.any?
+        params[:hidden_hits] = hidden.join(',') if hidden.any?
+        params[:override_tags] = tags.join(',') if tags.any?
+        params[:filter_curated_hits] = fch unless fch.nil?
+      end
+
       # Pagination
       pagination = compute_pagination
       params[:page] = pagination[:page] if pagination.key?(:page)
@@ -2102,6 +2115,32 @@ module SearchEngine
       SearchEngine::Instrumentation.instrument('search_engine.preset.conflict', payload) {}
     rescue StandardError
       nil
+    end
+
+    # Curation normalizers
+    # ---------------------
+    def normalize_curation_ids(values)
+      list = Array(values).flatten(1).compact
+      list.map { |v| v.to_s.strip }.reject(&:empty?)
+    end
+
+    def normalize_curation_tags(values)
+      list = Array(values).flatten(1).compact.map { |v| v.to_s.strip }.reject(&:empty?)
+      list.each_with_object([]) { |t, acc| acc << t unless acc.include?(t) }
+    end
+
+    def normalize_curation_input(value)
+      return nil if value.nil? || (value.respond_to?(:empty?) && value.empty?)
+      raise ArgumentError, 'curation must be a Hash' unless value.is_a?(Hash)
+
+      pinned = normalize_curation_ids(value[:pinned] || value['pinned'])
+      hidden = normalize_curation_ids(value[:hidden] || value['hidden'])
+      tags = normalize_curation_tags(value[:override_tags] || value['override_tags'])
+
+      raw_fch = (value.key?(:filter_curated_hits) ? value[:filter_curated_hits] : value['filter_curated_hits'])
+      fch = raw_fch.nil? ? nil : coerce_boolean_strict(raw_fch, :filter_curated_hits)
+
+      { pinned: pinned, hidden: hidden, override_tags: tags, filter_curated_hits: fch }
     end
   end
 end

@@ -77,6 +77,7 @@ Compiler.compile([AST.eq(:x, 1), AST.eq(:y, 2)])
 - `Relation#to_typesense_params` prefers compiling `ast` when present, falling back to legacy string `filters` for backward compatibility.
 - `Raw` fragments are preserved through the pipeline.
 - When joins are applied, joined fields render as `$assoc.field` in `filter_by` and as `$assoc.field:dir` in `sort_by`. Nested `include_fields` compile to `$assoc(field1,field2,...)` segments emitted before base fields. The final `include_fields` reflects precedence: effective include set = include − exclude (per path); exclude always wins. Empty groups are omitted.
+- Curation state maps to body params: `pinned_hits`, `hidden_hits`, `override_tags`, `filter_curated_hits` (omitted when empty/`nil`). See [Curation](./curation.md).
 
 ### Example with joins
 

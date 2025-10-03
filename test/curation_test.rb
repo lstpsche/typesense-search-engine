@@ -31,6 +31,7 @@ class CurationTest < Minitest::Test
   def test_curate_replaces_provided_keys_and_clear_works
     r =
       Product
+      .all
       .pin('x')
       .curate(pin: %w[a b], hide: %w[x], override_tags: %w[tag1], filter_curated_hits: false)
 
