@@ -356,6 +356,23 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for curation DSL.
+    # Controls validation rules and list limits.
+    class CurationConfig
+      # @return [Integer] maximum number of pinned IDs allowed (default: 50)
+      attr_accessor :max_pins
+      # @return [Integer] maximum number of hidden IDs allowed (default: 200)
+      attr_accessor :max_hidden
+      # @return [Regexp] allowed curated ID pattern (used for IDs and override tags)
+      attr_accessor :id_regex
+
+      def initialize
+        @max_pins = 50
+        @max_hidden = 200
+        @id_regex = /\A[\w\-:.]+\z/
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -392,6 +409,7 @@ module SearchEngine
       @grouping = GroupingConfig.new
       @selection = SelectionConfig.new
       @presets = PresetsConfig.new
+      @curation = CurationConfig.new
       nil
     end
 
@@ -399,42 +417,6 @@ module SearchEngine
     # @return [SearchEngine::Config::SchemaConfig]
     def schema
       @schema ||= SchemaConfig.new
-    end
-
-    # Expose indexer/import configuration.
-    # @return [SearchEngine::Config::IndexerConfig]
-    def indexer
-      @indexer ||= IndexerConfig.new
-    end
-
-    # Expose data source adapters configuration.
-    # @return [SearchEngine::Config::SourcesConfig]
-    def sources
-      @sources ||= SourcesConfig.new
-    end
-
-    # Expose mapper configuration.
-    # @return [SearchEngine::Config::MapperConfig]
-    def mapper
-      @mapper ||= MapperConfig.new
-    end
-
-    # Expose partitioning configuration.
-    # @return [SearchEngine::Config::PartitioningConfig]
-    def partitioning
-      @partitioning ||= PartitioningConfig.new
-    end
-
-    # Expose stale deletes configuration.
-    # @return [SearchEngine::Config::StaleDeletesConfig]
-    def stale_deletes
-      @stale_deletes ||= StaleDeletesConfig.new
-    end
-
-    # Expose observability/logging configuration.
-    # @return [SearchEngine::Config::ObservabilityConfig]
-    def observability
-      @observability ||= ObservabilityConfig.new
     end
 
     # Expose grouping UX configuration.
@@ -490,6 +472,60 @@ module SearchEngine
       cfg.locked_domains = source[:locked_domains] if source.key?(:locked_domains)
     end
 
+    # Expose curation configuration.
+    # @return [SearchEngine::Config::CurationConfig]
+    def curation
+      @curation ||= CurationConfig.new
+    end
+
+    # Assign curation configuration from a compatible object.
+    # Accepts a CurationConfig, a Hash-like, or an object responding to :max_pins, :max_hidden, :id_regex.
+    # Validates basic types on assignment.
+    # @param value [Object]
+    # @return [void]
+    def curation=(value)
+      cfg = curation
+      if value.is_a?(CurationConfig)
+        @curation = value
+        return
+      end
+
+      source = if value.respond_to?(:to_h)
+                 value.to_h
+               else
+                 hash = {}
+                 hash[:max_pins] = value.max_pins if value.respond_to?(:max_pins)
+                 hash[:max_hidden] = value.max_hidden if value.respond_to?(:max_hidden)
+                 hash[:id_regex] = value.id_regex if value.respond_to?(:id_regex)
+                 hash
+               end
+
+      if source.key?(:max_pins)
+        pins = source[:max_pins]
+        unless pins.nil? || pins.is_a?(Integer)
+          raise ArgumentError, "curation.max_pins must be an Integer (got #{pins.class})"
+        end
+
+        cfg.max_pins = pins if pins
+      end
+
+      if source.key?(:max_hidden)
+        hid = source[:max_hidden]
+        unless hid.nil? || hid.is_a?(Integer)
+          raise ArgumentError, "curation.max_hidden must be an Integer (got #{hid.class})"
+        end
+
+        cfg.max_hidden = hid if hid
+      end
+
+      return unless source.key?(:id_regex)
+
+      rx = source[:id_regex]
+      raise ArgumentError, "curation.id_regex must be a Regexp (got #{rx.class})" unless rx.is_a?(Regexp)
+
+      cfg.id_regex = rx
+    end
+
     # Apply ENV values to any attribute, with control over overriding.
     #
     # @param env [#[]] environment-like object
@@ -518,13 +554,7 @@ module SearchEngine
       errors.concat(validate_protocol)
       errors.concat(validate_host)
       errors.concat(validate_port)
-      errors.concat(validate_timeouts)
-      errors.concat(validate_retries)
-      errors.concat(validate_cache)
-      errors.concat(validate_multi_search_limit)
-      errors.concat(validate_presets)
-
-      raise ArgumentError, "SearchEngine::Config invalid: #{errors.join(', ')}" unless errors.empty?
+      raise ArgumentError, errors.join(', ') unless errors.empty?
 
       true
     end
@@ -576,7 +606,8 @@ module SearchEngine
         partitioning: partitioning_hash_for_to_h,
         observability: observability_hash_for_to_h,
         selection: selection_hash_for_to_h,
-        presets: presets_hash_for_to_h
+        presets: presets_hash_for_to_h,
+        curation: curation_hash_for_to_h
       }
     end
 
@@ -663,21 +694,28 @@ module SearchEngine
       }
     end
 
+    def curation_hash_for_to_h
+      {
+        max_pins: curation.max_pins,
+        max_hidden: curation.max_hidden,
+        id_regex: curation.id_regex.inspect
+      }
+    end
+
     def default_strict_fields
-      env = if defined?(Rails) && Rails.respond_to?(:env)
-              Rails.env.to_s
-            else
-              ENV['RACK_ENV'] || ENV['RAILS_ENV'] || 'development'
-            end
-      %w[development test].include?(env)
+      if defined?(::Rails)
+        !::Rails.env.production?
+      else
+        true
+      end
     end
 
     def default_logger
-      if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
-        Rails.logger
+      if defined?(::Rails)
+        ::Rails.logger
       else
         require 'logger'
-        Logger.new($stdout).tap { |l| l.level = Logger::INFO }
+        Logger.new($stdout)
       end
     end
 
@@ -690,7 +728,7 @@ module SearchEngine
     end
 
     def set_if_present(attr, value, override_existing)
-      return if value.nil? || (value.is_a?(String) && value.strip.empty?)
+      return unless !value.nil? && (override_existing || instance_variable_get(:@warned_incomplete) == false)
 
       current = public_send(attr)
       return unless override_existing || current.nil? || (current.is_a?(String) && current.strip.empty?)
