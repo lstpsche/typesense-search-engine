@@ -59,6 +59,27 @@ Tip: When using Typesense `include_fields`, only included fields will be hydrate
 
 ---
 
+## Pluck & selection
+
+`pluck(*fields)` validates requested fields against the effective selection (include − exclude; exclude wins) before executing. When a requested field is not permitted, it fails fast with an actionable error.
+
+Example:
+
+```ruby
+SearchEngine::Product.select(:id).pluck(:name)
+# raises InvalidSelection: field :name not in effective selection. Use `reselect(:id,:name)`.
+```
+
+Hints:
+- When a field is explicitly excluded, the error suggests removing the exclude.
+- When includes are present but missing the field, the error suggests `reselect(...)` with the current includes plus the requested fields.
+
+`ids` delegates to `pluck(:id)`. It succeeds when `:id` is permitted by the effective selection. If `:id` is explicitly excluded or not part of an include list (when includes are present), it raises `InvalidSelection` and suggests how to fix it. When includes are empty, all fields are allowed except explicit excludes, so `ids` works by default.
+
+See also: [Field Selection DSL](./field_selection.md).
+
+---
+
 ## Relation materializers and single-request memoization
 
 Materializers on `SearchEngine::Relation` trigger execution and cache a single `SearchEngine::Result` per relation instance. The first materializer issues exactly one search; subsequent materializers reuse the cached result. Relation immutability is preserved: chainers return new relations; materializers only populate an internal memo that is invisible to `inspect` and equality.

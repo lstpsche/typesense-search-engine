@@ -152,5 +152,5 @@ flowchart TD
   E -- no --> I[Leave absents unset (no ivars)] --> F
 ```
 
-See also: [Relation](./relation.md), [Materializers](./materializers.md), and [Compiler](./compiler.md).
+See also: [Relation](./relation.md), [Materializers](./materializers.md#pluck--selection), and [Compiler](./compiler.md).
 
