@@ -71,9 +71,58 @@ flowchart TD
 | `select(authors: [:first_name])` | include_nested: `{ authors: ["first_name"] }` | authors: `["first_name"]` |
 | `exclude(authors: [:middle_name])` | exclude_nested: `{ authors: ["middle_name"] }` | authors: include empty → all − `["middle_name"]` |
 
+## Compiler Mapping (Typesense params)
+
+- **include_fields**: base tokens and nested joins encoded as `$assoc(field1,field2)`.
+- **exclude_fields**: base tokens and nested joins encoded similarly.
+- **Precedence**: final effective set is `include − exclude` per path (root and each association). **Exclude wins**. Empty groups are omitted.
+
+### Mapping table
+
+| Normalized state | include_fields | exclude_fields |
+| --- | --- | --- |
+| include: `[:id, :name]` | `id,name` | — |
+| exclude: `[:legacy]` | — | `legacy` |
+| include: `[:id]`, include_nested: `{ authors: ["first_name","last_name"] }` | `$authors(first_name,last_name),id` | — |
+| exclude_nested: `{ brands: ["internal_score"] }` | — | `$brands(internal_score)` |
+| include: `[:id,:title]`, include_nested: `{ authors: ["first_name","last_name"] }`, exclude: `[:legacy]`, exclude_nested: `{ brands: ["internal_score"] }` | `id,title,$authors(first_name,last_name)` | `legacy,$brands(internal_score)` |
+| include_nested: `{ authors: ["first_name","last_name"] }`, exclude_nested: `{ authors: ["last_name"] }` | `$authors(first_name)` | — |
+
+Notes:
+- Only add `include_fields` if there is at least one effective include (root or nested).
+- Only add `exclude_fields` if there is at least one exclude (root or nested). You may keep excludes even if they are redundant due to precedence; keeping them is harmless and documents intent.
+- Multiple assoc groups are comma‑separated; no `$assoc()` empty groups are emitted.
+
+### Flow
+
+```mermaid
+flowchart TD
+  A[Normalized selection state] --> B[Apply precedence: include − exclude per path]
+  B --> C[Encode root: sort + join]
+  B --> D[Encode nested: $assoc(field1,field2) sorted]
+  C --> E[include_fields]
+  D --> E
+  F[Raw excludes (root + nested)] --> G[Sort + encode ($assoc(...))]
+  G --> H[exclude_fields]
+```
+
+### Example
+
+```ruby
+rel = SearchEngine::Book
+        .joins(:authors, :brands)
+        .select(:id, :title, authors: [:first_name, :last_name])
+        .exclude(:legacy, brands: [:internal_score])
+rel.to_typesense_params[:include_fields]
+# => "id,title,$authors(first_name,last_name)"
+rel.to_typesense_params[:exclude_fields]
+# => "legacy,$brands(internal_score)"
+```
+
 ## See also
 
 - [Relation](./relation.md)
 - [JOINs](./joins.md)
 - [Materializers](./materializers.md)
+- [Compiler](./compiler.md)
 

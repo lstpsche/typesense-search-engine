@@ -474,11 +474,17 @@ module SearchEngine
     # - group_missing_values [Boolean, only when true]
     # Validation: field present (Symbol/String), limit positive Integer if provided, missing_values Boolean.
     #
+    # Field selection mapping:
+    # - include_fields: base tokens and nested join segments encoded as "$assoc(field1,field2)".
+    # - exclude_fields: base tokens and nested join segments encoded as above.
+    # Precedence: effective include set is (include − exclude) at root and per association; exclude always wins.
+    # Empty groups are omitted and keys are omitted when resulting strings are blank.
+    #
     # @return [Hash] typesense body params suitable for Client#search
     # @example
     #   rel.to_typesense_params
     #   # => { q: "*", query_by: "name,description", filter_by: "brand_id:=[1,2] && active:=true", page: 2, per_page: 20 }
-    def to_typesense_params # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
+    def to_typesense_params # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
       cfg = SearchEngine.config
       opts = @state[:options] || {}
 
@@ -492,7 +498,7 @@ module SearchEngine
 
       # Filters and sorting
       ast_nodes = Array(@state[:ast]).flatten.compact
-      compile_started_ms = SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
+      SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
       filter_str = compiled_filter_by(ast_nodes)
       params[:filter_by] = filter_str if filter_str
 
@@ -520,80 +526,21 @@ module SearchEngine
         limit = grouping[:limit]
         missing_values = grouping[:missing_values]
 
-        field_valid = field.is_a?(Symbol) || field.is_a?(String)
-        limit_valid = limit.nil? || (limit.is_a?(Integer) && limit.positive?)
-        missing_values_bool = [true, false].include?(missing_values)
-
-        raise SearchEngine::Errors::InvalidGroup, 'InvalidGroup: field must be a Symbol or String' unless field_valid
-
-        unless limit_valid
-          raise SearchEngine::Errors::InvalidGroup,
-                "InvalidGroup: limit must be a positive integer (got #{limit.inspect})"
-        end
-        unless missing_values_bool
-          raise SearchEngine::Errors::InvalidGroup,
-                "InvalidGroup: missing_values must be boolean (got #{missing_values.inspect})"
+        if field
+          params[:group_by] = field.to_s
+          params[:group_limit] = limit if limit
+          params[:group_missing_values] = true if missing_values
         end
 
-        # Defensive unknown field and unsupported path checks
-        field_str = field.to_s
-        if field_str.start_with?('$') || field_str.include?('.')
-          raise SearchEngine::Errors::UnsupportedGroupField,
-                %(UnsupportedGroupField: grouping supports base fields only (got #{field_str.inspect}))
-        end
-        attrs = safe_attributes_map
-        unless attrs.nil? || attrs.empty? || attrs.key?(field.to_sym)
-          msg = build_invalid_group_unknown_field_message(field.to_sym)
-          raise SearchEngine::Errors::InvalidGroup, msg
-        end
-
-        # Guardrail warnings (non-fatal)
-        begin
-          if grouping_warnings_enabled?(cfg)
-            # 1) order vs group ordering
-            unless orders.empty?
-              cfg.logger&.warn('[search_engine] order affects hits, not group ordering.')
-              cfg.logger&.warn('[search_engine] Groups follow engine ranking.')
-              cfg.logger&.warn('[search_engine] Tip: Use filters to control the first hit per group.')
-            end
-
-            # 2) grouping field omitted from include_fields (only when include_fields present)
-            base_selected = Array(@state[:select]).map(&:to_s)
-            if !base_selected.empty? && !base_selected.include?(field_str)
-              cfg.logger&.warn(%([search_engine] Grouping by `#{field_str}` without selecting it may be confusing.))
-              cfg.logger&.warn('[search_engine] Consider including it in fields or read it from `Group#key`.')
-            end
-
-            # 3) missing_values: true combined with filters excluding nulls for the grouping field
-            if missing_values && excludes_nulls_for_field?(ast_nodes, field_str)
-              cfg.logger&.warn(
-                %([search_engine] missing_values: true + filters excluding `null` for `#{field_str}` )
-              )
-              cfg.logger&.warn('[search_engine] may produce fewer missing groups than expected.')
-            end
-          end
-        rescue StandardError
-          # Do not fail search on logging issues
-        end
-
-        # Compile-time grouping timing start
-        grouping_started_ms = SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
-
-        params[:group_by] = field_str
-        params[:group_limit] = limit if limit
-        params[:group_missing_values] = true if missing_values
-
-        # Emit compile-time grouping event with minimal payload
         if defined?(SearchEngine::Instrumentation)
           begin
-            g_payload = {
+            payload = {
               collection: klass_name_for_inspect,
-              field: field_str,
+              field: field&.to_s,
               limit: limit,
-              missing_values: missing_values,
-              duration_ms: (SearchEngine::Instrumentation.monotonic_ms - grouping_started_ms if grouping_started_ms)
-            }
-            SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', g_payload)
+              missing_values: missing_values
+            }.compact
+            SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', payload) {}
           rescue StandardError
             # swallow observability errors
           end
@@ -1362,6 +1309,8 @@ module SearchEngine
 
         exc_fields = Array(exclude_nested_map[assoc])
         fields = (inc_fields - exc_fields).map(&:to_s).reject(&:empty?)
+        # Ensure deterministic order within the assoc group
+        fields = fields.sort
         next if fields.empty?
 
         nested_segments << "$#{assoc}(#{fields.join(',')})"
@@ -1395,6 +1344,8 @@ module SearchEngine
         next if Array(include_nested_map[assoc]).any?
 
         fields = Array(exclude_nested_map[assoc]).map(&:to_s).reject(&:empty?)
+        # Ensure deterministic order within the assoc group
+        fields = fields.sort
         next if fields.empty?
 
         segments << "$#{assoc}(#{fields.join(',')})"
