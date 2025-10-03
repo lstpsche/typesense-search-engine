@@ -127,7 +127,7 @@ mr.dig(:brands).to_a
 mr.labels # => [:products, :brands]
 ```
 
-Note: A convenience helper `SearchEngine.multi_search_result` returns a `SearchEngine::MultiResult` directly without changing the default behavior of `SearchEngine.multi_search`.
+Note: A convenience helper `SearchEngine.multi_search_result` returns a `MultiResult` directly without changing the default behavior of `SearchEngine.multi_search`.
 
 ### URL opts, caching, and limits
 
@@ -249,3 +249,43 @@ flowchart TD
   F --> H
   G --> H
 ```
+
+## Curation in Multi‑search
+
+Curation parameters are computed per relation via `Relation#to_typesense_params` and live inside each per‑search entry (body‑only). They do not appear at the top‑level or in URL options.
+
+- **Per‑entry independence**: each `m.add` relation carries its own curation state
+- **Pinned order**: `pinned_hits` preserves first‑occurrence order
+- **Omission**: empty arrays are omitted; `filter_curated_hits` omitted when `nil`
+
+Verbatim example from the ticket:
+
+```ruby
+res = SearchEngine.multi_search do |m|
+  m.add :products, SearchEngine::Product.curate(pin: %w[p1 p2])
+  m.add :brands,   SearchEngine::Brand.curate(hide: %w[b9 b10], filter_curated_hits: true)
+end
+```
+
+Per‑search curation keys mapping (when present):
+
+| Relation state | Per‑search key |
+| --- | --- |
+| `pinned` | `pinned_hits` (comma‑separated, stable order) |
+| `hidden` | `hidden_hits` (comma‑separated) |
+| `override_tags` | `override_tags` (comma‑separated) |
+| `filter_curated_hits` | `filter_curated_hits` (boolean) |
+
+### Mermaid — Per‑search Curation Placement
+
+```mermaid
+flowchart TD
+  A[Relation] --> B[to_typesense_params]
+  B --> C[Per‑search entry]
+  C --> D{curation keys present?}
+  D -- yes --> E[Include pinned_hits/hidden_hits/override_tags/filter_curated_hits]
+  D -- no --> F[Omit curation keys]
+  C --> G[Append to searches[]]
+```
+
+Backlinks: [Curation](./curation.md) · [Index](./index.md) · [Relation](./relation.md)

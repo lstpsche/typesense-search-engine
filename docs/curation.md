@@ -79,7 +79,7 @@ flowchart TD
   C -- no --> F[No conflict]
 ```
 
-Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Multi‑search](./multi_search.md#curation-in-multi-search)
 
 ### Diagram
 
