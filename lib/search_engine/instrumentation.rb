@@ -52,6 +52,7 @@ module SearchEngine
     #   - :mode [Symbol] one of :merge, :only, :lock
     #   - :locked_domains [Array<Symbol>] configured locked domains for :lock mode
     #   - :pruned_keys [Array<Symbol>] keys removed by the chosen mode
+    #   # See also: docs/presets.md#observability
     # Measure a block and attach duration_ms to payload.
     # @param event [String]
     # @param base_payload [Hash]

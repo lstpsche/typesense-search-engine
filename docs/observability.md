@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Presets](./presets.md)
 
 ### Observability
 
