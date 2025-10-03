@@ -141,6 +141,7 @@ module SearchEngine
       # @param foreign_key [#to_sym] foreign key name in the target collection
       # @return [void]
       # @raise [ArgumentError] when inputs are invalid or duplicate name
+      # @see docs/joins.md for usage and compile-time instrumentation
       def join(name, collection:, local_key:, foreign_key:)
         assoc_name = name.to_sym
         raise ArgumentError, 'join name must be non-empty' if assoc_name.to_s.strip.empty?

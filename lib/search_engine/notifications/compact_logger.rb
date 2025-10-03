@@ -19,6 +19,7 @@ module SearchEngine
       EVENT_MULTI  = 'search_engine.multi_search'
       EVENT_SCHEMA_DIFF   = 'search_engine.schema.diff'
       EVENT_SCHEMA_APPLY  = 'search_engine.schema.apply'
+      EVENT_JOINS_COMPILE = 'search_engine.joins.compile'
       EVENT_PARTITION_START  = 'search_engine.indexer.partition_start'
       EVENT_PARTITION_FINISH = 'search_engine.indexer.partition_finish'
       EVENT_BATCH_IMPORT     = 'search_engine.indexer.batch_import'
@@ -36,7 +37,7 @@ module SearchEngine
       # @param include_params [Boolean] when true, include whitelisted params for single-search
       # @param format [Symbol, nil] :kv or :json; defaults to config.observability.log_format
       # @return [Array<Object>] subscription handles that can be passed to {.unsubscribe}
-      def self.subscribe(logger: default_logger, level: :info, include_params: false, format: nil) # rubocop:disable Metrics/AbcSize
+      def self.subscribe(logger: default_logger, level: :info, include_params: false, format: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         return [] unless defined?(ActiveSupport::Notifications)
 
         severity = map_level(level)
@@ -61,6 +62,11 @@ module SearchEngine
         schema_apply_sub = ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_APPLY) do |*args|
           ev = ActiveSupport::Notifications::Event.new(*args)
           emit_schema_apply(log, severity, ev, format: fmt)
+        end
+
+        joins_compile_sub = ActiveSupport::Notifications.subscribe(EVENT_JOINS_COMPILE) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_joins_compile(log, severity, ev, format: fmt)
         end
 
         part_start_sub = ActiveSupport::Notifications.subscribe(EVENT_PARTITION_START) do |*args|
@@ -101,8 +107,11 @@ module SearchEngine
           emit_delete_stale(log, severity, ev, format: fmt, legacy: :skipped)
         end
 
-        @last_handle = [search_sub, multi_sub, schema_diff_sub, schema_apply_sub, part_start_sub, part_finish_sub,
-                        batch_sub, stale_sub, legacy_started, legacy_finished, legacy_error, legacy_skipped]
+        @last_handle = [
+          search_sub, multi_sub, schema_diff_sub, schema_apply_sub, joins_compile_sub,
+          part_start_sub, part_finish_sub, batch_sub, stale_sub,
+          legacy_started, legacy_finished, legacy_error, legacy_skipped
+        ]
       end
 
       # Unsubscribe a previous subscription set.
@@ -180,6 +189,38 @@ module SearchEngine
           'duration.ms' => event.duration.round(1)
         }
         emit(logger, severity, h, format)
+      rescue StandardError
+        nil
+      end
+
+      # JOINs compile formatter
+      # Emits a single-line summary of associations and their usage, with lengths only
+      # and without raw filter/include/sort strings.
+      def self.emit_joins_compile(logger, severity, event, format: :kv)
+        return unless logger
+        return unless allow_log?(logger, severity)
+
+        p = event.payload
+        used = p[:used_in] || {}
+        used_compact = []
+        %i[include filter sort].each do |k|
+          arr = Array(used[k]).map(&:to_s)
+          used_compact << "#{k}:#{arr.join(',')}" unless arr.empty?
+        end
+
+        h = {
+          'event' => 'joins.compile',
+          'collection' => p[:collection],
+          'joins.assocs' => Array(p[:assocs]).join(','),
+          'joins.count' => p[:join_count],
+          'joins.used_in' => used_compact.join('|'),
+          'joins.include.len' => p[:include_len],
+          'joins.filter.len' => p[:filter_len],
+          'joins.sort.len' => p[:sort_len],
+          'has_joins' => p[:has_joins],
+          'duration.ms' => p[:duration_ms] || event.duration.round(1)
+        }
+        emit(logger, severity, h.compact, format)
       rescue StandardError
         nil
       end

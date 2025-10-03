@@ -1,8 +1,27 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
 
 # Join Declarations on Base
 
-Server‑side joins require lightweight association metadata declared on your model class. This page documents the model‑level DSL, the per‑class registry, and how the compiler/validator will consume this metadata.
+Server‑side joins require lightweight association metadata declared on your model class. This page documents the model‑level DSL, the per‑class registry, how the relation compiles joined selections/filters/sorts, and the instrumentation emitted during compile.
+
+## Overview
+
+- **Declare** associations on your model with `join :name, collection:, local_key:, foreign_key:`.
+- **Select** joins in queries with `Relation#joins(*assocs)`; names validated against the model’s registry.
+- **Use** nested include fields for joined collections; `where`/`order` can target joined fields using `$assoc.field`.
+- **Observe** compile‑time summaries via `search_engine.joins.compile` without exposing raw literals.
+
+```mermaid
+flowchart LR
+  subgraph Relation state
+    A[.joins(:authors)] --> B[select_nested (include_fields)]
+    A --> C[ast (where)]
+    A --> D[orders]
+  end
+  B & C & D --> E[Compiler]
+  E --> F[include_fields/filter_by/sort_by]
+  E --> G[_join context]
+```
 
 ## DSL
 
@@ -54,7 +73,7 @@ flowchart LR
 - Order is preserved and duplicates are not deduped by default; explicit chaining is honored.
 - For debugging, `rel.joins_list` returns the frozen array of association names in state.
 
-Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
 
 ## Filtering and Ordering on Joined Fields
 
@@ -200,3 +219,39 @@ rel.to_typesense_params
 Internals: the returned params also include a reserved `:_join` key with join context for downstream components. See [Compiler](./compiler.md) for the exact shape.
 
 See also: [Compiler](./compiler.md).
+
+---
+
+## Instrumentation
+
+Backlinks: [Observability](./observability.md) · [Compiler](./compiler.md)
+
+A compile‑time event is emitted per relation compile to summarize JOIN usage.
+
+- **Event**: `search_engine.joins.compile`
+- **Payload keys** (nil/empty omitted):
+  - `collection` — fully‑qualified class name (e.g., `SearchEngine::Book`)
+  - `join_count` — integer number of associations referenced
+  - `assocs` — ordered short array of association names
+  - `used_in` — `{ include: [...], filter: [...], sort: [...] }` with association names
+  - `include_len` — character length of compiled include string
+  - `filter_len` — length of `filter_by`
+  - `sort_len` — length of `sort_by`
+  - `duration_ms` — compile duration
+  - `has_joins` — boolean
+
+No raw filters or string literal values are included.
+
+### Sample logs
+
+KV format:
+
+```
+event=joins.compile collection=SearchEngine::Book joins.assocs=authors,orders joins.count=2 joins.used_in=include:authors|filter:authors|sort:authors joins.include.len=24 joins.filter.len=42 joins.sort.len=16 has_joins=true duration.ms=0.8
+```
+
+JSON format:
+
+```json
+{"event":"joins.compile","collection":"SearchEngine::Book","joins.assocs":"authors,orders","joins.count":2,"joins.used_in":"include:authors|filter:authors|sort:authors","joins.include.len":24,"joins.filter.len":42,"joins.sort.len":16,"has_joins":true,"duration.ms":0.8}
+```
