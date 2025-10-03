@@ -3,7 +3,7 @@
 Mountless Rails::Engine wrapping Typesense with idiomatic Rails integration and AR-like querying.
 
 ## Docs
-See [docs/index.md](./docs/index.md) for the full documentation set. Direct links: [Relation](./docs/relation.md), [JOINs](./docs/joins.md), [Query DSL](./docs/query_dsl.md), [Compiler](./docs/compiler.md), [Materializers](./docs/materializers.md), [Grouping](./docs/grouping.md), [Federated multi-search](./docs/multi_search.md), [Debugging](./docs/debugging.md).
+See [docs/index.md](./docs/index.md) for the full documentation set. Direct links: [Relation](./docs/relation.md), [JOINs](./docs/joins.md), [Query DSL](./docs/query_dsl.md), [Compiler](./docs/compiler.md), [Materializers](./docs/materializers.md), [Grouping](./docs/grouping.md), [Field Selection](./docs/field_selection.md), [Observability](./docs/observability.md), [Federated multi-search](./docs/multi_search.md), [Debugging](./docs/debugging.md).
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ client.search(
 )
 ```
 
-Next: tune defaults in [docs/configuration.md](./docs/configuration.md) and see the client API in [docs/client.md](./docs/client.md).
+Next: tune defaults in [docs/configuration.md](./docs/configuration.md), explore field selection in [docs/field_selection.md](./docs/field_selection.md), and see the client API in [docs/client.md](./docs/client.md).
 
 ## Purpose
 Provide a thin, mountless layer around Typesense for Rails apps. No routes/controllers are included by default.

@@ -36,7 +36,7 @@ r2.empty?     #=> false
 - **all**: returns the relation itself (parity with AR).
 - **where(*args)**: add filters. Accepts Hash, String/Symbol, arrays thereof.
 - **order(value)**: add order expressions. Accepts Hash or String.
-- **select(*fields)** / **exclude(*fields)** / **reselect(*fields)**: field selection DSL. See [Field Selection](./field_selection.md).
+- **select(*fields)** / **exclude(*fields)** / **reselect(*fields)**: field selection DSL. See [Field Selection](./field_selection.md) and [JOINs](./joins.md#nested-field-selection-for-joined-collections).
 - **limit(n)**, **offset(n)**, **page(n)**, **per(n)**: numeric setters; coerced with validation (see below).
 - **options(opts = {})**: shallow-merge additional options for future adapters.
 - **empty?**: true when state equals the default empty state.

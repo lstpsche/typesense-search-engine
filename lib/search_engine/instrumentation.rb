@@ -41,6 +41,11 @@ module SearchEngine
     #   - :sort_len [Integer]
     #   - :duration_ms [Float]
     #   - :has_joins [Boolean]
+    # - "search_engine.selection.compile": emitted once per relation compile summarizing field selection counts.
+    #   Payload keys:
+    #   - :include_count [Integer] total effective include fields (root + nested after precedence)
+    #   - :exclude_count [Integer] total excluded fields (root + nested)
+    #   - :nested_assoc_count [Integer] associations with any selection state (include or exclude)
     # Measure a block and attach duration_ms to payload.
     # @param event [String]
     # @param base_payload [Hash]

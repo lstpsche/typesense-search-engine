@@ -73,7 +73,7 @@ flowchart LR
 - Order is preserved and duplicates are not deduped by default; explicit chaining is honored.
 - For debugging, `rel.joins_list` returns the frozen array of association names in state.
 
-Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md) · [Field Selection](./field_selection.md)
 
 ## Filtering and Ordering on Joined Fields
 
@@ -173,7 +173,7 @@ Notes:
 
 ## Nested field selection for joined collections
 
-Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md)
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Field Selection](./field_selection.md)
 
 You can select fields from joined collections using a nested Ruby shape. These compile to Typesense `include_fields` with `$assoc(field,...)` segments.
 
@@ -213,7 +213,7 @@ rel = SearchEngine::Book
   .where(authors: { last_name: "Rowling" })
   .order(authors: { last_name: :asc })
 rel.to_typesense_params
-# => { q: "*", query_by: "name, description", include_fields: "$authors(first_name)", filter_by: "$authors.last_name:=\"Rowling\"", sort_by: "$authors.last_name:asc" }
+# => { q: "*", query_by: "name, description", include_fields: "$authors(first_name)", filter_by: "$authors.last_name:="Rowling"", sort_by: "$authors.last_name:asc" }
 ```
 
 Internals: the returned params also include a reserved `:_join` key with join context for downstream components. See [Compiler](./compiler.md) for the exact shape.

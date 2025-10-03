@@ -15,6 +15,7 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
   - `search_engine.indexer.delete_stale` — stale delete lifecycle (started/ok/failed/skipped)
   - `search_engine.joins.compile` — compile-time summary of JOINs usage
   - `search_engine.grouping.compile` — compile-time summary of grouping (field/limit/missing_values)
+  - `search_engine.selection.compile` — compile-time summary of selection counts (include/exclude/nested)
 
 Duration is available via the event (`ev.duration`).
 
@@ -30,6 +31,7 @@ Duration is available via the event (`ev.duration`).
 - **into**: Physical collection name
 - **duration_ms**: Float measured duration in milliseconds
 - **grouping.compile**: `{ field: String, limit: Integer|nil, missing_values: Boolean, collection?: String, duration_ms?: Float }`
+- **selection.compile**: `{ include_count: Integer, exclude_count: Integer, nested_assoc_count: Integer }`
 
 Redaction rules:
 - Sensitive keys matching `/key|token|secret|password/i` are redacted
@@ -56,6 +58,9 @@ Redaction rules:
 | `group_by`     | String               | N/A |
 | `group_limit`  | Integer, nil         | N/A |
 | `group_missing_values` | Boolean      | N/A |
+| `selection_include_count` | Integer   | Counts only |
+| `selection_exclude_count` | Integer   | Counts only |
+| `selection_nested_assoc_count` | Integer | Counts only |
 
 For URL/cache knobs, see [Configuration](./configuration.md).
 

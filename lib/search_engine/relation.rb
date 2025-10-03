@@ -1122,9 +1122,18 @@ module SearchEngine
         raise ArgumentError, 'select: field names must be non-empty' if name.empty?
 
         if !known.empty? && !known.include?(name)
-          klass_name = klass_name_for_inspect
-          known_list = known.sort.join(', ')
-          raise ArgumentError, "select: unknown field #{name.inspect} for #{klass_name}. Known: #{known_list}"
+          suggestions = suggest_fields(name.to_sym, known_attrs.keys.map(&:to_sym))
+          suggest = if suggestions.empty?
+                      ''
+                    elsif suggestions.length == 1
+                      " (did you mean :#{suggestions.first}?)"
+                    else
+                      last = suggestions.last
+                      others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
+                      " (did you mean #{others}, or :#{last}?)"
+                    end
+          raise SearchEngine::Errors::UnknownField,
+                "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
         end
 
         ordered << name unless ordered.include?(name)
@@ -1189,7 +1198,8 @@ module SearchEngine
           inner.each { |el| list << el }
           i += 1
         else
-          raise ArgumentError, "select/include_fields: unsupported input #{entry.class}"
+          raise SearchEngine::Errors::ConflictingSelection,
+                "ConflictingSelection: unsupported input #{entry.class} in selection"
         end
       end
 
@@ -1583,6 +1593,18 @@ module SearchEngine
       return lines unless params[:exclude_fields] && !params[:exclude_fields].to_s.strip.empty?
 
       lines << "  exclude: #{params[:exclude_fields]}"
+    end
+
+    def add_effective_selection_tokens!(lines)
+      include_root = Array(@state[:select]).map(&:to_s)
+      exclude_root = Array(@state[:exclude]).map(&:to_s)
+      return if include_root.empty? && exclude_root.empty?
+
+      effective = include_root.empty? ? include_root : (include_root - exclude_root)
+      parts = ['selection:']
+      parts << "sel=#{effective.join(',')}" if effective.any?
+      parts << "xsel=#{exclude_root.join(',')}" if exclude_root.any?
+      lines << "  #{parts.join(' ')}"
     end
 
     # Normalize and validate join names, preserving order and duplicates.
