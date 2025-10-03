@@ -93,11 +93,19 @@ module SearchEngine
     #   raise SearchEngine::Errors::InvalidGroup, "InvalidGroup: unknown field :brand for grouping on SearchEngine::Product (did you mean :brand_id?)"
     class InvalidGroup < Error; end
 
-    # Raised when grouping references unsupported constructs such as joined paths
+    # Raised when grouping references unsupported constructs such as joined/path fields
     # (e.g., "$assoc.field"). Only base fields are supported for grouping.
     #
     # @example
     #   raise SearchEngine::Errors::UnsupportedGroupField, 'UnsupportedGroupField: grouping supports base fields only (got "$authors.last_name")'
     class UnsupportedGroupField < Error; end
+
+    # Raised when strict selection is enabled and a requested field is absent
+    # in the hydrated document (e.g., excluded by API mapping).
+    #
+    # This error is actionable and guides remediation: adjust the relation's
+    # selection (select/exclude/reselect), relax strictness, or ensure the
+    # upstream Typesense include/exclude mapping includes the fields.
+    class MissingField < Error; end
   end
 end

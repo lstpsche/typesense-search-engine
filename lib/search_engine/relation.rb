@@ -1387,6 +1387,9 @@ module SearchEngine
       url_opts.merge!(overrides) unless overrides.empty?
 
       result = client.search(collection: collection, params: params, url_opts: url_opts)
+      # Wrap with selection context for hydration strictness
+      selection_ctx = build_selection_context
+      result = SearchEngine::Result.new(result.raw, klass: @klass, selection: selection_ctx) if selection_ctx
       @__result_memo = result
       @__loaded = true
       result

@@ -322,5 +322,37 @@ module SearchEngine
         avg_group_size: avg
       )
     end
+
+    # Enforce strict-missing behavior when enabled.
+    # Computes missing = requested_root − present_keys and raises when non-empty.
+    def enforce_strict_missing_if_needed!(present_keys)
+      ctx = @selection_ctx || {}
+      strict = (ctx[:strict_missing] == true)
+      return unless strict
+
+      requested = Array(ctx[:requested_root]).map(&:to_s).reject(&:empty?)
+      return if requested.empty?
+
+      missing = requested - present_keys
+      return if missing.empty?
+
+      model_name = begin
+        @klass&.name || 'Object'
+      rescue StandardError
+        'Object'
+      end
+
+      sample = missing.take(3)
+      more = missing.size - sample.size
+      sample_str = sample.map { |f| %("#{f}") }.join(', ')
+      sample_str << " (+#{more} more)" if more.positive?
+
+      msg = 'MissingField: requested fields absent for ' \
+            "#{model_name}: #{sample_str}. " \
+            'They may be excluded by selection or upstream Typesense mapping. ' \
+            'Fix by adjusting select/exclude/reselect, relaxing strictness, or ' \
+            'ensuring the mapping includes these fields.'
+      raise SearchEngine::Errors::MissingField, msg
+    end
   end
 end
