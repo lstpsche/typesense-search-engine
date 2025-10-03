@@ -1,53 +1,52 @@
-[← Back to Index](./index.md)
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md)
 
-### Grouping
+# Grouping
 
-- See also: [Relation](./relation.md), [Materializers](./materializers.md)
+Group results by a field and optionally control the number of hits per group and whether documents with missing values form their own group.
 
-#### Overview
-Grouping allows you to request de-duplicated, grouped results by a single field while preserving the immutable, composable nature of a `Relation`. Each call returns a new `Relation` with normalized frozen state stored under `state[:grouping]`.
+- **State source**: `Relation#group_by(field, limit: nil, missing_values: false)` stores normalized state in `@state[:grouping]`
+- **Compiler**: `Relation#to_typesense_params` emits Typesense params: `group_by`, `group_limit`, `group_missing_values`
 
-- **Single grouping per relation**: the last call to `group_by` replaces any previous grouping.
-- **Normalization**: `{ field: :symbol, limit: Integer/nil, missing_values: true|false }` (frozen).
-- **Composition**: plays nicely with `where`, `order`, `include_fields`, and `joins`.
+## Quick example
 
-#### API
 ```ruby
-SearchEngine::Product
-  .group_by(:brand_id, limit: 1, missing_values: true)
-  .where(active: true)
-  .order(updated_at: :desc)
+rel = SearchEngine::Product.group_by(:brand_id, limit: 1, missing_values: true)
+rel.to_typesense_params
+# => { q: "*", query_by: "name, description", group_by: "brand_id", group_limit: 1, group_missing_values: true }
 ```
 
-- `field` (required): Symbol/String; coerced to Symbol; must be non-blank.
-- `limit` (optional): Integer > 0 or nil.
-- `missing_values` (optional): Boolean; default `false`.
+## Mapping (Ruby DSL → Typesense params)
 
-Replacement semantics (last call wins):
-```ruby
-rel = SearchEngine::Product.group_by(:brand_id)
-rel2 = rel.group_by('category_id') # replaces prior grouping
-```
+| Ruby DSL                                       | Typesense params                                                                     |
+| ---                                            | ---                                                                                  |
+| `.group_by(:brand_id)`                         | `group_by: "brand_id"`                                                              |
+| `.group_by(:brand_id, limit: 2)`               | `group_by: "brand_id"`, `group_limit: 2`                                           |
+| `.group_by(:brand_id, missing_values: true)`   | `group_by: "brand_id"`, `group_missing_values: true`                                |
+| `.group_by(:brand_id, limit: 1, missing_values: true)` | `group_by: "brand_id"`, `group_limit: 1`, `group_missing_values: true`   |
 
-#### Behavior notes
-- Independent of other chainers; call order does not matter.
-- Joined fields are not supported in this ticket; use a base field only.
-- Future work will map this state to Typesense params (`group_by`, `group_limit`, and possibly a missing-values flag).
+Notes:
+- `group_limit` is included only when provided and must be a positive integer
+- `group_missing_values` is included only when `true`
 
-#### Mermaid overview
+## State → Params
+
 ```mermaid
 flowchart LR
-  A[Relation#group_by(field, limit, missing_values)] --> B[state[:grouping]\n{ field, limit, missing_values }]
-  B --> C[Compiler/Materializer\n(future mapping to Typesense)]
+  A[Relation#group_by] --> B[@state[:grouping]
+{ field, limit, missing_values }]
+  B --> C[Relation#to_typesense_params]
+  C --> D[Typesense params
+{ group_by, group_limit, group_missing_values }]
 ```
 
-#### Debugging
-- Reader: `relation.grouping` → returns the frozen Hash or `nil`.
-- Explain output includes a compact grouping summary when present:
+## Pagination interaction
 
-```text
-SearchEngine::Product Relation
-  where: active:=true
-  order: updated_at:desc
-  group: group_by=brand_id limit=1 missing_values=true
-```
+When grouping is enabled, Typesense applies `per_page` to the number of groups returned. `group_limit` caps the number of hits within each group. For example, `per(10)` returns up to 10 groups; with `group_limit: 3`, each group contains at most 3 hits.
+
+## Validation
+
+- `field` must be present as a Symbol or String
+- `limit` must be a positive Integer when provided
+- `missing_values` must be a Boolean
+
+See also: [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md)

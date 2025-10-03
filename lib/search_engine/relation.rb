@@ -416,11 +416,17 @@ module SearchEngine
     # Key insertion order: q, query_by, filter_by, sort_by, include_fields, page, per_page, infix.
     # Empty/nil values are omitted.
     #
+    # May emit grouping keys when present:
+    # - group_by [String]
+    # - group_limit [Integer]
+    # - group_missing_values [Boolean, only when true]
+    # Validation: field present (Symbol/String), limit positive Integer if provided, missing_values Boolean.
+    #
     # @return [Hash] typesense body params suitable for Client#search
     # @example
     #   rel.to_typesense_params
     #   # => { q: "*", query_by: "name,description", filter_by: "brand_id:=[1,2] && active:=true", page: 2, per_page: 20 }
-    def to_typesense_params # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+    def to_typesense_params # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
       cfg = SearchEngine.config
       opts = @state[:options] || {}
 
@@ -454,8 +460,21 @@ module SearchEngine
       # Grouping
       grouping = @state[:grouping]
       if grouping
-        params[:group_by] = "#{grouping[:field]}:#{grouping[:limit] || 'count'}"
-        params[:group_by] += ',missing_values=true' if grouping[:missing_values]
+        field = grouping[:field]
+        limit = grouping[:limit]
+        missing_values = grouping[:missing_values]
+
+        field_valid = field.is_a?(Symbol) || field.is_a?(String)
+        limit_valid = limit.nil? || (limit.is_a?(Integer) && limit.positive?)
+        missing_values_bool = [true, false].include?(missing_values)
+
+        raise ArgumentError, 'grouping: field must be a Symbol or String' unless field_valid
+        raise ArgumentError, 'grouping: limit must be a positive Integer' unless limit_valid
+        raise ArgumentError, 'grouping: missing_values must be a Boolean' unless missing_values_bool
+
+        params[:group_by] = field.to_s
+        params[:group_limit] = limit if limit
+        params[:group_missing_values] = true if missing_values
       end
 
       # Keep infix last for stability; include when configured or overridden
@@ -1056,7 +1075,7 @@ module SearchEngine
     end
 
     def normalize_grouping(value)
-      return {} if value.nil? || value.empty?
+      return nil if value.nil? || value.empty?
       raise ArgumentError, 'grouping: expected a Hash' unless value.is_a?(Hash)
 
       field = value[:field]
