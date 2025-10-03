@@ -35,17 +35,22 @@ module SearchEngine
       payload = params.dup
       # Strip internal keys that must not be sent to Typesense
       payload.delete(:_join)
+      payload.delete(:_selection)
       path = "/collections/#{collection}/documents/search"
 
       # Observability event payload (pre-built; redacted)
       if defined?(ActiveSupport::Notifications)
+        sel = params[:_selection].is_a?(Hash) ? params[:_selection] : {}
         se_payload = {
           collection: collection,
           params: Observability.redact(params),
           url_opts: Observability.filtered_url_opts(cache_params),
           status: nil,
           error_class: nil,
-          retries: nil
+          retries: nil,
+          selection_include_count: sel[:include_count],
+          selection_exclude_count: sel[:exclude_count],
+          selection_nested_assoc_count: sel[:nested_assoc_count]
         }
 
         result = nil

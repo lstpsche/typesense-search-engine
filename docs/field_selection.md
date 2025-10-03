@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [JOINs](./joins.md) · [Materializers](./materializers.md)
+[← Back to Index](./index.md) · [Relation](./relation.md) · [JOINs](./joins.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
 
 # Field Selection DSL (select / exclude / reselect)
 
@@ -17,6 +17,14 @@ Nested fields are addressed via association-name keyed Hashes and require the as
 { include: Set[:id, :name], include_nested: { authors: Set[:first_name, :last_name] },
   exclude: Set[:legacy], exclude_nested: { brands: Set[:internal_score] } }
 ```
+
+## DSL
+
+- Root fields: symbols/strings (e.g., `:id, "title"`)
+- Nested fields: `{ assoc => [:field, ...] }`
+- `reselect` replaces both include and exclude state
+
+See also: [Relation](./relation.md) and [JOINs](./joins.md) for DSL context.
 
 ## Usage
 
@@ -50,26 +58,17 @@ SearchEngine::Book
 ## Inspect / Explain
 
 - `inspect` includes compact tokens for current selection state, e.g. `sel="..." xsel="..."`.
-- `explain` prints human-readable `select:` and `exclude:` lines when present and a compact one-line summary of the effective selection after precedence, e.g. `selection: sel=id,name; xsel=legacy | authors[sel=first_name,last_name; xsel=middle_name]`.
+- `explain` prints human-readable `select:` and `exclude:` lines when present and a compact one-line summary of the effective selection after precedence.
 
-## Flow
+## State → Params mapping
 
 ```mermaid
 flowchart TD
-  A[DSL calls: select/exclude/reselect] --> B[Normalization: root & nested maps]
-  B --> C[Effective fields per path (precedence rules)]
-  C --> D[Compiler: params/build]
-  D --> E[Materializers: shaping fields on hydration]
+  A[DSL input: select/exclude/reselect] --> B[Normalization: include/exclude (root & nested)]
+  B --> C[Precedence: effective = include − exclude per path]
+  C --> D[Compiler encoders]
+  D --> E[Typesense params: include_fields / exclude_fields]
 ```
-
-## Comparison Table
-
-| Input shape | Normalized state | Effective set |
-| --- | --- | --- |
-| `select(:id, :name)` | include: `[:id, :name]` | `[:id, :name]` |
-| `exclude(:legacy)` | exclude: `[:legacy]` | include empty → all − `[:legacy]` |
-| `select(authors: [:first_name])` | include_nested: `{ authors: ["first_name"] }` | authors: `["first_name"]` |
-| `exclude(authors: [:middle_name])` | exclude_nested: `{ authors: ["middle_name"] }` | authors: include empty → all − `["middle_name"]` |
 
 ## Compiler Mapping (Typesense params)
 
@@ -87,11 +86,6 @@ flowchart TD
 | exclude_nested: `{ brands: ["internal_score"] }` | — | `$brands(internal_score)` |
 | include: `[:id,:title]`, include_nested: `{ authors: ["first_name","last_name"] }`, exclude: `[:legacy]`, exclude_nested: `{ brands: ["internal_score"] }` | `id,title,$authors(first_name,last_name)` | `legacy,$brands(internal_score)` |
 | include_nested: `{ authors: ["first_name","last_name"] }`, exclude_nested: `{ authors: ["last_name"] }` | `$authors(first_name)` | — |
-
-Notes:
-- Only add `include_fields` if there is at least one effective include (root or nested).
-- Only add `exclude_fields` if there is at least one exclude (root or nested). You may keep excludes even if they are redundant due to precedence; keeping them is harmless and documents intent.
-- Multiple assoc groups are comma‑separated; no `$assoc()` empty groups are emitted.
 
 ### Flow
 
@@ -119,6 +113,44 @@ rel.to_typesense_params[:exclude_fields]
 # => "legacy,$brands(internal_score)"
 ```
 
+## Strict vs Lenient selection
+
+Hydration respects selection by assigning only attributes present in each hit. Missing attributes are never synthesized.
+
+- **Lenient (default)**: Missing requested fields are left unset; readers should return `nil` if they rely on ivars.
+- **Strict**: If a requested field is absent in the hit, hydration raises `SearchEngine::Errors::MissingField` with guidance.
+
+Backed by:
+- Per‑relation override via `options(selection: { strict_missing: true })`
+- Global default via `SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false) }`
+
+```ruby
+# initializer
+SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false) }
+# per relation
+rel = SearchEngine::Product.select(:id).options(selection: { strict_missing: true })
+```
+
+### Hydration decision (strict vs lenient)
+
+```mermaid
+flowchart TD
+  H[Typesense hit] --> P[Present keys]
+  S[Effective selection] --> Q{strict_missing?}
+  P --> A[Assign only present keys]
+  Q -- yes --> M[Missing = Requested − Present]
+  M -- empty --> A
+  M -- non-empty --> R[Raise MissingField]
+  Q -- no --> L[Leave absents unset]
+  L --> A
+```
+
+See also: [Relation](./relation.md), [Materializers](./materializers.md#pluck--selection), and [Compiler](./compiler.md).
+
+## Pluck alignment
+
+`pluck(*fields)` validates against the effective selection and fails fast with guidance when a field is not permitted. See [Materializers → Pluck & selection](./materializers.md#pluck--selection).
+
 ## Guardrails & errors
 
 Validation happens during chaining (after normalization, before mutating state) and raises actionable errors early. Suggestions are provided when attribute registries are available.
@@ -139,38 +171,13 @@ Notes:
 
 See also: [Relation](./relation.md), [JOINs](./joins.md), and [Materializers](./materializers.md#pluck--selection).
 
-## Strict vs Lenient selection
+## Observability
 
-Hydration respects selection by assigning only attributes present in each hit. Missing attributes are never synthesized.
+- **Event**: `search_engine.selection.compile`
+- **Payload**: `{ include_count, exclude_count, nested_assoc_count }` — counts only; no field names
+- **Log token (text)**: `sel=I:<include>|X:<exclude>|N:<nested>`
+- **JSON keys**: `selection_include_count`, `selection_exclude_count`, `selection_nested_assoc_count`
+- **Redaction**: counts only; raw field names and raw query params are never logged
 
-- **Lenient (default)**: Missing requested fields are left unset; readers should return `nil` if they rely on ivars.
-- **Strict**: If a requested field is absent in the hit, hydration raises `SearchEngine::Errors::MissingField` with guidance.
-
-Backed by:
-- Per‑relation override via `options(selection: { strict_missing: true })`
-- Global default via `SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false) }`
-
-```ruby
-# initializer
-SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false) }
-# per relation
-rel = SearchEngine::Product.select(:id).options(selection: { strict_missing: true })
-```
-
-Hydration decision flow:
-
-```mermaid
-flowchart TD
-  A[Typesense hit] --> B[Extract present keys]
-  R[Relation selection (effective)] --> C[Requested keys]
-  B --> D[Assign only present keys]
-  C --> E{strict_missing?}
-  D --> F[All good]
-  E -- yes --> G[Missing = Requested − Present]
-  G -- empty --> F
-  G -- non-empty --> H[Raise MissingField with guidance]
-  E -- no --> I[Leave absents unset (no ivars)] --> F
-```
-
-See also: [Relation](./relation.md), [Materializers](./materializers.md#pluck--selection), and [Compiler](./compiler.md).
+Backlinks: [Observability](./observability.md), [Relation](./relation.md), [JOINs](./joins.md), [Materializers](./materializers.md).
 

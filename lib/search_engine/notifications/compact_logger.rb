@@ -144,6 +144,7 @@ module SearchEngine
 
         parts.concat(status_parts(p, duration_ms))
         parts.concat(url_parts(p))
+        parts.concat(selection_parts(p)) unless multi
 
         parts.concat(param_parts(p)) if include_params && !multi
 
@@ -401,6 +402,14 @@ module SearchEngine
       end
       private_class_method :param_parts
 
+      def self.selection_parts(payload)
+        inc = (payload[:selection_include_count] || 0).to_i
+        exc = (payload[:selection_exclude_count] || 0).to_i
+        nest = (payload[:selection_nested_assoc_count] || 0).to_i
+        ["sel=I:#{inc}|X:#{exc}|N:#{nest}"]
+      end
+      private_class_method :selection_parts
+
       # Map a Symbol severity to Logger integer constant.
       def self.map_level(level)
         case level.to_s
@@ -468,7 +477,10 @@ module SearchEngine
             'status' => payload[:http_status] || payload[:status] || 'ok',
             'duration.ms' => duration_ms,
             'cache' => extract_cache_flag(payload[:url_opts]),
-            'ttl' => extract_ttl(payload[:url_opts])
+            'ttl' => extract_ttl(payload[:url_opts]),
+            'selection_include_count' => (payload[:selection_include_count] || 0).to_i,
+            'selection_exclude_count' => (payload[:selection_exclude_count] || 0).to_i,
+            'selection_nested_assoc_count' => (payload[:selection_nested_assoc_count] || 0).to_i
           }
           # Grouping fields at top-level when present
           h['group_by'] = params_hash[:group_by] if params_hash.key?(:group_by)

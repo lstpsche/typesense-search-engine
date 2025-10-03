@@ -102,7 +102,13 @@ module SearchEngine
         return if known.include?(fname)
 
         suggestions = suggest(fname, known)
-        msg = "unknown joined field #{assoc_cfg[:name]}.#{fname}"
+        model_name = safe_class_name(target_klass)
+        assoc_name = assoc_cfg[:name] || begin
+          # best effort: derive from collection
+          collection.to_s
+        end
+        # Match ticket verbatim prefix
+        msg = "UnknownJoinField: :#{fname} is not declared on association :#{assoc_name} for #{model_name}"
         msg += suggestion_suffix(suggestions)
         raise SearchEngine::Errors::UnknownJoinField, msg
       end
