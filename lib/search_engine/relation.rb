@@ -40,7 +40,7 @@ module SearchEngine
 
     # Keys considered essential for :only preset mode.
     # Intentionally minimal: query basics and pagination; other keys are dropped.
-    ESSENTIAL_PARAM_KEYS = %i[q query_by page per_page infix].freeze
+    ESSENTIAL_PARAM_KEYS = %i[q page per_page].freeze
 
     # Keys managed by preset in :lock mode. When present on the compiled params,
     # they will be dropped and recorded as conflicts.
@@ -204,8 +204,9 @@ module SearchEngine
     #
     # Modes:
     # - :merge (default): emit preset and all chain params; chain wins on overlaps
-    # - :only: emit preset and only essential params (q, query_by, page, per_page, infix)
-    # - :lock: emit preset and all chain params, but drop chain keys managed by preset
+    # - :only: emit preset and only essential params (q, page, per_page)
+    # - :lock: emit preset and all chain params, but drop keys present in
+    #          SearchEngine.config.presets.locked_domains
     #
     # @param name [#to_s, #to_sym] preset token (without namespace)
     # @param mode [Symbol] one of :merge, :only, :lock
@@ -546,17 +547,13 @@ module SearchEngine
     # Empty/nil values are omitted.
     #
     # May emit grouping keys when present:
-    # - group_by [String]
-    # - group_limit [Integer]
-    # - group_missing_values [Boolean, only when true]
-    # Validation: field present (Symbol/String), limit positive Integer if provided, missing_values Boolean.
+    # - { group_by, group_limit, group_missing_values }
     #
-    # Field selection mapping:
-    # - include_fields: base tokens and nested join segments encoded as "$assoc(field1,field2)".
-    # - exclude_fields: base tokens and nested join segments encoded as above.
-    # Precedence: effective include set is (include − exclude) at root and per association; exclude always wins.
-    # Empty groups are omitted and keys are omitted when resulting strings are blank.
-    #
+    # Presets:
+    # - Always injects `preset` when present on the relation
+    # - mode=:merge — no pruning
+    # - mode=:only  — keep only essentials (q, page, per_page)
+    # - mode=:lock  — prune keys in SearchEngine.config.presets.locked_domains
     # @return [Hash] typesense body params suitable for Client#search
     # @example
     #   rel.to_typesense_params
@@ -649,8 +646,9 @@ module SearchEngine
           params = minimal
         when :lock
           conflicts = []
-          PRESET_MANAGED_PARAM_KEYS.each do |k|
-            next unless params.key?(k)
+          locked = SearchEngine.config.presets.locked_domains_set
+          params.each_key do |k|
+            next unless locked.include?(k)
 
             params.delete(k)
             conflicts << k

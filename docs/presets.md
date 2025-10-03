@@ -21,6 +21,16 @@ SearchEngine::Product.preset(:aggressive_sale, mode: :only).page(1).per(24)
 SearchEngine::Product.preset(:brand_curated, mode: :lock).order(price: :asc) # order will be dropped
 ```
 
+#### Example (from ticket)
+
+```ruby
+rel = SearchEngine::Product
+        .preset(:popular_products, mode: :only)
+        .where(active: true)
+rel.to_typesense_params
+# => { q: "*", page: 1, per_page: 10, preset: "prod_popular_products" }
+```
+
 ## Namespacing
 
 Effective preset name is computed using global presets configuration (`SearchEngine.config.presets`). When enabled and a non-empty `namespace` is present, the effective name is `"#{namespace}_#{token}"`; otherwise the token is used as-is.
@@ -39,8 +49,15 @@ Effective preset name is computed using global presets configuration (`SearchEng
 | Mode  | What is sent | Who wins on overlaps | Conflicts recorded |
 |------|---------------|----------------------|--------------------|
 | merge | preset + all chain params | chain | no |
-| only  | preset + essentials (q, query_by, page, per_page, infix) | n/a (others dropped) | no |
-| lock  | preset + chain minus preset-managed keys | preset | yes (dropped keys) |
+| only  | preset + essentials (q, page, per_page) | n/a (others dropped) | no |
+| lock  | preset + chain minus locked domains | preset | yes (dropped keys) |
+
+## Configuration
+
+Customize which param keys are considered preset-managed in `:lock` mode:
+
+- **Default:** `SearchEngine.config.presets.locked_domains = %i[filter_by sort_by include_fields exclude_fields]`
+- The value is normalized to Symbols and used as a Set for deterministic pruning.
 
 ## Explain & Inspect
 
@@ -51,11 +68,11 @@ Effective preset name is computed using global presets configuration (`SearchEng
 
 ```mermaid
 flowchart TD
-  A[Relation#preset(name, mode)] --> B[Compute effective preset name (namespace?)]
+  A[Relation state: preset_name + preset_mode] --> B[Draft params from DSL]
   B --> C{mode}
-  C -- merge --> D[Emit preset + all chain params; chain wins on overlaps]
-  C -- only --> E[Emit preset + ESSENTIAL params only]
-  C -- lock --> F[Emit preset + chain params; drop chain keys in PRESET_MANAGED; record conflicts]
+  C -- merge --> D[Keep all + preset]
+  C -- only --> E[Keep essentials: q/page/per_page + preset]
+  C -- lock --> F[Drop keys in locked_domains + keep others + preset]
   D --> G[Final Typesense params]
   E --> G
   F --> G
@@ -63,6 +80,6 @@ flowchart TD
 
 ## Notes
 
-- Essential params include: `q`, `query_by`, `page`, `per_page`, `infix`.
-- Preset-managed keys include: `filter_by`, `sort_by`, `include_fields`, `exclude_fields`, `facet_by`, `max_facet_values`, `group_by`, `group_limit`, `group_missing_values`.
+- Essential params include: `q`, `page`, `per_page`.
+- Locked domains default to: `filter_by`, `sort_by`, `include_fields`, `exclude_fields`.
 - The API is immutable and copy-on-write; invalid mode or name raises `ArgumentError`.
