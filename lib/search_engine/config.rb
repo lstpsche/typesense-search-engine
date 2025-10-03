@@ -360,10 +360,13 @@ module SearchEngine
     # Controls validation rules and list limits.
     class CurationConfig
       # @return [Integer] maximum number of pinned IDs allowed (default: 50)
+      # @see docs/curation.md
       attr_accessor :max_pins
       # @return [Integer] maximum number of hidden IDs allowed (default: 200)
+      # @see docs/curation.md
       attr_accessor :max_hidden
       # @return [Regexp] allowed curated ID pattern (used for IDs and override tags)
+      # @see docs/curation.md
       attr_accessor :id_regex
 
       def initialize

@@ -1,15 +1,39 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Multi-search](./multi_search.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
 
-## Curation DSL (pin/hide/curate/clear)
+# Curation
 
-Immutable chainers to curate hits by ID and apply optional override tags.
+Curate results by pinning or hiding specific IDs, optionally tagging with override tags, and optionally filtering hidden hits from the materialized view. Purely declarative; encoded as body params only.
 
-### Overview
+## Overview
 
-- Pin hits by ID to the top of results
-- Hide hits by ID
-- Optionally apply override tags
-- Optional filtering switch for curated hits
+- **Pin** hits by ID to the top of results (stable first-occurrence order)
+- **Hide** hits by ID (hide-wins when an ID is both pinned and hidden)
+- **Override tags** are optional body-only tags
+- **Filter flag** `filter_curated_hits` optionally excludes hidden hits from the curated view
+- **Composes with** selection, presets, grouping, pagination; does not alter URL/common params
+
+## DSL
+
+Immutable chainers on `Relation` (copy-on-write). Inputs are normalized (coerced to String, blank dropped), arrays flattened one level, and lists de-duplicated while preserving first occurrence order.
+
+- `pin(*ids)` — append to pinned list (stable-dedupe)
+- `hide(*ids)` — append to hidden list (set semantics)
+- `curate(pin: [], hide: [], override_tags: [], filter_curated_hits: nil|true|false)` — replace provided keys; omit to retain
+- `clear_curation` — remove all curation state from the relation
+
+State shape on the relation:
+
+- `pinned: Array<String>`
+- `hidden: Array<String>`
+- `override_tags: Array<String>`
+- `filter_curated_hits: true | false | nil`
+
+Inspect/explain:
+
+- `inspect` emits a compact token only when non-empty, e.g. `curation=p:[p_12,p_34]|h:[p_99]|tags:[homepage]|fch:false`
+- `explain` adds a concise curation summary and a conflicts line when overlaps/limits occur
+
+Insert (verbatim from earlier ticket):
 
 ```ruby
 # Pin two products to the top and hide one, with an override tag
@@ -22,133 +46,35 @@ SearchEngine::Product
 SearchEngine::Product.curate(pin: %w[p_12 p_34], hide: %w[p_99], override_tags: %w[homepage])
 ```
 
-### Normalization & State
+## Compiler mapping
 
-State is normalized and stored on the relation as:
-
-- pinned: Array<String> (deduped, first occurrence order preserved)
-- hidden: Array<String> (deduped, first-seen order preserved)
-- override_tags: Array<String>
-- filter_curated_hits: true | false | nil
-
-### DSL
-
-- pin(*ids): append IDs to pinned (stable-dedupe; preserves first occurrence order)
-- hide(*ids): append IDs to hidden (set semantics; preserves first-seen order)
-- curate(pin: [], hide: [], override_tags: [], filter_curated_hits: nil): replace provided keys; omit to retain
-- clear_curation: remove all curation state
-
-### Inspect / Explain
-
-- Inspect adds a compact token only when non-empty, e.g. `curation=p:[p_12,p_34]|h:[p_99]|tags:[homepage]|fch:false`
-- Explain adds a concise curation summary and conflicts when present.
-
-Materializers & explain
------------------------
-
-- Materializers reuse the memoized single response and apply curation in-memory.
-- Ordering: pins first (declared order, present IDs only), then remainder in original order. Hide-wins.
-- Filtering: when `filter_curated_hits: true`, hidden hits are excluded from iteration and counts.
-- Counts: with filtering on, `count`/`exists?` reflect the curated view size; otherwise they reflect server totals when available.
-
-Verbatim example from the ticket:
-
-```
-Curation: pinned=2 hidden=1 filter_curated_hits=false override_tags=[homepage]
-Conflicts: [p1 (both pinned & hidden → hidden)]
-```
-
-### Mermaid — Curation Effects on Materialization
-
-```mermaid
-flowchart TD
-  A[Raw hits from response (memoized)] --> B[Build pinned segment (declared order, present IDs only)]
-  A --> C[Compute remainder in original order]
-  B --> D[Concatenate pinned + remainder]
-  C --> D
-  D --> E{filter_curated_hits?}
-  E -- yes --> F[Drop hidden hits]
-  E -- no  --> G[Keep hidden hits]
-  F --> H[Curated view → iterate/hydrate]
-  G --> H[Curated view → iterate/hydrate]
-  H --> I[count/exists? computed per rules]
-  H --> J[Relation#explain summary]
-```
-
-Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md) · [Compiler](./compiler.md)
-
-### Guardrails & errors
-
-- Rules
-  - **ID format**: all curated IDs and override tags must match `SearchEngine.config.curation.id_regex` (default: `/\A[\w\-:\.]+\z/`).
-  - **Deduplication**: `pinned` stable-dedupes (first occurrence wins); `hidden` set-dedupes (first-seen order preserved).
-  - **Limits**: `max_pins` (default 50) and `max_hidden` (default 200) enforced after normalization and precedence.
-  - **Precedence**: when an ID appears in both `pinned` and `hidden`, **hide wins** — the ID is removed from `pinned` and recorded as a conflict. Explain shows: `Conflicts: <ids> (hidden overrides pin)`.
-
-- Errors
-  - `InvalidCuratedId`: `"<id>" is not a valid curated ID. Expected pattern: <regex>. Try removing illegal characters.`
-  - `CurationLimitExceeded`: `pinned list exceeds max_pins=<N> (attempted <M>). Reduce inputs or raise the limit in SearchEngine.config.curation.` (similarly for `hidden`).
-  - `InvalidOverrideTag`: `"<tag>" is invalid. Use non-blank strings that match the allowed pattern.`
-
-- Config knobs
-
-```ruby
-SearchEngine.configure do |c|
-  c.curation = OpenStruct.new(max_pins: 50, max_hidden: 200, id_regex: /\A[\w\-:\.]+\z/)
-end
-```
-
-- Mermaid — precedence
-
-```mermaid
-flowchart TD
-  A[Input pinned, hidden] --> B[Normalize + dedupe]
-  B --> C{overlap?}
-  C -- yes --> D[Remove ID from pinned]
-  D --> E[Record conflict: hidden_overrides_pin]
-  C -- no --> F[No conflict]
-```
-
-Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Multi‑search](./multi_search.md#curation-in-multi-search)
-
-### Diagram
-
-```mermaid
-flowchart TD
-  A[DSL calls: pin/hide/curate/clear] --> B[Normalization: coerce strings, dedupe, preserve order]
-  B --> C[Curation state on Relation]
-  C --> D[inspect/explain summaries]
-```
-
-### Mapping to Typesense params
+Curation state maps to Typesense body params and never appears in URL/common params. Empty arrays are omitted; `filter_curated_hits` is omitted when `nil`.
 
 | State key             | Example value             | Param key             | Encoded value         |
 | --------------------- | ------------------------- | --------------------- | --------------------- |
 | `pinned`              | `["p1","p2"]`             | `pinned_hits`         | `"p1,p2"`             |
-| `hidden`              | ``"p9"``                  | `hidden_hits`         | `"p9"`                |
+| `hidden`              | `"p9"`                    | `hidden_hits`         | `"p9"`                |
 | `override_tags`       | `["homepage","campaign"]` | `override_tags`       | `"homepage,campaign"` |
 | `filter_curated_hits` | `true`                    | `filter_curated_hits` | `true`                |
 
-- Keys are omitted when arrays are empty or when `filter_curated_hits` is `nil`.
-- Ordering is deterministic; `pinned` preserves first-occurrence order.
-
-### Mermaid — Curation State → Params
+- Keys are omitted when arrays are empty or when `filter_curated_hits` is `nil`
+- Ordering is deterministic; `pinned` preserves first-occurrence order
 
 ```mermaid
 flowchart TD
-  A[Relation.curation state] --> B[Compiler encoder]
+  A[Relation.curation state] --> B[Encoder in to_typesense_params]
   B --> C{present?}
   C -- pinned --> D[pinned_hits: join(',')]
   C -- hidden --> E[hidden_hits: join(',')]
   C -- tags --> F[override_tags: join(',')]
-  C -- filter flag --> G[filter_curated_hits: boolean]
+  C -- filter --> G[filter_curated_hits: boolean]
   D --> H[Body params]
   E --> H
   F --> H
   G --> H
 ```
 
-### Example (verbatim)
+Insert (verbatim mapping example):
 
 ```ruby
 rel = SearchEngine::Product
@@ -161,22 +87,92 @@ rel.to_typesense_params
 # }
 ```
 
-Observability
--------------
+## Guardrails & errors
 
-- Events (counts/flags only; redacted):
-  - `search_engine.curation.compile` — emitted once per compile when curation state is present
-    - Payload: `pinned_count`, `hidden_count`, `has_override_tags`, `filter_curated_hits`
-  - `search_engine.curation.conflict` — emitted when overlaps or limits are detected; at most once per compile
-    - Payload: `type` (`:overlap`|`:limit_exceeded`), `count`, optional `limit`
+Validation is applied after normalization. Overlaps and limits are recorded for `explain` and observability.
 
-- Compact logging subscriber:
-  - Text token appended to single-search lines: `cu=p:<pinned>|h:<hidden>|f:<flag>|t:<tags>`; when present, also `cf=<type>`
-  - JSON keys: `curation_pinned_count`, `curation_hidden_count`, `curation_has_override_tags`, `curation_filter_flag`, optional `curation_conflict_type`, `curation_conflict_count`
+### Rules
 
-- Examples (no IDs/tags shown):
-  - Text: `[se.search] collection=products status=200 duration=12.3ms cu=p:2|h:1|f:false|t:1`
-  - JSON: `{ "event":"search", "collection":"products", "curation_pinned_count":2, "curation_hidden_count":1, "curation_has_override_tags":true, "curation_filter_flag":false }`
+| Rule | Behavior |
+| --- | --- |
+| ID format | `SearchEngine.config.curation.id_regex` (default `/\A[\w\-:\.]+\z/`) applied to curated IDs and override tags |
+| Deduplication | `pinned` stable-dedupes (first occurrence wins); `hidden` set-dedupes (first-seen order preserved) |
+| Limits | `max_pins` (default 50) and `max_hidden` (default 200) enforced post-normalization |
+| Precedence | When an ID exists in both lists, **hide wins** (removed from `pinned`, recorded as conflict) |
+
+### Errors
+
+| Error | When |
+| --- | --- |
+| `InvalidCuratedId` | Curated ID fails the allowed pattern |
+| `CurationLimitExceeded` | Pinned or hidden list exceeds configured limit |
+| `InvalidOverrideTag` | Override tag is blank or fails the allowed pattern |
+
+Config example:
+
+```ruby
+SearchEngine.configure do |c|
+  c.curation = OpenStruct.new(max_pins: 50, max_hidden: 200, id_regex: /\A[\w\-:\.]+\z/)
+end
+```
+
+## Multi-search
+
+Per-search independence: each `m.add` relation carries its own curation keys in its body. Pinned order is preserved; omission rules apply; `filter_curated_hits` is scoped per entry.
+
+Insert (verbatim multi-search example):
+
+```ruby
+res = SearchEngine.multi_search do |m|
+  m.add :products, SearchEngine::Product.curate(pin: %w[p1 p2])
+  m.add :brands,   SearchEngine::Brand.curate(hide: %w[b9 b10], filter_curated_hits: true)
+end
+```
+
+See also: [Multi‑search](./multi_search.md#curation-in-multi-search)
+
+## Materializers & explain
+
+Materializers reuse the memoized single response and apply curation in-memory.
+
+- Ordering: pins first (declared order, present IDs only), then remainder in original order. **Hide-wins**.
+- Filtering: when `filter_curated_hits: true`, hidden hits are excluded from iteration and counts.
+- Counts: when filtering is on, `count` reflects the curated view size; `exists?` follows server totals. To check curated emptiness, use `count > 0`.
+- `explain` adds a curation summary and a conflicts line.
+
+Verbatim explain excerpt:
+
+```
+Curation: pinned=2 hidden=1 filter_curated_hits=false override_tags=[homepage]
+Conflicts: [p1 (both pinned & hidden → hidden)]
+```
+
+```mermaid
+flowchart TD
+  R[Memoized response hits] --> P[Build pinned segment (declared order, present IDs only)]
+  R --> U[Unpinned remainder (original order)]
+  P --> O[Concatenate]
+  U --> O
+  O --> F{filter_curated_hits?}
+  F -- yes --> X[Drop hidden]
+  F -- no --> Y[Keep hidden]
+  X --> V[Curated view (materializers iterate)]
+  Y --> V[Curated view (materializers iterate)]
+```
+
+## Observability
+
+Events are counts/flags only; IDs/tags are redacted. A compact logging subscriber appends a short curation segment to single-search lines and structured JSON fields when present.
+
+- `search_engine.curation.compile` — once per compile when curation state exists
+  - Payload: `pinned_count`, `hidden_count`, `has_override_tags`, `filter_curated_hits`
+- `search_engine.curation.conflict` — emitted when overlaps or limits are detected; at most once per compile
+  - Payload: `type` (`:overlap`|`:limit_exceeded`), `count`, optional `limit`
+
+Compact logging (examples; no IDs/tags):
+
+- Text: `[se.search] collection=products status=200 duration=12.3ms cu=p:2|h:1|f:false|t:1`
+- JSON: `{ "event":"search", "collection":"products", "curation_pinned_count":2, "curation_hidden_count":1, "curation_has_override_tags":true, "curation_filter_flag":false }`
 
 ```mermaid
 sequenceDiagram
@@ -185,15 +181,23 @@ sequenceDiagram
   participant I as Instrumentation
   participant L as Log Subscriber
 
-  R->>C: to_typesense_params()
-  C->>C: Encode curation params & counts
-  C-->>I: instrument "search_engine.curation.compile" {counts, flags}
-  Note right of I: redacted — no IDs/tags
-  C-->>I: instrument "search_engine.curation.conflict" {type, count, limit?}
-  C-->>L: search log context
-  L->>L: append cu=p:…|h:…|f:…|t:… (text) / JSON fields
+  R->>C: to_typesense_params
+  C->>C: Encode curation keys & counts
+  C-->>I: search_engine.curation.compile {pinned_count, hidden_count, has_override_tags, filter_curated_hits}
+  C-->>I: search_engine.curation.conflict {type, count, limit?}
+  C-->>L: search context
+  L->>L: append compact curation segment (text+JSON)
 ```
 
-Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Observability](./observability.md)
+## FAQ
 
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+- **How does hide‑wins work?** If the same ID appears in both lists, it is removed from `pinned` and treated as hidden. The conflict is visible in `explain` and emitted once via `search_engine.curation.conflict`.
+- **Why are curation keys body‑only?** They are Typesense body params and never belong to URL/common params. This keeps caches and logs clean and minimizes risk of leakage.
+- **How are limits enforced?** After normalization and dedupe. When a list exceeds the configured limit, it is truncated and `CurationLimitExceeded` is raised. A conflict event with `type: :limit_exceeded` is also emitted.
+- **Does curation change pagination?** No. It only affects the curated in‑memory view. Pagination/search execution semantics remain unchanged.
+- **What if a pinned ID isn’t present in the response?** It is ignored for ordering; only IDs present in the current page are surfaced.
+- **How does curation interact with presets or selection?** Curation composes orthogonally. Presets affect compiled params; selection controls hydrated fields. Curation doesn’t add extra requests and respects the effective selection during hydration.
+
+---
+
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Multi‑search](./multi_search.md) · [Materializers](./materializers.md) · [Observability](./observability.md)

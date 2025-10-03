@@ -312,6 +312,7 @@ module SearchEngine
     #
     # @param ids [Array<#to_s>] one or more IDs; arrays are flattened one level
     # @return [SearchEngine::Relation]
+    # @see docs/curation.md
     def pin(*ids)
       additions = normalize_curation_ids(ids)
       return self if additions.empty?
@@ -330,6 +331,7 @@ module SearchEngine
     #
     # @param ids [Array<#to_s>] one or more IDs; arrays are flattened one level
     # @return [SearchEngine::Relation]
+    # @see docs/curation.md
     def hide(*ids)
       additions = normalize_curation_ids(ids)
       return self if additions.empty?
@@ -351,6 +353,7 @@ module SearchEngine
     # @param override_tags [Array<#to_s>, nil]
     # @param filter_curated_hits [true,false,nil,Symbol]
     # @return [SearchEngine::Relation]
+    # @see docs/curation.md
     def curate(pin: nil, hide: nil, override_tags: nil, filter_curated_hits: :__unset__)
       spawn do |s|
         cur = s[:curation] || { pinned: [], hidden: [], override_tags: [], filter_curated_hits: nil }
@@ -375,6 +378,7 @@ module SearchEngine
 
     # Clear all curation state from the relation.
     # @return [SearchEngine::Relation]
+    # @see docs/curation.md
     def clear_curation
       spawn do |s|
         s[:curation] = nil

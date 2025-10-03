@@ -135,18 +135,21 @@ module SearchEngine
 
     # Raised when curated ID does not match the configured pattern.
     #
+    # @see docs/curation.md
     # @example
     #   raise SearchEngine::Errors::InvalidCuratedId, 'InvalidCuratedId: "foo bar" is not a valid curated ID. Expected pattern: /\A[\w\-:\.]+\z/. Try removing illegal characters.'
     class InvalidCuratedId < Error; end
 
     # Raised when pinned/hidden lists exceed configured limits after normalization.
     #
+    # @see docs/curation.md
     # @example
     #   raise SearchEngine::Errors::CurationLimitExceeded, 'CurationLimitExceeded: pinned list exceeds max_pins=50 (attempted 51). Reduce inputs or raise the limit in SearchEngine.config.curation.'
     class CurationLimitExceeded < Error; end
 
     # Raised when an override tag is blank or invalid per allowed pattern.
     #
+    # @see docs/curation.md
     # @example
     #   raise SearchEngine::Errors::InvalidOverrideTag, 'InvalidOverrideTag: "" is invalid. Use non-blank strings that match the allowed pattern.'
     class InvalidOverrideTag < Error; end
