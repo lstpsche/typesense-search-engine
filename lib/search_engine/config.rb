@@ -243,6 +243,16 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for grouping UX.
+    class GroupingConfig
+      # @return [Boolean] emit non-fatal warnings for ambiguous combinations
+      attr_accessor :warn_on_ambiguous
+
+      def initialize
+        @warn_on_ambiguous = true
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -276,6 +286,7 @@ module SearchEngine
       @partitioning = PartitioningConfig.new
       @stale_deletes = StaleDeletesConfig.new
       @observability = ObservabilityConfig.new
+      @grouping = GroupingConfig.new
       nil
     end
 
@@ -319,6 +330,12 @@ module SearchEngine
     # @return [SearchEngine::Config::ObservabilityConfig]
     def observability
       @observability ||= ObservabilityConfig.new
+    end
+
+    # Expose grouping UX configuration.
+    # @return [SearchEngine::Config::GroupingConfig]
+    def grouping
+      @grouping ||= GroupingConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.

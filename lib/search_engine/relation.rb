@@ -176,10 +176,11 @@ module SearchEngine
     # Subsequent calls replace the existing grouping state (last call wins).
     #
     # @param field [Symbol, String] field name to group by (base field only)
-    # @param limit [Integer, nil] optional positive limit for number of groups
+    # @param limit [Integer, nil] optional positive limit for number of hits per group
     # @param missing_values [Boolean] whether to include missing values as their own group
     # @return [SearchEngine::Relation] a new relation with grouping applied
-    # @raise [ArgumentError] when inputs are invalid
+    # @raise [SearchEngine::Errors::InvalidGroup] when inputs are invalid or field is unknown
+    # @raise [SearchEngine::Errors::UnsupportedGroupField] when a joined/path field is provided (unsupported)
     # @example
     #   SearchEngine::Product
     #     .group_by(:brand_id, limit: 1, missing_values: true)
@@ -468,11 +469,61 @@ module SearchEngine
         limit_valid = limit.nil? || (limit.is_a?(Integer) && limit.positive?)
         missing_values_bool = [true, false].include?(missing_values)
 
-        raise ArgumentError, 'grouping: field must be a Symbol or String' unless field_valid
-        raise ArgumentError, 'grouping: limit must be a positive Integer' unless limit_valid
-        raise ArgumentError, 'grouping: missing_values must be a Boolean' unless missing_values_bool
+        raise SearchEngine::Errors::InvalidGroup, 'InvalidGroup: field must be a Symbol or String' unless field_valid
 
-        params[:group_by] = field.to_s
+        unless limit_valid
+          raise SearchEngine::Errors::InvalidGroup,
+                "InvalidGroup: limit must be a positive integer (got #{limit.inspect})"
+        end
+        unless missing_values_bool
+          raise SearchEngine::Errors::InvalidGroup,
+                "InvalidGroup: missing_values must be boolean (got #{missing_values.inspect})"
+        end
+
+        # Defensive unknown field and unsupported path checks
+        field_str = field.to_s
+        if field_str.start_with?('$') || field_str.include?('.')
+          raise SearchEngine::Errors::UnsupportedGroupField,
+                %(UnsupportedGroupField: grouping supports base fields only (got #{field_str.inspect}))
+        end
+        attrs = safe_attributes_map
+        unless attrs.nil? || attrs.empty? || attrs.key?(field.to_sym)
+          msg = build_invalid_group_unknown_field_message(field.to_sym)
+          raise SearchEngine::Errors::InvalidGroup, msg
+        end
+
+        # Guardrail warnings (non-fatal)
+        begin
+          if grouping_warnings_enabled?(cfg)
+            # 1) order vs group ordering
+            unless orders.empty?
+              cfg.logger&.warn('[search_engine] order affects hits, not group ordering.')
+              cfg.logger&.warn('[search_engine] Groups follow engine ranking.')
+              cfg.logger&.warn('[search_engine] Tip: Use filters to control the first hit per group.')
+            end
+
+            # 2) grouping field omitted from include_fields (only when include_fields present)
+            base_selected = Array(@state[:select]).map(&:to_s)
+            if !base_selected.empty? && !base_selected.include?(field_str)
+              cfg.logger&.warn(
+                %([search_engine] Grouping by `#{field_str}` without selecting it may be confusing.)
+              )
+              cfg.logger&.warn('[search_engine] Consider including it in fields or read it from `Group#key`.')
+            end
+
+            # 3) missing_values: true combined with filters excluding nulls for the grouping field
+            if missing_values && excludes_nulls_for_field?(ast_nodes, field_str)
+              cfg.logger&.warn(
+                %([search_engine] missing_values: true + filters excluding `null` for `#{field_str}` )
+              )
+              cfg.logger&.warn('[search_engine] may produce fewer missing groups than expected.')
+            end
+          end
+        rescue StandardError
+          # Do not fail search on logging issues
+        end
+
+        params[:group_by] = field_str
         params[:group_limit] = limit if limit
         params[:group_missing_values] = true if missing_values
       end
@@ -1083,11 +1134,39 @@ module SearchEngine
       missing_values = value[:missing_values]
 
       unless field.is_a?(Symbol) || field.is_a?(String)
-        raise ArgumentError,
-              'grouping: field must be a Symbol or String'
+        raise SearchEngine::Errors::InvalidGroup,
+              'InvalidGroup: field must be a Symbol or String'
       end
-      raise ArgumentError, 'grouping: limit must be an Integer or nil' unless limit.nil? || limit.is_a?(Integer)
-      raise ArgumentError, 'grouping: missing_values must be a Boolean' unless [true, false].include?(missing_values)
+
+      # Disallow joined/path fields like "$assoc.field"
+      field_str = field.to_s
+      if field_str.start_with?('$') || field_str.include?('.')
+        raise SearchEngine::Errors::UnsupportedGroupField,
+              %(UnsupportedGroupField: grouping supports base fields only (got #{field_str.inspect}))
+      end
+
+      # Validate existence against declared attributes when available
+      attrs = safe_attributes_map
+      unless attrs.nil? || attrs.empty?
+        sym = field.to_sym
+        unless attrs.key?(sym)
+          msg = build_invalid_group_unknown_field_message(sym)
+          raise SearchEngine::Errors::InvalidGroup, msg
+        end
+      end
+
+      # Validate limit positivity when provided
+      if !limit.nil? && !(limit.is_a?(Integer) && limit >= 1)
+        got = limit.nil? ? 'nil' : limit.inspect
+        raise SearchEngine::Errors::InvalidGroup,
+              "InvalidGroup: limit must be a positive integer (got #{got})"
+      end
+
+      # Validate missing_values strict boolean
+      unless [true, false].include?(missing_values)
+        raise SearchEngine::Errors::InvalidGroup,
+              "InvalidGroup: missing_values must be boolean (got #{missing_values.inspect})"
+      end
 
       { field: field.to_sym, limit: limit, missing_values: missing_values }
     end
@@ -1499,6 +1578,64 @@ module SearchEngine
         seen << name unless seen.include?(name)
       end
       seen
+    end
+
+    # Build an actionable InvalidGroup message for unknown field with suggestions.
+    def build_invalid_group_unknown_field_message(field_sym)
+      klass_name = klass_name_for_inspect
+      known = safe_attributes_map.keys.map(&:to_sym)
+      suggestions = suggest_fields(field_sym, known)
+      suggestion_str =
+        if suggestions.empty?
+          ''
+        elsif suggestions.length == 1
+          " (did you mean :#{suggestions.first}?)"
+        else
+          last = suggestions.last
+          others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
+          " (did you mean #{others}, or :#{last}?)"
+        end
+      "InvalidGroup: unknown field :#{field_sym} for grouping on #{klass_name}#{suggestion_str}"
+    end
+
+    # Lightweight suggestion helper using Levenshtein; returns up to 3 candidates within distance <= 2.
+    def suggest_fields(field_sym, known_syms)
+      return [] if known_syms.nil? || known_syms.empty?
+
+      input = field_sym.to_s
+      candidates = known_syms.map(&:to_s)
+      begin
+        require 'did_you_mean'
+        require 'did_you_mean/levenshtein'
+      rescue StandardError
+        return []
+      end
+
+      distances = candidates.each_with_object({}) do |cand, acc|
+        acc[cand] = DidYouMean::Levenshtein.distance(input, cand)
+      end
+      # Select up to 3 with minimal distance under threshold
+      sorted = distances.sort_by { |(_cand, d)| d }
+      threshold = 2
+      sorted.take(3).select { |(_cand, d)| d <= threshold }.map { |cand, _d| cand.to_sym }
+    end
+
+    def grouping_warnings_enabled?(cfg)
+      cfg&.grouping&.warn_on_ambiguous
+    end
+
+    def excludes_nulls_for_field?(ast_nodes, field_str)
+      field = field_str.to_s
+      Array(ast_nodes).flatten.any? do |node|
+        case node
+        when SearchEngine::AST::NotEq
+          node.field.to_s == field && node.value.nil?
+        when SearchEngine::AST::NotIn
+          node.field.to_s == field && Array(node.values).include?(nil)
+        else
+          false
+        end
+      end
     end
   end
 end

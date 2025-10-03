@@ -83,5 +83,21 @@ module SearchEngine
     # Example: calling `where(authors: { last_name: "Rowling" })` without
     # `.joins(:authors)` on the relation first.
     class JoinNotApplied < Error; end
+
+    # Raised when grouping DSL is used with invalid inputs.
+    #
+    # Use for actionable messages like unknown field names, invalid limit values,
+    # or non-boolean missing_values.
+    #
+    # @example Unknown field with suggestion
+    #   raise SearchEngine::Errors::InvalidGroup, "InvalidGroup: unknown field :brand for grouping on SearchEngine::Product (did you mean :brand_id?)"
+    class InvalidGroup < Error; end
+
+    # Raised when grouping references unsupported constructs such as joined paths
+    # (e.g., "$assoc.field"). Only base fields are supported for grouping.
+    #
+    # @example
+    #   raise SearchEngine::Errors::UnsupportedGroupField, 'UnsupportedGroupField: grouping supports base fields only (got "$authors.last_name")'
+    class UnsupportedGroupField < Error; end
   end
 end
