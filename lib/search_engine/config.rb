@@ -253,6 +253,17 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for selection/hydration.
+    # Controls strictness of missing attributes during hydration.
+    class SelectionConfig
+      # @return [Boolean] when true, missing requested fields raise MissingField
+      attr_accessor :strict_missing
+
+      def initialize
+        @strict_missing = false
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -287,6 +298,7 @@ module SearchEngine
       @stale_deletes = StaleDeletesConfig.new
       @observability = ObservabilityConfig.new
       @grouping = GroupingConfig.new
+      @selection = SelectionConfig.new
       nil
     end
 
@@ -336,6 +348,12 @@ module SearchEngine
     # @return [SearchEngine::Config::GroupingConfig]
     def grouping
       @grouping ||= GroupingConfig.new
+    end
+
+    # Expose selection/hydration configuration.
+    # @return [SearchEngine::Config::SelectionConfig]
+    def selection
+      @selection ||= SelectionConfig.new
     end
 
     # Apply ENV values to any attribute, with control over overriding.
@@ -421,7 +439,8 @@ module SearchEngine
         sources: sources_hash_for_to_h,
         mapper: mapper_hash_for_to_h,
         partitioning: partitioning_hash_for_to_h,
-        observability: observability_hash_for_to_h
+        observability: observability_hash_for_to_h,
+        selection: selection_hash_for_to_h
       }
     end
 
@@ -491,6 +510,12 @@ module SearchEngine
         max_message_length: observability.max_message_length,
         include_error_messages: observability.include_error_messages ? true : false,
         emit_legacy_event_aliases: observability.emit_legacy_event_aliases ? true : false
+      }
+    end
+
+    def selection_hash_for_to_h
+      {
+        strict_missing: selection.strict_missing ? true : false
       }
     end
 

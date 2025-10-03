@@ -119,10 +119,38 @@ rel.to_typesense_params[:exclude_fields]
 # => "legacy,$brands(internal_score)"
 ```
 
-## See also
+## Strict vs Lenient selection
 
-- [Relation](./relation.md)
-- [JOINs](./joins.md)
-- [Materializers](./materializers.md)
-- [Compiler](./compiler.md)
+Hydration respects selection by assigning only attributes present in each hit. Missing attributes are never synthesized.
+
+- **Lenient (default)**: Missing requested fields are left unset; readers should return `nil` if they rely on ivars.
+- **Strict**: If a requested field is absent in the hit, hydration raises `SearchEngine::Errors::MissingField` with guidance.
+
+Backed by:
+- Per‑relation override via `options(selection: { strict_missing: true })`
+- Global default via `SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false) }`
+
+```ruby
+# initializer
+SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false) }
+# per relation
+rel = SearchEngine::Product.select(:id).options(selection: { strict_missing: true })
+```
+
+Hydration decision flow:
+
+```mermaid
+flowchart TD
+  A[Typesense hit] --> B[Extract present keys]
+  R[Relation selection (effective)] --> C[Requested keys]
+  B --> D[Assign only present keys]
+  C --> E{strict_missing?}
+  D --> F[All good]
+  E -- yes --> G[Missing = Requested − Present]
+  G -- empty --> F
+  G -- non-empty --> H[Raise MissingField with guidance]
+  E -- no --> I[Leave absents unset (no ivars)] --> F
+```
+
+See also: [Relation](./relation.md), [Materializers](./materializers.md), and [Compiler](./compiler.md).
 
