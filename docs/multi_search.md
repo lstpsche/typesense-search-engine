@@ -215,3 +215,37 @@ sequenceDiagram
 - **How do `common:` and per-search params interact?** Shallow merge per search: keys from the relation override `common:`. URL-only keys (`use_cache`, `cache_ttl`) are filtered from both. See [Common params merge](#common-params-merge).
 - **Can I run multi-search without `MultiResult`?** Yes. `SearchEngine.multi_search` returns `SearchEngine::Multi::ResultSet` by default. Use `SearchEngine.multi_search_result` to get a `MultiResult`, or `SearchEngine.multi_search_raw` for the raw Typesense response.
 - **How do I debug a failing sub-search?** Use labels from the `search_engine.multi_search` event to identify the failing index, then run each `Relation#explain` individually. Consider subscribing to `SearchEngine::Notifications::CompactLogger` and see [Observability](./observability.md).
+
+## Presets in multi-search
+
+Presets are applied per search. Each entry in `searches[]` carries its own `preset` and respects the relation’s `preset_mode`:
+
+- **mode=:merge**: pass through compiled params as-is (includes `preset`)
+- **mode=:only**: keep only `collection`, `q`, `page`, `per_page`, `preset`
+- **mode=:lock**: drop any keys listed in `SearchEngine.config.presets.locked_domains`
+
+Required keys for multi-search are preserved even in `:only` mode: `collection`, `q`, `page`, `per_page`, plus `preset`.
+
+Example:
+
+```ruby
+res = SearchEngine.multi_search do |m|
+  m.add :products, SearchEngine::Product.preset(:popular_products).per(5)
+  m.add :brands,   SearchEngine::Brand.preset(:brand_popularity, mode: :only).per(3)
+end
+```
+
+See also: [Presets](./presets.md).
+
+```mermaid
+flowchart TD
+  A[Relation] --> B[to_typesense_params]
+  B --> C[Per‑search payload]
+  C --> D{preset_mode}
+  D -- merge --> E[Pass through]
+  D -- only --> F[Keep collection,q,page,per_page + preset]
+  D -- lock --> G[Drop keys in locked_domains]
+  E --> H[searches[]]
+  F --> H
+  G --> H
+```

@@ -20,6 +20,9 @@ module SearchEngine
     # URL-level options that must never appear in request bodies.
     URL_ONLY_KEYS = %i[use_cache cache_ttl].freeze
 
+    # Keys that must be present/retained for :only mode in multi-search payloads.
+    ESSENTIAL_MULTI_KEYS = %i[collection q page per_page preset].freeze
+
     # Canonicalize a label into a case-insensitive Symbol key.
     # @param label [String, Symbol]
     # @return [Symbol]
@@ -77,6 +80,13 @@ module SearchEngine
     # URL-only options (:use_cache, :cache_ttl) are filtered from both sources.
     # Empty values are omitted for cleanliness.
     #
+    # Presets:
+    # - Preset token lives inside each per-search payload under :preset (never top-level)
+    # - mode=:merge — pass through compiler output (includes :preset)
+    # - mode=:only  — retain only ESSENTIAL_MULTI_KEYS (collection,q,page,per_page,preset) after common merge
+    # - mode=:lock  — defensively drop any keys present in Config.presets.locked_domains from the merged payload
+    #                 (conflict recording remains in single-search compile)
+    #
     # @param common [Hash] optional parameters applied to each per-search payload
     # @return [Array<Hash>] array of request bodies suitable for Client#multi_search
     # @raise [ArgumentError] when +common+ is not a Hash, when duplicate labels are detected,
@@ -113,7 +123,7 @@ module SearchEngine
 
         # Shallow-merge with per-search winning
         merged = filtered_common.merge(per_search)
-        payload = { collection: collection }.merge(merged)
+        payload = { collection: collection }.merge(EssentialPruner.prune(merged, relation: e.relation))
         prune_empty_values(payload)
       end
     end
@@ -229,6 +239,40 @@ module SearchEngine
         out[k] = v
       end
       out
+    end
+
+    # Internal helpers for applying preset-mode safeguards deterministically.
+    module EssentialPruner
+      module_function
+
+      def prune(merged_hash, relation:)
+        preset = relation.respond_to?(:preset_name) ? relation.preset_name : nil
+        return merged_hash unless preset
+
+        mode = relation.respond_to?(:preset_mode) ? relation.preset_mode : :merge
+        case mode
+        when :only
+          keep_only_essentials(merged_hash)
+        when :lock
+          drop_locked_domains(merged_hash)
+        else
+          merged_hash
+        end
+      end
+
+      def keep_only_essentials(hash)
+        out = {}
+        ESSENTIAL_MULTI_KEYS.each do |k|
+          out[k] = hash[k] if hash.key?(k)
+        end
+        out
+      end
+
+      def drop_locked_domains(hash)
+        locked = SearchEngine.config.presets.locked_domains_set
+        # Return a shallow copy with locked keys removed
+        hash.reject { |k, _| locked.include?(k) }
+      end
     end
   end
 end

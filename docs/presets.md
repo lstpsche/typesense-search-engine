@@ -1,6 +1,6 @@
 # Presets: Relation#preset and Merge Strategies
 
-Back to: [Index](./index.md) · See also: [Relation](./relation.md) · Multi-search: [Multi](./multi_search.md)
+Back to: [Index](./index.md) · See also: [Relation](./relation.md) · Multi-search: [Multi](./multi_search.md#presets-in-multi-search)
 
 ## Overview
 
@@ -86,7 +86,7 @@ When conflicts are present, a single event is emitted per compile:
   - `preset_name` (String) — effective preset name
   - `count` (Integer) — number of dropped keys
 
-Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Multi-search](./multi_search.md)
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Multi-search](./multi_search.md#presets-in-multi-search)
 
 ### Mermaid — Conflict Resolution Flow
 
