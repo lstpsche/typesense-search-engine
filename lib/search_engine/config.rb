@@ -264,6 +264,53 @@ module SearchEngine
       end
     end
 
+    # Lightweight nested configuration for default presets resolution.
+    # Controls namespacing and enablement.
+    class PresetsConfig
+      # @return [Boolean] when false, namespace is ignored but declared tokens remain usable
+      attr_accessor :enabled
+      # @return [String, nil] optional namespace prepended to preset names when enabled
+      attr_accessor :namespace
+
+      def initialize
+        @enabled = true
+        @namespace = nil
+      end
+
+      # Normalize a Boolean-like value.
+      # Accepts true/false, or common String forms ("true","false","1","0","yes","no","on","off").
+      # @param value [Object]
+      # @return [Boolean]
+      def self.normalize_enabled(value)
+        return true  if value == true
+        return false if value == false
+
+        if value.is_a?(String)
+          v = value.strip.downcase
+          return true  if %w[1 true yes on].include?(v)
+          return false if %w[0 false no off].include?(v)
+        end
+
+        value
+      end
+
+      # Normalize namespace to a non-empty String or return original for validation.
+      # @param value [Object]
+      # @return [String, nil, Object]
+      def self.normalize_namespace(value)
+        return nil if value.nil?
+
+        if value.is_a?(String)
+          ns = value.strip
+          return nil if ns.empty?
+
+          return ns
+        end
+
+        value
+      end
+    end
+
     # Create a new configuration with defaults, optionally hydrated from ENV.
     #
     # @param env [#[]] environment-like object (defaults to ::ENV)
@@ -299,6 +346,7 @@ module SearchEngine
       @observability = ObservabilityConfig.new
       @grouping = GroupingConfig.new
       @selection = SelectionConfig.new
+      @presets = PresetsConfig.new
       nil
     end
 
@@ -356,6 +404,43 @@ module SearchEngine
       @selection ||= SelectionConfig.new
     end
 
+    # Expose presets configuration.
+    # @return [SearchEngine::Config::PresetsConfig]
+    def presets
+      @presets ||= PresetsConfig.new
+    end
+
+    # Assign presets configuration from a compatible object.
+    # Accepts a PresetsConfig, a Hash-like, or an object responding to :namespace and/or :enabled (e.g., OpenStruct).
+    # Normalizes values on assignment.
+    # @param value [Object]
+    # @return [void]
+    def presets=(value)
+      cfg = presets
+      if value.is_a?(PresetsConfig)
+        @presets = value
+        return
+      end
+
+      source = if value.respond_to?(:to_h)
+                 value.to_h
+               else
+                 hash = {}
+                 hash[:enabled] = value.enabled if value.respond_to?(:enabled)
+                 hash[:namespace] = value.namespace if value.respond_to?(:namespace)
+                 hash
+               end
+
+      if source.key?(:enabled)
+        normalized = PresetsConfig.normalize_enabled(source[:enabled])
+        cfg.enabled = normalized
+      end
+
+      return unless source.key?(:namespace)
+
+      cfg.namespace = PresetsConfig.normalize_namespace(source[:namespace])
+    end
+
     # Apply ENV values to any attribute, with control over overriding.
     #
     # @param env [#[]] environment-like object
@@ -388,6 +473,7 @@ module SearchEngine
       errors.concat(validate_retries)
       errors.concat(validate_cache)
       errors.concat(validate_multi_search_limit)
+      errors.concat(validate_presets)
 
       raise ArgumentError, "SearchEngine::Config invalid: #{errors.join(', ')}" unless errors.empty?
 
@@ -440,7 +526,8 @@ module SearchEngine
         mapper: mapper_hash_for_to_h,
         partitioning: partitioning_hash_for_to_h,
         observability: observability_hash_for_to_h,
-        selection: selection_hash_for_to_h
+        selection: selection_hash_for_to_h,
+        presets: presets_hash_for_to_h
       }
     end
 
@@ -516,6 +603,13 @@ module SearchEngine
     def selection_hash_for_to_h
       {
         strict_missing: selection.strict_missing ? true : false
+      }
+    end
+
+    def presets_hash_for_to_h
+      {
+        enabled: presets.enabled ? true : false,
+        namespace: presets.namespace
       }
     end
 
@@ -616,6 +710,20 @@ module SearchEngine
       return [] if multi_search_limit.is_a?(Integer) && !multi_search_limit.negative?
 
       ['multi_search_limit must be a non-negative Integer']
+    end
+
+    def validate_presets
+      errors = []
+      en = presets.enabled
+      ns = presets.namespace
+
+      errors << 'presets.enabled must be a Boolean' unless [true, false].include?(en)
+
+      unless ns.nil? || (ns.is_a?(String) && !ns.strip.empty?)
+        errors << 'presets.namespace must be a non-empty String or nil'
+      end
+
+      errors
     end
   end
 end

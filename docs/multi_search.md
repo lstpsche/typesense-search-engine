@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Relation](./relation.md) · [Materializers](./materializers.md)
+[← Back to Index](./index.md) · [Client](./client.md) · [Relation](./relation.md) · [Materializers](./materializers.md) · [Presets](./presets.md)
 
 ## Federated multi-search
 

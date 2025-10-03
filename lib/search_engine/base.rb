@@ -74,6 +74,12 @@ module SearchEngine
         # Inherit joins registry via copy-on-write snapshot
         parent_joins = @joins_config || {}
         subclass.instance_variable_set(:@joins_config, parent_joins.dup.freeze)
+
+        # Inherit declared default preset token if present
+        return unless instance_variable_defined?(:@__declared_default_preset__)
+
+        token = instance_variable_get(:@__declared_default_preset__)
+        subclass.instance_variable_set(:@__declared_default_preset__, token)
       end
 
       # Return a fresh, immutable relation bound to this model class.
@@ -212,6 +218,47 @@ module SearchEngine
         available = (@joins_config || {}).keys
         raise SearchEngine::Errors::UnknownJoin,
               "Unknown join :#{key} for #{self}. Available: #{available.inspect}."
+      end
+
+      # Declare a default preset token for this collection.
+      #
+      # Stores the declared token as a Symbol without namespace. Validation
+      # ensures presence and shape. The effective preset name is computed by
+      # {default_preset_name} using the global presets configuration.
+      #
+      # @param name [#to_sym] declared preset token (without namespace)
+      # @return [void]
+      # @raise [ArgumentError] when the token is nil, blank, or invalid
+      def default_preset(name)
+        raise ArgumentError, 'default_preset requires a name' if name.nil?
+
+        token = name.to_sym
+        raise ArgumentError, 'default_preset name must be non-empty' if token.to_s.strip.empty?
+
+        instance_variable_set(:@__declared_default_preset__, token)
+        nil
+      end
+
+      # Compute the effective default preset name for this collection.
+      #
+      # Applies the global presets configuration: when enabled and a namespace
+      # is present, returns "#{SearchEngine.config.presets.namespace}_#{token}";
+      # otherwise returns the declared token as a String. When disabled, the
+      # namespace is ignored and the token is returned as a String.
+      #
+      # @return [String, nil] effective preset name, or nil when no preset declared
+      def default_preset_name
+        token = if instance_variable_defined?(:@__declared_default_preset__)
+                  instance_variable_get(:@__declared_default_preset__)
+                end
+        return nil if token.nil?
+
+        presets_cfg = SearchEngine.config.presets
+        if presets_cfg.enabled && presets_cfg.namespace
+          +"#{presets_cfg.namespace}_#{token}"
+        else
+          token.to_s
+        end
       end
     end
 
