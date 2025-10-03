@@ -505,9 +505,7 @@ module SearchEngine
             # 2) grouping field omitted from include_fields (only when include_fields present)
             base_selected = Array(@state[:select]).map(&:to_s)
             if !base_selected.empty? && !base_selected.include?(field_str)
-              cfg.logger&.warn(
-                %([search_engine] Grouping by `#{field_str}` without selecting it may be confusing.)
-              )
+              cfg.logger&.warn(%([search_engine] Grouping by `#{field_str}` without selecting it may be confusing.))
               cfg.logger&.warn('[search_engine] Consider including it in fields or read it from `Group#key`.')
             end
 
@@ -523,9 +521,28 @@ module SearchEngine
           # Do not fail search on logging issues
         end
 
+        # Compile-time grouping timing start
+        grouping_started_ms = SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
+
         params[:group_by] = field_str
         params[:group_limit] = limit if limit
         params[:group_missing_values] = true if missing_values
+
+        # Emit compile-time grouping event with minimal payload
+        if defined?(SearchEngine::Instrumentation)
+          begin
+            g_payload = {
+              collection: klass_name_for_inspect,
+              field: field_str,
+              limit: limit,
+              missing_values: missing_values,
+              duration_ms: (SearchEngine::Instrumentation.monotonic_ms - grouping_started_ms if grouping_started_ms)
+            }
+            SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', g_payload)
+          rescue StandardError
+            # swallow observability errors
+          end
+        end
       end
 
       # Keep infix last for stability; include when configured or overridden

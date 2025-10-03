@@ -13,6 +13,8 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
   - `search_engine.indexer.partition_finish` — partition processing finished with summary
   - `search_engine.indexer.batch_import` — each bulk import attempt
   - `search_engine.indexer.delete_stale` — stale delete lifecycle (started/ok/failed/skipped)
+  - `search_engine.joins.compile` — compile-time summary of JOINs usage
+  - `search_engine.grouping.compile` — compile-time summary of grouping (field/limit/missing_values)
 
 Duration is available via the event (`ev.duration`).
 
@@ -27,10 +29,11 @@ Duration is available via the event (`ev.duration`).
 - **partition/partition_hash**: Numeric raw key or short hash for strings
 - **into**: Physical collection name
 - **duration_ms**: Float measured duration in milliseconds
+- **grouping.compile**: `{ field: String, limit: Integer|nil, missing_values: Boolean, collection?: String, duration_ms?: Float }`
 
 Redaction rules:
 - Sensitive keys matching `/key|token|secret|password/i` are redacted
-- Only whitelisted param keys are preserved: `q`, `query_by`, `per_page`, `page`, `infix`, `filter_by`
+- Only whitelisted param keys are preserved: `q`, `query_by`, `per_page`, `page`, `infix`, `filter_by`, `group_by`, `group_limit`, `group_missing_values`
 - `q` is truncated when longer than 128 chars
 - `filter_by` literals are masked while preserving structure (e.g., `price:>10` → `price:>***`)
 - `filter_by` is never logged as-is; a `filter_hash` (sha1) is provided instead for stale deletes
@@ -50,6 +53,9 @@ Redaction rules:
 | `partition`    | Numeric or hidden    | Hidden for strings; use `partition_hash` |
 | `partition_hash` | String (sha1 prefix) | N/A |
 | `filter_hash`  | String (sha1)        | Raw filter never logged |
+| `group_by`     | String               | N/A |
+| `group_limit`  | Integer, nil         | N/A |
+| `group_missing_values` | Boolean      | N/A |
 
 For URL/cache knobs, see [Configuration](./configuration.md).
 
@@ -75,30 +81,14 @@ SearchEngine::Notifications::CompactLogger.subscribe(
 Example lines:
 
 ```
-[se.search] collection=products status=200 duration=12.3ms cache=true ttl=60 q="milk" per_page=5
+[se.search] collection=products status=200 duration=12.3ms cache=true ttl=60 grp=brand_id:1:mv q="milk" per_page=5
 [se.multi] count=2 labels=products,brands status=200 duration=18.6ms cache=true ttl=60
-```
-
-New KV examples:
-
-```
-event=schema.diff collection=SearchEngine::Product fields.changed=0 fields.added=3 fields.removed=0 in_sync=false duration_ms=12.1
-
-event=schema.apply collection=SearchEngine::Product into=products_20251001_120000_001 alias_swapped=true retention_deleted_count=2 status=ok duration_ms=842.4
-
-event=indexer.partition_start collection=SearchEngine::Product into=products_20251001_120000_001 partition=9 dispatch_mode=inline timestamp=2025-10-02T12:00:00Z
-
-event=indexer.partition_finish collection=SearchEngine::Product into=products_20251001_120000_001 partition=9 batches_total=4 docs_total=8000 success_total=8000 failed_total=0 status=ok duration_ms=5234.7
-
-event=indexer.batch_import collection=products into=products batch_index=1 docs_count=2000 success_count=2000 failure_count=0 attempts=1 http_status=200 bytes_sent=123456 duration_ms=317.9
-
-event=indexer.delete_stale collection=SearchEngine::Product into=products_20251001_120000_001 partition=ab12cd34 filter_hash=f3e1... deleted_count=120 status=ok duration_ms=210.0
 ```
 
 JSON example (one line):
 
 ```json
-{"event":"schema.apply","collection":"SearchEngine::Product","into":"products_20251001_120000_001","alias_swapped":true,"retention_deleted_count":2,"status":"ok","duration_ms":842.4}
+{"event":"search","collection":"products","status":200,"duration.ms":12.3,"cache":true,"ttl":60,"group_by":"brand_id","group_limit":1,"group_missing_values":true}
 ```
 
 ### Event flow
@@ -111,6 +101,8 @@ flowchart TD
   D[Batch Import] -->|indexer.batch_import| N
   E[Delete Stale] -->|indexer.delete_stale| N
   C2[Partition Finish] -->|indexer.partition_finish| N
+  G[Grouping Compile] -->|grouping.compile| N
+  J[JOINs Compile] -->|joins.compile| N
   N --> L[Compact Logger]
 ```
 

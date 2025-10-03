@@ -445,6 +445,60 @@ module SearchEngine
         end
       end
       private_class_method :log_with_level
+
+      # Build JSON object for search/multi events
+      def self.build_json_hash(payload, duration_ms:, multi:, include_params: false) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+        if multi
+          labels = Array(payload[:labels]).map(&:to_s)
+          labels = Array(payload[:collections]).map(&:to_s) if labels.empty? || labels.all?(&:empty?)
+          {
+            'event' => 'multi',
+            'labels' => (labels unless labels.empty?),
+            'count' => payload[:searches_count] || (payload[:params].is_a?(Array) ? payload[:params].size : nil),
+            'status' => payload[:http_status] || payload[:status] || 'ok',
+            'duration.ms' => duration_ms,
+            'cache' => extract_cache_flag(payload[:url_opts]),
+            'ttl' => extract_ttl(payload[:url_opts])
+          }.compact
+        else
+          params_hash = payload[:params].is_a?(Hash) ? payload[:params] : {}
+          h = {
+            'event' => 'search',
+            'collection' => payload[:collection],
+            'status' => payload[:http_status] || payload[:status] || 'ok',
+            'duration.ms' => duration_ms,
+            'cache' => extract_cache_flag(payload[:url_opts]),
+            'ttl' => extract_ttl(payload[:url_opts])
+          }
+          # Grouping fields at top-level when present
+          h['group_by'] = params_hash[:group_by] if params_hash.key?(:group_by)
+          h['group_limit'] = params_hash[:group_limit] if params_hash.key?(:group_limit)
+          h['group_missing_values'] = true if params_hash[:group_missing_values]
+
+          if include_params
+            %i[q query_by per_page page infix].each do |key|
+              h[key.to_s] = params_hash[key] if params_hash.key?(key)
+            end
+            h['filter_by'] = '***' if params_hash.key?(:filter_by)
+          end
+          h.compact
+        end
+      end
+      private_class_method :build_json_hash
+
+      def self.extract_cache_flag(url_opts)
+        return nil unless url_opts.is_a?(Hash)
+
+        url_opts[:use_cache] ? true : false
+      end
+      private_class_method :extract_cache_flag
+
+      def self.extract_ttl(url_opts)
+        return nil unless url_opts.is_a?(Hash)
+
+        url_opts[:cache_ttl]
+      end
+      private_class_method :extract_ttl
     end
   end
 end
