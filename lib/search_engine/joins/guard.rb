@@ -80,9 +80,10 @@ module SearchEngine
       #
       # @param assoc_cfg [Hash] normalized association config
       # @param field [Symbol, String]
+      # @param source_klass [Class, nil] optional source model class for error messages
       # @raise [SearchEngine::Errors::UnknownJoinField]
       # @return [void]
-      def validate_joined_field!(assoc_cfg, field)
+      def validate_joined_field!(assoc_cfg, field, source_klass: nil)
         return if assoc_cfg.nil?
 
         collection = assoc_cfg[:collection]
@@ -102,12 +103,12 @@ module SearchEngine
         return if known.include?(fname)
 
         suggestions = suggest(fname, known)
-        model_name = safe_class_name(target_klass)
+        # Prefer the source model name for message clarity when provided
+        model_name = safe_class_name(source_klass || target_klass)
         assoc_name = assoc_cfg[:name] || begin
           # best effort: derive from collection
           collection.to_s
         end
-        # Match ticket verbatim prefix
         msg = "UnknownJoinField: :#{fname} is not declared on association :#{assoc_name} for #{model_name}"
         msg += suggestion_suffix(suggestions)
         raise SearchEngine::Errors::UnknownJoinField, msg
