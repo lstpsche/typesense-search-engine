@@ -68,6 +68,21 @@ module SearchEngine
       nodes.frozen? ? nodes : nodes.dup.freeze
     end
 
+    # Return the effective preset mode when a preset is applied.
+    # Falls back to :merge when not explicitly set.
+    #
+    # @return [Symbol] one of :merge, :only, :lock
+    def preset_mode
+      (@state[:preset_mode] || :merge).to_sym
+    end
+
+    # Return the effective preset token (namespaced if configured) or nil.
+    #
+    # @return [String, nil]
+    def preset_name
+      @state[:preset_name]
+    end
+
     # Create a new Relation.
     #
     # @param klass [Class] model class the relation is bound to
@@ -655,19 +670,7 @@ module SearchEngine
           end
           params[:_preset_conflicts] = conflicts unless conflicts.empty?
 
-          if defined?(SearchEngine::Instrumentation) && !conflicts.empty?
-            begin
-              payload = {
-                keys: conflicts.map(&:to_sym).sort,
-                mode: pmode,
-                preset_name: pn,
-                count: conflicts.size
-              }
-              SearchEngine::Instrumentation.instrument('search_engine.preset.conflict', payload) {}
-            rescue StandardError
-              # swallow observability errors
-            end
-          end
+          instrument_preset_conflicts(pmode, pn, conflicts)
         end
       end
 
@@ -1979,6 +1982,27 @@ module SearchEngine
         lines << "  preset: #{@state[:preset_name]} (mode=#{mode})"
       end
       lines
+    end
+
+    # Instrument preset conflicts in :lock mode without affecting compile flow.
+    # Swallows any observer errors to keep compilation pure/deterministic.
+    # @param mode [Symbol]
+    # @param name [String]
+    # @param conflicts [Array<Symbol>]
+    # @return [void]
+    def instrument_preset_conflicts(mode, name, conflicts)
+      return unless defined?(SearchEngine::Instrumentation)
+      return if Array(conflicts).empty?
+
+      payload = {
+        keys: Array(conflicts).map(&:to_sym).sort,
+        mode: mode,
+        preset_name: name,
+        count: Array(conflicts).size
+      }
+      SearchEngine::Instrumentation.instrument('search_engine.preset.conflict', payload) {}
+    rescue StandardError
+      nil
     end
   end
 end
