@@ -306,6 +306,7 @@ module SearchEngine
     # @param params [Hash]
     # @return [Hash]
     def build_curation_segment(params)
+      # Counts/flags only; IDs/tags redacted. See docs/curation.md.
       pinned_str = params[:pinned_hits].to_s
       hidden_str = params[:hidden_hits].to_s
       tags_str   = params[:override_tags].to_s
