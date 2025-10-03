@@ -32,26 +32,12 @@ module SearchEngine
       ts = typesense
 
       start = current_monotonic_ms
-      payload = params.dup
-      # Strip internal keys that must not be sent to Typesense
-      payload.delete(:_join)
-      payload.delete(:_selection)
+      payload = sanitize_body_params(params)
       path = "/collections/#{collection}/documents/search"
 
       # Observability event payload (pre-built; redacted)
       if defined?(ActiveSupport::Notifications)
-        sel = params[:_selection].is_a?(Hash) ? params[:_selection] : {}
-        se_payload = {
-          collection: collection,
-          params: Observability.redact(params),
-          url_opts: Observability.filtered_url_opts(cache_params),
-          status: nil,
-          error_class: nil,
-          retries: nil,
-          selection_include_count: sel[:include_count],
-          selection_exclude_count: sel[:exclude_count],
-          selection_nested_assoc_count: sel[:nested_assoc_count]
-        }
+        se_payload = build_search_event_payload(collection: collection, params: params, cache_params: cache_params)
 
         result = nil
         ActiveSupport::Notifications.instrument('search_engine.search', se_payload) do
@@ -265,6 +251,54 @@ module SearchEngine
     private
 
     attr_reader :config
+
+    # Remove internal-only keys from the HTTP payload
+    def sanitize_body_params(params)
+      payload = params.dup
+      payload.delete(:_join)
+      payload.delete(:_selection)
+      payload.delete(:_preset_mode)
+      payload.delete(:_preset_pruned_keys)
+      payload.delete(:_preset_conflicts)
+      payload
+    end
+
+    # Build the search event payload including selection and preset segments
+    def build_search_event_payload(collection:, params:, cache_params: {})
+      sel = params[:_selection].is_a?(Hash) ? params[:_selection] : {}
+      base = {
+        collection: collection,
+        params: Observability.redact(params),
+        url_opts: Observability.filtered_url_opts(cache_params),
+        status: nil,
+        error_class: nil,
+        retries: nil,
+        selection_include_count: sel[:include_count],
+        selection_exclude_count: sel[:exclude_count],
+        selection_nested_assoc_count: sel[:nested_assoc_count]
+      }
+      base.merge(build_preset_segment(params))
+    end
+
+    # Build preset segment (counts/keys only) from compiled params
+    # @param params [Hash]
+    # @return [Hash]
+    def build_preset_segment(params)
+      preset_mode = params[:_preset_mode]
+      pruned = Array(params[:_preset_pruned_keys]).map { |k| k.respond_to?(:to_sym) ? k.to_sym : k }.grep(Symbol)
+      locked_count = begin
+        SearchEngine.config.presets.locked_domains.size
+      rescue StandardError
+        nil
+      end
+      {
+        preset_name: params[:preset],
+        preset_mode: preset_mode,
+        preset_pruned_keys_count: pruned.empty? ? nil : pruned.size,
+        preset_locked_domains_count: locked_count,
+        preset_pruned_keys: pruned.empty? ? nil : pruned
+      }
+    end
 
     def typesense
       @typesense ||= build_typesense_client

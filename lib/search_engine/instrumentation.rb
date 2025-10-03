@@ -46,6 +46,12 @@ module SearchEngine
     #   - :include_count [Integer] total effective include fields (root + nested after precedence)
     #   - :exclude_count [Integer] total excluded fields (root + nested)
     #   - :nested_assoc_count [Integer] associations with any selection state (include or exclude)
+    # - "search_engine.preset.apply": emitted once per relation compile when a preset is present.
+    #   Payload keys (keys-only; values redacted elsewhere):
+    #   - :preset_name [String] effective namespaced preset
+    #   - :mode [Symbol] one of :merge, :only, :lock
+    #   - :locked_domains [Array<Symbol>] configured locked domains for :lock mode
+    #   - :pruned_keys [Array<Symbol>] keys removed by the chosen mode
     # Measure a block and attach duration_ms to payload.
     # @param event [String]
     # @param base_payload [Hash]

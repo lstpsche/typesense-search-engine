@@ -127,3 +127,38 @@ flowchart TD
 - Essential params include: `q`, `page`, `per_page`.
 - Locked domains default to: `filter_by`, `sort_by`, `include_fields`, `exclude_fields`.
 - The API is immutable and copy-on-write; invalid mode or name raises `ArgumentError`.
+
+## Observability
+
+See also: [Observability](./observability.md)
+
+- **Event**: `search_engine.preset.apply` — emitted once per compile when a preset is present.
+- **Payload** (redacted; keys only):
+  - `preset_name` (String)
+  - `mode` (Symbol) — one of `:merge | :only | :lock`
+  - `locked_domains` (Array<Symbol>) — from configuration
+  - `pruned_keys` (Array<Symbol>) — keys dropped by the strategy
+
+- **Logging (compact subscriber)**:
+  - Text: appends `pz=<name>|m=<mode>|pk=<count>|ld=<count>`; when `pruned_keys.size <= 3` includes `pk=[k1,k2]`.
+  - JSON: adds `preset_name`, `preset_mode`, `preset_pruned_keys_count`, `preset_locked_domains_count`, and optionally `preset_pruned_keys`.
+
+### Mermaid — Preset Observability Timeline
+
+```mermaid
+sequenceDiagram
+  participant R as Relation
+  participant C as Compiler
+  participant I as Instrumentation
+  participant L as Logging Subscriber
+
+  R->>C: to_typesense_params
+  C->>C: Apply preset (mode rules) & compute pruned_keys
+  C-->>I: instrument "search_engine.preset.apply" {preset_name, mode, locked_domains, pruned_keys}
+  Note right of I: redacted payload (keys/counts only)
+  C-->>L: search event payload (includes preset summary counts)
+  L->>L: format compact token (text) / JSON fields
+  C-->>R: final params
+```
+
+Backlinks: [Index](./index.md) · [Observability](./observability.md)
