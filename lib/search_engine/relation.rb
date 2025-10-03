@@ -819,6 +819,7 @@ module SearchEngine
       lines << header
 
       append_preset_explain_line(lines, params)
+      append_curation_explain_lines(lines)
 
       if params[:filter_by] && !params[:filter_by].to_s.strip.empty?
         where_str = friendly_where(params[:filter_by].to_s)
@@ -997,6 +998,11 @@ module SearchEngine
     # Uses memoized Result when loaded; otherwise performs a minimal found-only request.
     # @return [Integer]
     def count
+      if curation_filter_curated_hits?
+        ensure_loaded!
+        return curated_indices_for_current_result.size
+      end
+
       return @__result_memo.found.to_i if @__loaded && @__result_memo
 
       fetch_found_only
@@ -2141,6 +2147,16 @@ module SearchEngine
       fch = raw_fch.nil? ? nil : coerce_boolean_strict(raw_fch, :filter_curated_hits)
 
       { pinned: pinned, hidden: hidden, override_tags: tags, filter_curated_hits: fch }
+    end
+
+    def curated_indices_for_current_result
+      @__result_memo.to_a.each_with_index.select do |obj, idx|
+        obj.respond_to?(:curated_hit?) && obj.curated_hit?
+      end.map(&:last)
+    end
+
+    def curation_filter_curated_hits?
+      @state[:curation] && @state[:curation][:filter_curated_hits]
     end
   end
 end
