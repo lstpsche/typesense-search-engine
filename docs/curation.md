@@ -41,11 +41,41 @@ State is normalized and stored on the relation as:
 ### Inspect / Explain
 
 - Inspect adds a compact token only when non-empty, e.g. `curation=p:[p_12,p_34]|h:[p_99]|tags:[homepage]|fch:false`
-- Explain adds multi-line summary lines:
-  - Pinned: p_12, p_34
-  - Hidden: p_99
-  - Override tags: homepage
-  - Filter curated hits: false
+- Explain adds a concise curation summary and conflicts when present.
+
+Materializers & explain
+-----------------------
+
+- Materializers reuse the memoized single response and apply curation in-memory.
+- Ordering: pins first (declared order, present IDs only), then remainder in original order. Hide-wins.
+- Filtering: when `filter_curated_hits: true`, hidden hits are excluded from iteration and counts.
+- Counts: with filtering on, `count`/`exists?` reflect the curated view size; otherwise they reflect server totals when available.
+
+Verbatim example from the ticket:
+
+```
+Curation: pinned=2 hidden=1 filter_curated_hits=false override_tags=[homepage]
+Conflicts: [p1 (both pinned & hidden → hidden)]
+```
+
+### Mermaid — Curation Effects on Materialization
+
+```mermaid
+flowchart TD
+  A[Raw hits from response (memoized)] --> B[Build pinned segment (declared order, present IDs only)]
+  A --> C[Compute remainder in original order]
+  B --> D[Concatenate pinned + remainder]
+  C --> D
+  D --> E{filter_curated_hits?}
+  E -- yes --> F[Drop hidden hits]
+  E -- no  --> G[Keep hidden hits]
+  F --> H[Curated view → iterate/hydrate]
+  G --> H[Curated view → iterate/hydrate]
+  H --> I[count/exists? computed per rules]
+  H --> J[Relation#explain summary]
+```
+
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md) · [Compiler](./compiler.md)
 
 ### Guardrails & errors
 
