@@ -373,7 +373,7 @@ module SearchEngine
     # @example
     #   rel.to_typesense_params
     #   # => { q: "*", query_by: "name,description", filter_by: "brand_id:=[1,2] && active:=true", page: 2, per_page: 20 }
-    def to_typesense_params
+    def to_typesense_params # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
       cfg = SearchEngine.config
       opts = @state[:options] || {}
 
@@ -387,6 +387,7 @@ module SearchEngine
 
       # Filters and sorting
       ast_nodes = Array(@state[:ast]).flatten.compact
+      compile_started_ms = SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
       filter_str = compiled_filter_by(ast_nodes)
       params[:filter_by] = filter_str if filter_str
 
@@ -410,6 +411,34 @@ module SearchEngine
       # Internal join context (for downstream components; may be stripped before HTTP)
       join_ctx = build_join_context(ast_nodes: ast_nodes, orders: orders)
       params[:_join] = join_ctx unless join_ctx.nil? || join_ctx.empty?
+
+      # Emit compile-time JOINs event summarizing usage (no raw strings)
+      if defined?(SearchEngine::Instrumentation)
+        begin
+          assocs = Array(join_ctx[:assocs]).map(&:to_s)
+          used = join_ctx[:referenced_in] || {}
+          used_in = {}
+          %i[include filter sort].each do |k|
+            arr = Array(used[k]).map(&:to_s)
+            used_in[k] = arr unless arr.empty?
+          end
+
+          payload = {
+            collection: klass_name_for_inspect,
+            join_count: assocs.size,
+            assocs: (assocs unless assocs.empty?),
+            used_in: (used_in unless used_in.empty?),
+            include_len: (include_str.to_s.length unless include_str.to_s.strip.empty?),
+            filter_len: (filter_str.to_s.length unless filter_str.to_s.strip.empty?),
+            sort_len:   (sort_str.to_s.length unless sort_str.to_s.strip.empty?),
+            duration_ms: (SearchEngine::Instrumentation.monotonic_ms - compile_started_ms if compile_started_ms),
+            has_joins: !assocs.empty?
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.joins.compile', payload)
+        rescue StandardError
+          # swallow observability errors
+        end
+      end
 
       params
     end
@@ -581,6 +610,7 @@ module SearchEngine
     # @return [SearchEngine::Relation]
     # @raise [SearchEngine::Errors::UnknownJoin] when an association is not declared
     # @raise [ArgumentError] when inputs are not Symbols/Strings
+    # @see docs/joins.md
     # @example
     #   SearchEngine::Book
     #     .joins(:authors)

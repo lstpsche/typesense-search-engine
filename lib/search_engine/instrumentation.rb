@@ -28,6 +28,19 @@ module SearchEngine
       ActiveSupport::Notifications.instrument(event, shaped) { yield if block_given? }
     end
 
+    # Known events
+    #
+    # - "search_engine.joins.compile": emitted once per relation compile summarizing JOIN usage.
+    #   Payload keys (nil/empty omitted):
+    #   - :collection [String]
+    #   - :join_count [Integer]
+    #   - :assocs [Array<String>]
+    #   - :used_in [Hash{Symbol=>Array<String>}] include/filter/sort association usage
+    #   - :include_len [Integer]
+    #   - :filter_len [Integer]
+    #   - :sort_len [Integer]
+    #   - :duration_ms [Float]
+    #   - :has_joins [Boolean]
     # Measure a block and attach duration_ms to payload.
     # @param event [String]
     # @param base_payload [Hash]
