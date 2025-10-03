@@ -138,7 +138,78 @@ module SearchEngine
       groups.each(&block)
     end
 
+    # Number of groups present in this result page.
+    # When grouping is disabled, returns 0.
+    # @return [Integer]
+    # @example
+    #   res = SearchEngine::Product.group_by(:brand_id, limit: 1).execute
+    #   res.groups_count #=> number of groups in this page
+    def groups_count
+      return 0 unless grouped?
+
+      @__groups_memo.size
+    end
+
+    # Total documents found by the backend for this query (not page-limited).
+    # Reads the backend-provided scalar (e.g., Typesense's `found`).
+    # @return [Integer, nil]
+    # @example
+    #   res = SearchEngine::Product.group_by(:brand_id, limit: 1).execute
+    #   res.total_found #=> total documents found
+    def total_found
+      @found
+    end
+
+    # Total number of groups for this query.
+    # If the backend exposes a total groups count, returns that value.
+    # Otherwise, falls back to the number of groups in the current page
+    # (i.e., {#groups_count}). When grouping is disabled, returns +nil+.
+    # @return [Integer, nil]
+    # @example
+    #   res = SearchEngine::Product.group_by(:brand_id, limit: 1).execute
+    #   res.total_groups #=> global groups if available; else groups_count (page-scoped)
+    def total_groups
+      return nil unless grouped?
+
+      api_total = detect_total_groups_from_raw(@raw)
+      api_total.nil? ? @__groups_memo.size : api_total
+    end
+
+    # First group in this page or +nil+ when there are no groups.
+    # Returns a reference to the memoized group; no new objects are allocated.
+    # @return [SearchEngine::Result::Group, nil]
+    def first_group
+      return nil unless grouped?
+
+      @__groups_memo.first
+    end
+
+    # Last group in this page or +nil+ when there are no groups.
+    # Returns a reference to the memoized group; no new objects are allocated.
+    # @return [SearchEngine::Result::Group, nil]
+    def last_group
+      return nil unless grouped?
+
+      @__groups_memo.last
+    end
+
     private
+
+    # Attempt to read a total groups count from the raw payload using common keys.
+    # Returns +nil+ when the backend does not provide a value.
+    # @param raw [Hash]
+    # @return [Integer, nil]
+    def detect_total_groups_from_raw(raw)
+      keys = %w[total_groups group_count groups_count found_groups total_group_count total_grouped total_group_matches]
+      keys.each do |key|
+        val = raw[key] || raw[key.to_sym]
+        next if val.nil?
+        return Integer(val) if val.is_a?(Integer) || (val.is_a?(String) && val.match?(/\A-?\d+\z/))
+      end
+      nil
+    rescue StandardError
+      nil
+    end
 
     # Hydrate a single Typesense document (Hash) into a Ruby object.
     #
