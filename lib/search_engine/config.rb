@@ -478,6 +478,12 @@ module SearchEngine
       @curation ||= CurationConfig.new
     end
 
+    # Expose observability/logging configuration.
+    # @return [SearchEngine::Config::ObservabilityConfig]
+    def observability
+      @observability ||= ObservabilityConfig.new
+    end
+
     # Assign curation configuration from a compatible object.
     # Accepts a CurationConfig, a Hash-like, or an object responding to :max_pins, :max_hidden, :id_regex.
     # Validates basic types on assignment.

@@ -80,6 +80,11 @@ module SearchEngine
     # URL-only options (:use_cache, :cache_ttl) are filtered from both sources.
     # Empty values are omitted for cleanliness.
     #
+    # Curation:
+    # - Reuses Relation#to_typesense_params to inject per-entry curation keys
+    # - Body-only: curation keys never appear in URL opts or top-level
+    # - Deterministic: preserves first-occurrence order for pinned IDs
+    #
     # Presets:
     # - Preset token lives inside each per-search payload under :preset (never top-level)
     # - mode=:merge — pass through compiler output (includes :preset)
