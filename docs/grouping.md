@@ -1,4 +1,4 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md)
+[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
 
 # Grouping
 
@@ -83,7 +83,7 @@ When grouping is enabled, Typesense applies `per_page` to the number of groups r
 
 ## Guardrails & errors
 
-Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md)
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
 
 Misuse → behavior:
 
@@ -119,5 +119,26 @@ SearchEngine::Product.group_by(:brand_id, limit: 0)
 # Warns about order not affecting group ordering
 SearchEngine::Product.group_by(:brand_id).order(updated_at: :desc).to_typesense_params
 ```
+
+## Observability
+
+- **Compile-time event**: `search_engine.grouping.compile`
+  - Payload: `{ field, limit, missing_values, collection?, duration_ms? }` (nil/empty keys omitted)
+  - Emitted during `Relation#to_typesense_params` when grouping is present
+- **Search logs**:
+  - KV/compact: appends a single-token summary `grp=<field>[:<limit>][:mv]`, e.g., `grp=brand_id:1:mv`; when absent → `grp=—`
+  - JSON: includes `group_by`, `group_limit`, `group_missing_values` when present
+
+Examples:
+
+```
+[se.search] collection=products status=200 duration=12.3ms cache=true ttl=60 grp=brand_id:1:mv q="milk" per_page=5
+```
+
+```json
+{"event":"search","collection":"products","status":200,"duration.ms":12.3,"cache":true,"ttl":60,"group_by":"brand_id","group_limit":1,"group_missing_values":true}
+```
+
+See also: [Observability](./observability.md) for subscriber options and payload redaction.
 
 See also: [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md)

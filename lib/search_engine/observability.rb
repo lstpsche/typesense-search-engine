@@ -11,7 +11,7 @@ module SearchEngine
     SENSITIVE_KEY_PATTERN = /key|token|secret|password/i
 
     # Whitelisted search parameter keys to include in payload excerpts.
-    PARAM_WHITELIST = %i[q query_by per_page page infix filter_by].freeze
+    PARAM_WHITELIST = %i[q query_by per_page page infix filter_by group_by group_limit group_missing_values].freeze
 
     # Maximum length for `q` values before truncation.
     MAX_Q_LENGTH = 128
