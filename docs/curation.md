@@ -47,6 +47,40 @@ State is normalized and stored on the relation as:
   - Override tags: homepage
   - Filter curated hits: false
 
+### Guardrails & errors
+
+- Rules
+  - **ID format**: all curated IDs and override tags must match `SearchEngine.config.curation.id_regex` (default: `/\A[\w\-:\.]+\z/`).
+  - **Deduplication**: `pinned` stable-dedupes (first occurrence wins); `hidden` set-dedupes (first-seen order preserved).
+  - **Limits**: `max_pins` (default 50) and `max_hidden` (default 200) enforced after normalization and precedence.
+  - **Precedence**: when an ID appears in both `pinned` and `hidden`, **hide wins** — the ID is removed from `pinned` and recorded as a conflict. Explain shows: `Conflicts: <ids> (hidden overrides pin)`.
+
+- Errors
+  - `InvalidCuratedId`: `"<id>" is not a valid curated ID. Expected pattern: <regex>. Try removing illegal characters.`
+  - `CurationLimitExceeded`: `pinned list exceeds max_pins=<N> (attempted <M>). Reduce inputs or raise the limit in SearchEngine.config.curation.` (similarly for `hidden`).
+  - `InvalidOverrideTag`: `"<tag>" is invalid. Use non-blank strings that match the allowed pattern.`
+
+- Config knobs
+
+```ruby
+SearchEngine.configure do |c|
+  c.curation = OpenStruct.new(max_pins: 50, max_hidden: 200, id_regex: /\A[\w\-:\.]+\z/)
+end
+```
+
+- Mermaid — precedence
+
+```mermaid
+flowchart TD
+  A[Input pinned, hidden] --> B[Normalize + dedupe]
+  B --> C{overlap?}
+  C -- yes --> D[Remove ID from pinned]
+  D --> E[Record conflict: hidden_overrides_pin]
+  C -- no --> F[No conflict]
+```
+
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
 ### Diagram
 
 ```mermaid
@@ -61,7 +95,7 @@ flowchart TD
 | State key             | Example value             | Param key             | Encoded value         |
 | --------------------- | ------------------------- | --------------------- | --------------------- |
 | `pinned`              | `["p1","p2"]`             | `pinned_hits`         | `"p1,p2"`             |
-| `hidden`              | `[`"p9"`]`                  | `hidden_hits`         | `"p9"`                |
+| `hidden`              | ``"p9"``                  | `hidden_hits`         | `"p9"`                |
 | `override_tags`       | `["homepage","campaign"]` | `override_tags`       | `"homepage,campaign"` |
 | `filter_curated_hits` | `true`                    | `filter_curated_hits` | `true`                |
 
