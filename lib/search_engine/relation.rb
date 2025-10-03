@@ -27,6 +27,7 @@ module SearchEngine
       offset:  nil,
       page:    nil,
       per_page: nil,
+      grouping: nil,
       options: {}.freeze
     }.freeze
 
@@ -167,6 +168,45 @@ module SearchEngine
     # @return [SearchEngine::Relation]
     def include_fields(*fields)
       select(*fields)
+    end
+
+    # Group results by a single field with optional limit and missing values policy.
+    #
+    # Stores normalized immutable grouping state under `@state[:grouping]`.
+    # Subsequent calls replace the existing grouping state (last call wins).
+    #
+    # @param field [Symbol, String] field name to group by (base field only)
+    # @param limit [Integer, nil] optional positive limit for number of groups
+    # @param missing_values [Boolean] whether to include missing values as their own group
+    # @return [SearchEngine::Relation] a new relation with grouping applied
+    # @raise [ArgumentError] when inputs are invalid
+    # @example
+    #   SearchEngine::Product
+    #     .group_by(:brand_id, limit: 1, missing_values: true)
+    #     .where(active: true)
+    #     .order(updated_at: :desc)
+    def group_by(field, limit: nil, missing_values: false)
+      normalized = normalize_grouping(field: field, limit: limit, missing_values: missing_values)
+
+      rel = spawn do |s|
+        s[:grouping] = normalized
+      end
+
+      if defined?(SearchEngine::Instrumentation)
+        begin
+          payload = {
+            collection: klass_name_for_inspect,
+            field: normalized[:field].to_s,
+            limit: normalized[:limit],
+            missing_values: normalized[:missing_values]
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.relation.group_by_updated', payload) {}
+        rescue StandardError
+          # swallow observability errors
+        end
+      end
+
+      rel
     end
 
     # Replace the selected fields list (Typesense `include_fields`).
@@ -357,6 +397,13 @@ module SearchEngine
       selected = Array(@state[:select])
       parts << "select=#{selected.length}" unless selected.empty?
 
+      if (g = @state[:grouping])
+        gparts = ["group_by=#{g[:field]}"]
+        gparts << "limit=#{g[:limit]}" if g[:limit]
+        gparts << 'missing_values=true' if g[:missing_values]
+        parts << gparts.join(' ')
+      end
+
       parts << "page=#{compiled[:page]}" if compiled.key?(:page)
       parts << "per=#{compiled[:per_page]}" if compiled.key?(:per_page)
 
@@ -403,6 +450,13 @@ module SearchEngine
       pagination = compute_pagination
       params[:page] = pagination[:page] if pagination.key?(:page)
       params[:per_page] = pagination[:per_page] if pagination.key?(:per_page)
+
+      # Grouping
+      grouping = @state[:grouping]
+      if grouping
+        params[:group_by] = "#{grouping[:field]}:#{grouping[:limit] || 'count'}"
+        params[:group_by] += ',missing_values=true' if grouping[:missing_values]
+      end
 
       # Keep infix last for stability; include when configured or overridden
       infix_val = option_value(opts, :infix) || cfg.default_infix
@@ -469,6 +523,13 @@ module SearchEngine
       end
 
       lines << "  order: #{params[:sort_by]}" if params[:sort_by] && !params[:sort_by].to_s.strip.empty?
+
+      if (g = @state[:grouping])
+        gparts = ["group_by=#{g[:field]}"]
+        gparts << "limit=#{g[:limit]}" if g[:limit]
+        gparts << 'missing_values=true' if g[:missing_values]
+        lines << "  group: #{gparts.join(' ')}"
+      end
 
       if params[:include_fields] && !params[:include_fields].to_s.strip.empty?
         lines << "  select: #{params[:include_fields]}"
@@ -635,6 +696,15 @@ module SearchEngine
       list.frozen? ? list : list.dup.freeze
     end
 
+    # Read-only grouping state for debugging/explain.
+    # @return [Hash, nil] frozen hash `{ field: Symbol, limit: Integer/nil, missing_values: Boolean }` or nil
+    def grouping
+      g = @state[:grouping]
+      return nil if g.nil?
+
+      g.frozen? ? g : g.dup.freeze
+    end
+
     # Read-only selected fields state for debugging (base + nested).
     # @return [Hash]
     def selected_fields_state
@@ -690,55 +760,59 @@ module SearchEngine
       s.gsub(':!=[', ' NOT IN [')
     end
 
-    def normalize_initial_state(state) # rubocop:disable Metrics/AbcSize
+    def normalize_initial_state(state)
       return {} if state.nil? || state.empty?
       raise ArgumentError, 'state must be a Hash' unless state.is_a?(Hash)
 
       normalized = {}
-      state.each do |key, value|
-        k = key.to_sym
-        case k
-        when :filters
-          normalized[:filters] = normalize_where(Array(value))
-        when :filters_ast
-          # Back-compat: accept legacy key and map to :ast
-          nodes = Array(value).flatten.compact
-          normalized[:ast] ||= []
-          normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                                nodes
-                              else
-                                SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                              end
-        when :ast
-          nodes = Array(value).flatten.compact
-          normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                               nodes
-                             else
-                               SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                             end
-        when :orders
-          normalized[:orders] = normalize_order(value)
-        when :select
-          normalized[:select] = normalize_select(Array(value))
-        when :select_nested
-          normalized[:select_nested] = (value || {})
-        when :select_nested_order
-          normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :joins
-          normalized[:joins] = normalize_joins(Array(value))
-        when :limit
-          normalized[:limit] = coerce_integer_min(value, :limit, 1)
-        when :offset
-          normalized[:offset] = coerce_integer_min(value, :offset, 0)
-        when :page
-          normalized[:page] = coerce_integer_min(value, :page, 1)
-        when :per_page
-          normalized[:per_page] = coerce_integer_min(value, :per, 1)
-        when :options
-          normalized[:options] = (value || {}).dup
-        end
-      end
+      state.each { |key, value| apply_initial_state_key!(normalized, key, value) }
       normalized
+    end
+
+    def apply_initial_state_key!(normalized, key, value) # rubocop:disable Metrics/AbcSize
+      k = key.to_sym
+      case k
+      when :filters
+        normalized[:filters] = normalize_where(Array(value))
+      when :filters_ast
+        # Back-compat: accept legacy key and map to :ast
+        nodes = Array(value).flatten.compact
+        normalized[:ast] ||= []
+        normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                              nodes
+                            else
+                              SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                            end
+      when :ast
+        nodes = Array(value).flatten.compact
+        normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                             nodes
+                           else
+                             SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                           end
+      when :orders
+        normalized[:orders] = normalize_order(value)
+      when :select
+        normalized[:select] = normalize_select(Array(value))
+      when :select_nested
+        normalized[:select_nested] = (value || {})
+      when :select_nested_order
+        normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+      when :joins
+        normalized[:joins] = normalize_joins(Array(value))
+      when :limit
+        normalized[:limit] = coerce_integer_min(value, :limit, 1)
+      when :offset
+        normalized[:offset] = coerce_integer_min(value, :offset, 0)
+      when :page
+        normalized[:page] = coerce_integer_min(value, :page, 1)
+      when :per_page
+        normalized[:per_page] = coerce_integer_min(value, :per, 1)
+      when :options
+        normalized[:options] = (value || {}).dup
+      when :grouping
+        normalized[:grouping] = normalize_grouping(value)
+      end
     end
 
     # One-time migration: when AST is empty and legacy string filters exist, map
@@ -981,6 +1055,24 @@ module SearchEngine
       { base: base.uniq, nested: nested, nested_order: nested_order }
     end
 
+    def normalize_grouping(value)
+      return {} if value.nil? || value.empty?
+      raise ArgumentError, 'grouping: expected a Hash' unless value.is_a?(Hash)
+
+      field = value[:field]
+      limit = value[:limit]
+      missing_values = value[:missing_values]
+
+      unless field.is_a?(Symbol) || field.is_a?(String)
+        raise ArgumentError,
+              'grouping: field must be a Symbol or String'
+      end
+      raise ArgumentError, 'grouping: limit must be an Integer or nil' unless limit.nil? || limit.is_a?(Integer)
+      raise ArgumentError, 'grouping: missing_values must be a Boolean' unless [true, false].include?(missing_values)
+
+      { field: field.to_sym, limit: limit, missing_values: missing_values }
+    end
+
     def coerce_integer_min(value, name, min)
       return nil if value.nil?
 
@@ -995,6 +1087,28 @@ module SearchEngine
       integer
     rescue ArgumentError, TypeError
       raise ArgumentError, "#{name} must be an Integer or nil"
+    end
+
+    def coerce_boolean_strict(value, name)
+      case value
+      when true, false
+        value
+      when String
+        s = value.to_s.strip.downcase
+        return true  if %w[1 true yes on t].include?(s)
+
+        return false if %w[0 false no off f].include?(s)
+
+        raise ArgumentError, "#{name} must be a boolean"
+      when Integer
+        return true  if value == 1
+
+        return false if value.zero?
+
+        raise ArgumentError, "#{name} must be a boolean"
+      else
+        raise ArgumentError, "#{name} must be a boolean"
+      end
     end
 
     def deep_dup(obj)
