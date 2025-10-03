@@ -59,10 +59,54 @@ Customize which param keys are considered preset-managed in `:lock` mode:
 - **Default:** `SearchEngine.config.presets.locked_domains = %i[filter_by sort_by include_fields exclude_fields]`
 - The value is normalized to Symbols and used as a Set for deterministic pruning.
 
+## Conflicts
+
+Conflicts are detected only in `mode: :lock` and occur when a compiled chain param key belongs to `SearchEngine.config.presets.locked_domains`. Such keys are dropped from the final params and recorded as conflicts.
+
+- **Accessor:** `Relation#preset_conflicts` → `[{ key: :filter_by, reason: :locked_by_preset }, ...]` (deterministic, frozen)
+- **Explain:** lists the effective preset and one line per dropped key with a humanized reason.
+- **Inspect:** appends a compact token: `preset=prod_brand_curated(mode=lock; conflicts=filter_by,sort_by)`
+- **Redaction:** keys only; raw values are not included anywhere.
+
+Verbatim example snippet:
+
+```
+Preset: prod_brand_curated (mode: lock)
+Dropped: sort_by (locked by preset)
+```
+
+### Instrumentation
+
+When conflicts are present, a single event is emitted per compile:
+
+- **Event:** `search_engine.preset.conflict`
+- **Payload:**
+  - `keys` (Array<Symbol>) — dropped keys (redacted; names only)
+  - `mode` (Symbol) — preset mode (always `:lock` here)
+  - `preset_name` (String) — effective preset name
+  - `count` (Integer) — number of dropped keys
+
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Multi-search](./multi_search.md)
+
+### Mermaid — Conflict Resolution Flow
+
+```mermaid
+flowchart TD
+  A[Draft params from chain] --> B[locked_domains from config]
+  P[Preset mode] -->|lock| C{key in locked_domains?}
+  P -->|merge/only| J[No conflict detection]
+  C -- yes --> D[Drop key from params]
+  D --> E[Record conflict {key, reason: locked_by_preset}]
+  E --> F[Emit event search_engine.preset.conflict once]
+  D --> G[Final params]
+  C -- no --> G
+  G --> H[Relation#explain includes preset + conflicts]
+```
+
 ## Explain & Inspect
 
-- `inspect` adds a compact token, e.g., `preset=prod_popular_products(mode=lock)` when applied.
-- `explain` prints a `preset:` line and, for `mode: :lock`, includes `dropped:` keys, e.g. `preset: prod_popular_products (mode=lock dropped: filter_by,sort_by)`.
+- `inspect` adds a compact token, e.g., `preset=prod_popular_products(mode=lock; conflicts=filter_by,sort_by)` when applied and conflicts exist.
+- `explain` prints a `Preset:` header and, for `mode: :lock`, a deterministic list of `Dropped:` lines with humanized reasons (as above). Redaction-safe by construction.
 
 ## Mermaid: strategy flow
 

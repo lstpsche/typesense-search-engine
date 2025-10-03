@@ -654,6 +654,20 @@ module SearchEngine
             conflicts << k
           end
           params[:_preset_conflicts] = conflicts unless conflicts.empty?
+
+          if defined?(SearchEngine::Instrumentation) && !conflicts.empty?
+            begin
+              payload = {
+                keys: conflicts.map(&:to_sym).sort,
+                mode: pmode,
+                preset_name: pn,
+                count: conflicts.size
+              }
+              SearchEngine::Instrumentation.instrument('search_engine.preset.conflict', payload) {}
+            rescue StandardError
+              # swallow observability errors
+            end
+          end
         end
       end
 
@@ -957,6 +971,17 @@ module SearchEngine
         nested: nested.transform_values { |arr| Array(arr).dup.freeze }.freeze,
         nested_order: order.dup.freeze
       }.freeze
+    end
+
+    # Programmatic accessor for preset conflicts in :lock mode.
+    # Builds a deterministic, frozen list of conflict entries. Keys only; no values.
+    # @return [Array<Hash{Symbol=>Symbol}>] e.g., [{ key: :sort_by, reason: :locked_by_preset }]
+    def preset_conflicts
+      params = to_typesense_params
+      keys = Array(params[:_preset_conflicts]).map { |k| k.respond_to?(:to_sym) ? k.to_sym : k }.grep(Symbol)
+      return [].freeze if keys.empty?
+
+      keys.sort.map { |k| { key: k, reason: :locked_by_preset }.freeze }.freeze
     end
 
     protected
