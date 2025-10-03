@@ -87,6 +87,12 @@ class PresetsCompilerTest < Minitest::Test
     assert_includes conflicts, :filter_by
     assert_includes conflicts, :sort_by
     assert_includes conflicts, :include_fields
+
+    # Explain should include preset summary and dropped keys
+    exp = rel.explain
+    assert_includes exp, 'preset: prod_popular_products (mode=lock dropped: filter_by,include_fields,sort_by)'
+    # And selection token exists
+    assert_includes exp, 'selection:'
   end
 
   def test_lock_mode_respects_custom_locked_domains
@@ -106,5 +112,32 @@ class PresetsCompilerTest < Minitest::Test
 
     conflicts = params[:_preset_conflicts]
     assert_includes conflicts, :infix
+  end
+
+  def test_instrumentation_emits_single_conflict_event
+    skip 'ActiveSupport::Notifications not available' unless defined?(ActiveSupport::Notifications)
+
+    received = []
+    sub = ActiveSupport::Notifications.subscribe('search_engine.preset.conflict') do |*args|
+      ev = ActiveSupport::Notifications::Event.new(*args)
+      received << ev
+    end
+
+    begin
+      rel = Product.all
+                   .preset(:popular_products, mode: :lock)
+                   .where(active: true)
+                   .order(updated_at: :desc)
+      rel.to_typesense_params
+    ensure
+      ActiveSupport::Notifications.unsubscribe(sub)
+    end
+
+    assert_equal 1, received.size
+    payload = received.first.payload
+    assert_equal %i[filter_by sort_by], Array(payload[:keys]).sort
+    assert_equal :lock, payload[:mode]
+    assert_equal 'prod_popular_products', payload[:preset_name]
+    assert_equal 2, payload[:count]
   end
 end
