@@ -64,6 +64,7 @@ module SearchEngine
     #
     # Accepted forms:
     # - Hash: where(id: 1, brand_id: [1,2,3])
+    # - Joined Hash: where(authors: { last_name: "Rowling" })
     # - Raw string fragment: where("brand_id:=[1,2,3]")
     # - Template with placeholders: where("price > ?", 100)
     #
@@ -74,7 +75,7 @@ module SearchEngine
     # @return [SearchEngine::Relation]
     def where(*args)
       # Build AST nodes for all supported inputs via the DSL parser
-      ast_nodes = SearchEngine::DSL::Parser.parse_list(args, klass: @klass)
+      ast_nodes = SearchEngine::DSL::Parser.parse_list(args, klass: @klass, joins: joins_list)
       # Back-compat: preserve legacy string fragments as well (escape hatch)
       fragments = normalize_where(args)
       spawn do |s|
@@ -86,11 +87,11 @@ module SearchEngine
     # Append ordering expressions. Accepts Hash or String forms.
     #
     # Accepted input:
-    # - Hash: { field => :asc|:desc, ... }
+    # - Hash: { field => :asc|:desc, ... } or { assoc => { field => :asc|:desc } }
     # - String: "field:dir" or comma-separated "field:dir,other:asc"
     #
     # Normalization:
-    # - Stored as array of strings like ["field:asc", "other:desc"]
+    # - Stored as array of strings like ["field:asc", "$assoc.field:desc"]
     # - Direction lowercased; field trimmed; validation enforced
     # - Dedupe by field with last-wins semantics while preserving last position
     #
@@ -156,7 +157,7 @@ module SearchEngine
         raise ArgumentError, 'rewhere: provide a new predicate input'
       end
 
-      nodes = SearchEngine::DSL::Parser.parse(input, klass: @klass, args: args)
+      nodes = SearchEngine::DSL::Parser.parse(input, klass: @klass, args: args, joins: joins_list)
       list = Array(nodes).flatten.compact
       raise ArgumentError, 'rewhere: produced no predicates' if list.empty?
 

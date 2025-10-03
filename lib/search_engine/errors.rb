@@ -68,5 +68,12 @@ module SearchEngine
     # Typical cause: a typo or referencing an association that has not been
     # registered via {SearchEngine::Base.join}.
     class UnknownJoin < Error; end
+
+    # Raised when a query references a joined association field without applying
+    # the association on the relation via {SearchEngine::Relation#joins}.
+    #
+    # Example: calling `where(authors: { last_name: "Rowling" })` without
+    # `.joins(:authors)` on the relation first.
+    class JoinNotApplied < Error; end
   end
 end
