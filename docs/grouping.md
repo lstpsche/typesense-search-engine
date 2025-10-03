@@ -81,4 +81,43 @@ When grouping is enabled, Typesense applies `per_page` to the number of groups r
 - `limit` must be a positive Integer when provided
 - `missing_values` must be a Boolean
 
+## Guardrails & errors
+
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md)
+
+Misuse → behavior:
+
+- Unknown field:
+  - Raises `SearchEngine::Errors::InvalidGroup` with suggestions when available.
+  - Example error:
+    - `InvalidGroup: unknown field :brand for grouping on SearchEngine::Product (did you mean :brand_id?)`
+- Invalid limit:
+  - Raises `SearchEngine::Errors::InvalidGroup`.
+  - Example: `InvalidGroup: limit must be a positive integer (got 0)`
+- Non-boolean `missing_values`:
+  - Raises `SearchEngine::Errors::InvalidGroup`.
+  - Example: `InvalidGroup: missing_values must be boolean (got "yes")`
+- Unsupported path (joined field):
+  - Raises `SearchEngine::Errors::UnsupportedGroupField`.
+  - Example: `UnsupportedGroupField: grouping supports base fields only (got "$authors.last_name")`
+
+Warnings (non-fatal, can be suppressed via `SearchEngine.config.grouping.warn_on_ambiguous = false`):
+
+- Grouping with `order`: `order` affects hits, not group ordering; groups follow engine ranking. Use filters to control which items appear as the first hit per group.
+- Grouping by a field that is omitted from `include_fields`: Consider including the field or read it from `Group#key`.
+- `missing_values: true` while filters exclude `null` for the grouping field: May produce fewer "missing" groups than expected.
+
+Examples:
+
+```ruby
+# Raises unknown field with suggestion
+SearchEngine::Product.group_by(:brand)
+
+# Raises invalid limit
+SearchEngine::Product.group_by(:brand_id, limit: 0)
+
+# Warns about order not affecting group ordering
+SearchEngine::Product.group_by(:brand_id).order(updated_at: :desc).to_typesense_params
+```
+
 See also: [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md)
