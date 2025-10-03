@@ -10,6 +10,21 @@ class RelationFieldSelectionTest < Minitest::Test
     attribute :active, :boolean
   end
 
+  # Model to reproduce ticket example verbatim
+  module ::SearchEngine
+    class Book < SearchEngine::Base
+      collection 'books_field_selection_ticket'
+      attribute :id, :integer
+      attribute :title, :string
+      attribute :author_id, :integer
+      attribute :brand_id, :integer
+      attribute :legacy, :string
+
+      join :authors, collection: 'authors', local_key: :author_id, foreign_key: :id
+      join :brands,  collection: 'brands',  local_key: :brand_id,  foreign_key: :id
+    end
+  end
+
   def test_exclude_only_emits_exclude_fields
     rel = Product.all.exclude(:name)
     params = rel.to_typesense_params
@@ -33,5 +48,37 @@ class RelationFieldSelectionTest < Minitest::Test
     p2 = r2.to_typesense_params
     assert_equal 'name', p2[:include_fields]
     refute p2.key?(:exclude_fields)
+  end
+
+  def test_nested_exclude_only_emits_nested_exclude_fields
+    rel = RelationIncludeFieldsNestedTest::Book.all.joins(:authors).exclude(authors: %i[last_name first_name])
+    params = rel.to_typesense_params
+
+    refute params.key?(:include_fields)
+    assert_equal '$authors(first_name,last_name)', params[:exclude_fields]
+  end
+
+  def test_nested_include_and_exclude_precedence
+    rel = RelationIncludeFieldsNestedTest::Book
+          .all
+          .joins(:authors)
+          .select(:id, authors: %i[first_name last_name])
+          .exclude(authors: [:last_name])
+    params = rel.to_typesense_params
+
+    assert_equal '$authors(first_name),id', params[:include_fields]
+    refute params.key?(:exclude_fields)
+  end
+
+  def test_ticket_example_verbatim
+    rel = SearchEngine::Book
+          .all
+          .joins(:authors, :brands)
+          .select(:id, :title, authors: %i[first_name last_name])
+          .exclude(:legacy, brands: [:internal_score])
+    params = rel.to_typesense_params
+
+    assert_equal '$authors(first_name,last_name),id,title', params[:include_fields]
+    assert_equal '$brands(internal_score)', params[:exclude_fields]
   end
 end
