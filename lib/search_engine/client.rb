@@ -33,6 +33,8 @@ module SearchEngine
 
       start = current_monotonic_ms
       payload = params.dup
+      # Strip internal keys that must not be sent to Typesense
+      payload.delete(:_join)
       path = "/collections/#{collection}/documents/search"
 
       # Observability event payload (pre-built; redacted)

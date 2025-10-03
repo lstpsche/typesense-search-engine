@@ -185,5 +185,18 @@ SearchEngine::Book
 - **Ordering policy**: nested `$assoc(...)` segments are emitted first in association first-mention order, then base fields.
 - **Validation**: association keys are validated against `klass.joins_config` (`UnknownJoin` on typos). Calling `.joins(:assoc)` before selecting nested fields is recommended; the compiler will still emit `$assoc(...)` even if `joins` wasn't chained yet.
 
-See also: [Relation](./relation.md) for the `#select` / `#include_fields` chainers and [Compiler](./compiler.md) for parameter mapping.
+### End-to-end example with filters and sort
 
+```ruby
+rel = SearchEngine::Book
+  .joins(:authors)
+  .include_fields(authors: [:first_name])
+  .where(authors: { last_name: "Rowling" })
+  .order(authors: { last_name: :asc })
+rel.to_typesense_params
+# => { q: "*", query_by: "name, description", include_fields: "$authors(first_name)", filter_by: "$authors.last_name:=\"Rowling\"", sort_by: "$authors.last_name:asc" }
+```
+
+Internals: the returned params also include a reserved `:_join` key with join context for downstream components. See [Compiler](./compiler.md) for the exact shape.
+
+See also: [Compiler](./compiler.md).

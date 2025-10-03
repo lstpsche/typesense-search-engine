@@ -76,5 +76,20 @@ Compiler.compile([AST.eq(:x, 1), AST.eq(:y, 2)])
 
 - `Relation#to_typesense_params` prefers compiling `ast` when present, falling back to legacy string `filters` for backward compatibility.
 - `Raw` fragments are preserved through the pipeline.
+- When joins are applied, joined fields render as `$assoc.field` in `filter_by` and as `$assoc.field:dir` in `sort_by`. Nested `include_fields` compile to `$assoc(field1,field2,...)` segments emitted before base fields.
 
-See also: [Relation](./relation.md) · [Query DSL](./query_dsl.md)
+### Example with joins
+
+```ruby
+rel = SearchEngine::Book
+  .joins(:authors)
+  .include_fields(authors: [:first_name])
+  .where(authors: { last_name: "Rowling" })
+  .order(authors: { last_name: :asc })
+rel.to_typesense_params
+# => { q: "*", query_by: "name, description", include_fields: "$authors(first_name)", filter_by: "$authors.last_name:=\"Rowling\"", sort_by: "$authors.last_name:asc", _join: { assocs: [:authors], fields_by_assoc: { authors: ["first_name"] }, referenced_in: { include: [:authors], filter: [:authors], sort: [:authors] } } }
+```
+
+Note: the `:_join` section is an internal context map for downstream components and may be removed by the HTTP layer before sending the request. See [Joins](./joins.md) for details.
+
+See also: [Relation](./relation.md) · [Query DSL](./query_dsl.md) · [Joins](./joins.md)
