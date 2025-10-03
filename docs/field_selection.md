@@ -50,7 +50,7 @@ SearchEngine::Book
 ## Inspect / Explain
 
 - `inspect` includes compact tokens for current selection state, e.g. `sel="..." xsel="..."`.
-- `explain` prints human-readable `select:` and `exclude:` lines when present.
+- `explain` prints human-readable `select:` and `exclude:` lines when present and a compact one-line summary of the effective selection after precedence, e.g. `selection: sel=id,name; xsel=legacy | authors[sel=first_name,last_name; xsel=middle_name]`.
 
 ## Flow
 
@@ -118,6 +118,26 @@ rel.to_typesense_params[:include_fields]
 rel.to_typesense_params[:exclude_fields]
 # => "legacy,$brands(internal_score)"
 ```
+
+## Guardrails & errors
+
+Validation happens during chaining (after normalization, before mutating state) and raises actionable errors early. Suggestions are provided when attribute registries are available.
+
+- **UnknownField**: base attribute not declared on the model.
+- **UnknownJoinField**: nested attribute not declared on the given association.
+- **ConflictingSelection**: invalid/ambiguous shapes that cannot be normalized deterministically.
+
+Example (verbatim):
+
+```
+UnknownJoinField: :middle_name is not declared on association :authors for SearchEngine::Book
+```
+
+Notes:
+- Suggestion source: Levenshtein/prefix against the relevant registry (top 1–3, stable order).
+- Overlap between include and exclude is allowed; precedence still applies. Conflicts are only about malformed shapes.
+
+See also: [Relation](./relation.md), [JOINs](./joins.md), and [Materializers](./materializers.md#pluck--selection).
 
 ## Strict vs Lenient selection
 

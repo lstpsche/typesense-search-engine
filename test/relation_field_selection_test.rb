@@ -81,4 +81,49 @@ class RelationFieldSelectionTest < Minitest::Test
     assert_equal '$authors(first_name,last_name),id,title', params[:include_fields]
     assert_equal '$brands(internal_score)', params[:exclude_fields]
   end
+
+  def test_unknown_base_field_raises_with_suggestion
+    rel = Product.all
+    error = assert_raises(SearchEngine::Errors::UnknownField) do
+      rel.select(:id, :naem)
+    end
+    assert_match(/UnknownField/i, error.message)
+    assert_match(/did you mean/i, error.message)
+  end
+
+  def test_unknown_join_field_raises_with_verbatim_example_and_suggestion
+    error = assert_raises(SearchEngine::Errors::UnknownJoinField) do
+      SearchEngine::Book.all.joins(:authors).select(authors: [:middle_name])
+    end
+    # Verbatim prefix must match the ticket example
+    prefix = 'UnknownJoinField: :middle_name is not declared on association :authors for SearchEngine::Book'
+    assert_equal prefix, error.message.split(' (did you mean').first
+  end
+
+  def test_conflicting_selection_invalid_shape_raises
+    rel = Product.all
+    error = assert_raises(SearchEngine::Errors::ConflictingSelection) do
+      rel.select(123)
+    end
+    assert_match(/ConflictingSelection/i, error.message)
+  end
+
+  def test_exclude_path_validates_unknown_field
+    rel = Product.all
+    error = assert_raises(SearchEngine::Errors::UnknownField) do
+      rel.exclude(:naem)
+    end
+    assert_match(/UnknownField/i, error.message)
+  end
+
+  def test_explain_includes_effective_selection_tokens
+    rel = Product
+          .all
+          .select(:id, :name)
+          .exclude(:name)
+    summary = rel.explain
+    assert_includes summary, 'selection: '
+    assert_includes summary, 'sel=id'
+    assert_includes summary, 'xsel=name'
+  end
 end

@@ -31,6 +31,9 @@ class RelationExplainTest < Minitest::Test
     assert_includes summary, 'order: updated_at:desc'
     assert_includes summary, 'select: id,name'
     assert_includes summary, 'page/per: 2/20'
+    # Effective selection tokens
+    assert_includes summary, 'selection: '
+    assert_includes summary, 'sel=id,name'
   end
 
   def test_explain_does_not_hit_network

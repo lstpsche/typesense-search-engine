@@ -13,3 +13,19 @@ begin
 rescue StandardError
   nil
 end
+
+# Shared test models for attribute registries used by selection validation
+module SearchEngine
+  class Author < SearchEngine::Base
+    collection 'authors'
+    attribute :id, :integer
+    attribute :first_name, :string
+    attribute :last_name, :string
+  end
+
+  class Brand < SearchEngine::Base
+    collection 'brands'
+    attribute :id, :integer
+    attribute :internal_score, :float
+  end
+end

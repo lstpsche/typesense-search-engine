@@ -20,11 +20,11 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_merge_ordering_and_dedupe
-    r1 = Book.all.joins(:authors).include_fields(:id, authors: %i[a])
-    r2 = r1.include_fields(:title, authors: %i[b a])
+    r1 = Book.all.joins(:authors).include_fields(:id, authors: %i[first_name])
+    r2 = r1.include_fields(:title, authors: %i[last_name first_name])
 
     params = r2.to_typesense_params
-    assert_equal '$authors(a,b),id,title', params[:include_fields]
+    assert_equal '$authors(first_name,last_name),id,title', params[:include_fields]
   end
 
   def test_unknown_association_raises
@@ -43,18 +43,18 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_reselect_replaces_both_base_and_nested
-    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:a])
-    r2 = r1.reselect(:title, authors: [:b])
+    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:first_name])
+    r2 = r1.reselect(:title, authors: [:last_name])
 
     p1 = r1.to_typesense_params
     p2 = r2.to_typesense_params
 
-    assert_equal '$authors(a),id', p1[:include_fields]
-    assert_equal '$authors(b),title', p2[:include_fields]
+    assert_equal '$authors(first_name),id', p1[:include_fields]
+    assert_equal '$authors(last_name),title', p2[:include_fields]
   end
 
   def test_unscope_select_clears_both
-    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:a])
+    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:first_name])
     r2 = r1.unscope(:select)
 
     p1 = r1.to_typesense_params
@@ -62,5 +62,13 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
 
     assert p1.key?(:include_fields)
     refute p2.key?(:include_fields)
+  end
+
+  def test_unknown_join_field_raises
+    error = assert_raises(SearchEngine::Errors::UnknownJoinField) do
+      Book.all.joins(:authors).select(authors: [:frst_name])
+    end
+    assert_match(/UnknownJoinField:/i, error.message)
+    assert_match(/did you mean/i, error.message)
   end
 end

@@ -1781,5 +1781,39 @@ module SearchEngine
         end
       end
     end
+
+    def build_selection_context # rubocop:disable Metrics/PerceivedComplexity
+      include_base = Array(@state[:select]).map(&:to_s)
+      include_nested = (@state[:select_nested] || {}).transform_values { |arr| Array(arr).map(&:to_s) }
+      exclude_base = Array(@state[:exclude]).map(&:to_s)
+      exclude_nested = (@state[:exclude_nested] || {}).transform_values { |arr| Array(arr).map(&:to_s) }
+
+      nothing_selected = include_base.empty? && selection_maps_all_empty?(include_nested)
+      nothing_excluded = exclude_base.empty? && selection_maps_all_empty?(exclude_nested)
+      return nil if nothing_selected && nothing_excluded
+
+      # Compute effective selection (exclude wins)
+      effective_base = include_base.empty? ? nil : (include_base - exclude_base).map(&:to_s).reject(&:empty?)
+
+      nested_effective = {}
+      Array(@state[:select_nested_order]).each do |assoc|
+        inc = Array(include_nested[assoc]).map(&:to_s)
+        next if inc.empty?
+
+        exc = Array(exclude_nested[assoc]).map(&:to_s)
+        eff = (inc - exc)
+        nested_effective[assoc] = eff unless eff.empty?
+      end
+
+      selection = {}
+      selection[:base] = effective_base unless effective_base.nil?
+      selection[:nested] = nested_effective unless nested_effective.empty?
+
+      selection unless selection.empty?
+    end
+
+    def selection_maps_all_empty?(map)
+      Array(map.values).all? { |v| Array(v).empty? }
+    end
   end
 end
