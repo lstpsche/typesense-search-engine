@@ -107,13 +107,42 @@ flowchart LR
   B -- id = book_id --> O
 ```
 
-## Validation & Errors
+## Guardrails & errors
 
-- Missing or blank `collection` → `ArgumentError`.
-- Unknown `local_key` (not declared via `attribute`) → `SearchEngine::Errors::InvalidField` with a hint.
-- Duplicate `join` name → `ArgumentError` indicating the conflict.
-- Unknown lookup via `join_for(:name)` → `SearchEngine::Errors::UnknownJoin` listing available names.
-- Referencing joined fields without applying the join on the relation → `SearchEngine::Errors::JoinNotApplied` with guidance to call `.joins(:name)`.
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
+Misuse scenarios are validated early with actionable errors and suggestions:
+
+- Unknown association on model → `SearchEngine::Errors::InvalidJoin` with guidance and suggestions.
+- Incomplete join config (missing `local_key`/`foreign_key`) → `SearchEngine::Errors::InvalidJoinConfig`.
+- Using joined fields without calling `.joins(:assoc)` → `SearchEngine::Errors::JoinNotApplied`.
+- Unknown field within the joined collection → `SearchEngine::Errors::UnknownJoinField` (best‑effort; skipped if target model is unavailable).
+- Multi‑hop paths (e.g. `$authors.publisher.name`) → `SearchEngine::Errors::UnsupportedJoinNesting`.
+- Duplicate selections/orders are deduped; first mention wins.
+
+Examples:
+
+```ruby
+# Using a missing association
+SearchEngine::Book.where(authors: { last_name: "Rowling" })
+# => raises InvalidJoin: association :authors is not declared on SearchEngine::Book (declare with `join :authors, ...`)
+
+# Joined field without applying join
+SearchEngine::Book.where(authors: { last_name: "Rowling" })
+# ^ when used via Relation, call .joins(:authors) first
+
+# Incomplete config
+SearchEngine::Book.joins(:authors)
+# => raises InvalidJoinConfig if either key is missing
+
+# Unknown joined field (best‑effort)
+SearchEngine::Book.joins(:authors).where(authors: { lats_name: "Rowling" })
+# => raises UnknownJoinField (did you mean :last_name?) when target attributes are known
+```
+
+Notes:
+- Suggestion strings are provided when the distance is small; otherwise omitted.
+- Field validation for joined collections is best‑effort and skipped when the target model is not registered.
 
 ## FAQ
 

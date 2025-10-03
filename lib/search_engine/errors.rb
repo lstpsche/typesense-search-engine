@@ -69,6 +69,14 @@ module SearchEngine
     # registered via {SearchEngine::Base.join}.
     class UnknownJoin < Error; end
 
+    # Raised when an association reference is invalid for the model and should
+    # be declared via {SearchEngine::Base.join}.
+    #
+    # Prefer this for high-level validation messaging with guidance and
+    # suggestions ("did you mean ..."), while keeping {UnknownJoin} for
+    # lower-level registry lookups.
+    class InvalidJoin < Error; end
+
     # Raised when a query references a joined association field without applying
     # the association on the relation via {SearchEngine::Relation#joins}.
     #

@@ -589,6 +589,9 @@ module SearchEngine
       names = normalize_joins(assocs)
       return self if names.empty?
 
+      # Validate all first for better error UX
+      names.each { |name| SearchEngine::Joins::Guard.ensure_config_complete!(@klass, name) }
+
       spawn do |s|
         existing = Array(s[:joins])
         s[:joins] = existing + names
@@ -775,21 +778,49 @@ module SearchEngine
     end
 
     # Parse and normalize order input into an array of "field:dir" strings.
-    def normalize_order(value)
+    def normalize_order(value) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
       return [] if value.nil?
 
       case value
       when Hash
         value.flat_map do |k, dir|
-          field = k.to_s.strip
-          raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+          if dir.is_a?(Hash)
+            # Nested assoc: { assoc => { field => :asc|:desc } }
+            assoc = k.to_sym
+            # Validate assoc exists and join applied
+            @klass.join_for(assoc)
+            SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, assoc, context: 'sorting')
 
-          direction = dir.to_s.strip.downcase
-          unless %w[asc desc].include?(direction)
-            raise ArgumentError, "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
+            dir.flat_map do |field_name, d|
+              field = field_name.to_s.strip
+              raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+              begin
+                cfg = @klass.join_for(assoc)
+                SearchEngine::Joins::Guard.validate_joined_field!(cfg, field)
+              rescue StandardError
+                # best-effort only
+              end
+
+              direction = d.to_s.strip.downcase
+              unless %w[asc desc].include?(direction)
+                raise ArgumentError,
+                      "order: direction must be :asc or :desc (got #{d.inspect} for field #{field_name.inspect})"
+              end
+
+              "$#{assoc}.#{field}:#{direction}"
+            end
+          else
+            field = k.to_s.strip
+            raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+            direction = dir.to_s.strip.downcase
+            unless %w[asc desc].include?(direction)
+              raise ArgumentError, "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
+            end
+
+            "#{field}:#{direction}"
           end
-
-          "#{field}:#{direction}"
         end
       when String
         value.split(',').map(&:strip).reject(&:empty?).map do |chunk|
@@ -858,7 +889,7 @@ module SearchEngine
 
     # Extended normalization supporting nested association selections.
     # Returns a Hash with keys: :base (Array<String>), :nested (Hash<Symbol,Array<String>>), :nested_order (Array<Symbol>).
-    def normalize_select_input(fields)
+    def normalize_select_input(fields) # rubocop:disable Metrics/AbcSize
       list = Array(fields).flatten.compact
       return { base: [], nested: {}, nested_order: [] } if list.empty?
 
@@ -871,6 +902,8 @@ module SearchEngine
       add_nested = lambda do |assoc, values|
         key = assoc.to_sym
         @klass.join_for(key)
+        # Enforce that the relation has applied the join before selecting nested fields
+        SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, key, context: 'selecting fields')
 
         items = case values
                 when Array then values
@@ -879,6 +912,16 @@ module SearchEngine
                 end
         names = items.flatten.compact.map(&:to_s).map(&:strip).reject(&:empty?)
         return if names.empty?
+
+        # Optional: validate joined field names if target collection model is available
+        begin
+          cfg = @klass.join_for(key)
+          names.each do |fname|
+            SearchEngine::Joins::Guard.validate_joined_field!(cfg, fname)
+          end
+        rescue StandardError
+          # Best-effort only; skip strict validation if registry or attributes unavailable
+        end
 
         existing = Array(nested[key])
         merged = (existing + names).each_with_object([]) { |n, acc| acc << n unless acc.include?(n) }
