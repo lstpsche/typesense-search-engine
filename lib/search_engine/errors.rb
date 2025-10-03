@@ -55,6 +55,13 @@ module SearchEngine
     # {SearchEngine::Base.attribute}.
     class InvalidField < Error; end
 
+    # Raised when a base attribute referenced by the Field Selection DSL is not
+    # declared on the model.
+    #
+    # Prefer this over {InvalidField} for selection-time validation to provide
+    # developer-friendly guidance and suggestions.
+    class UnknownField < Error; end
+
     # Raised when an operator or fragment token is not recognized by the SQL-ish
     # grammar accepted by the Parser.
     class InvalidOperator < Error; end
@@ -83,6 +90,17 @@ module SearchEngine
     # Example: calling `where(authors: { last_name: "Rowling" })` without
     # `.joins(:authors)` on the relation first.
     class JoinNotApplied < Error; end
+
+    # Raised when a nested attribute referenced by the Field Selection DSL is
+    # not declared on the joined association's target model.
+    #
+    # Typical cause: a typo in a nested field name or a stale attribute map.
+    class UnknownJoinField < Error; end
+
+    # Raised when selection inputs are malformed or ambiguous and cannot be
+    # deterministically normalized (e.g., invalid nested shapes or incompatible
+    # payload types).
+    class ConflictingSelection < Error; end
 
     # Raised when grouping DSL is used with invalid inputs.
     #
