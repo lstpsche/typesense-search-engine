@@ -37,8 +37,10 @@ Use `Relation#joins(*assocs)` to select join associations on a query. Names are 
 
 ```ruby
 SearchEngine::Book
-  .joins(:authors)
+  .joins(:authors, :orders)
+  .where(authors: { last_name: "Rowling" })
   .where(orders: { total_price: 12.34 })
+  .order(authors: { last_name: :asc })
 ```
 
 ```mermaid
@@ -53,6 +55,34 @@ flowchart LR
 - For debugging, `rel.joins_list` returns the frozen array of association names in state.
 
 Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
+
+## Filtering and Ordering on Joined Fields
+
+With joins applied, you can reference joined collection fields in `where` and `order` using nested hashes. Joined left‑hand‑sides render as `$assoc.field`.
+
+| Input (Ruby) | Compiled filter_by | Compiled sort_by |
+| --- | --- | --- |
+| `where(authors: { last_name: "Rowling" })` | `$authors.last_name:="Rowling"` | – |
+| `where(orders: { total_price: 12.34 })` | `$orders.total_price:=12.34` | – |
+| `order(authors: { last_name: :asc })` | – | `$authors.last_name:asc` |
+| `order("$authors.last_name:asc")` | – | `$authors.last_name:asc` |
+
+Notes:
+- Base fields continue to work unchanged (e.g., `where(active: true)`).
+- Mixed base and joined predicates interleave as usual; the compiler preserves grouping semantics.
+- Raw `order` strings are accepted as‑is; ensure you supply valid Typesense fragments.
+
+### AST Path Diagram
+
+The parser produces a normal predicate node with a joined field path for the LHS. The compiler renders it verbatim.
+
+```mermaid
+flowchart TD
+  A[Hash input] -->|{ authors: { last_name: "Rowling" } }| P[Parser]
+  P -->|LHS "$authors.last_name"| N[AST::Eq]
+  N --> C[Compiler]
+  C -->|filter_by| F[$authors.last_name:="Rowling"]
+```
 
 ## Association Table Pattern
 
@@ -83,6 +113,7 @@ flowchart LR
 - Unknown `local_key` (not declared via `attribute`) → `SearchEngine::Errors::InvalidField` with a hint.
 - Duplicate `join` name → `ArgumentError` indicating the conflict.
 - Unknown lookup via `join_for(:name)` → `SearchEngine::Errors::UnknownJoin` listing available names.
+- Referencing joined fields without applying the join on the relation → `SearchEngine::Errors::JoinNotApplied` with guidance to call `.joins(:name)`.
 
 ## FAQ
 

@@ -8,11 +8,14 @@ module SearchEngine
     # - Hash: { field => value } (scalar => Eq, Array => In)
     # - Raw String: full Typesense fragment (escape hatch) => Raw
     # - Fragment + args: ["price > ?", 100] or ["brand_id IN ?", [1,2,3]]
+    # - Joined Hash: { assoc => { field => value } } => LHS "$assoc.field"
     #
     # Validation/coercion:
     # - Field names validated against model attributes (when available)
     # - Booleans coerced from "true"/"false" strings when attribute type is boolean
     # - Date/DateTime coerced to Time.utc; Arrays flattened one level and compacted
+    # - When using joined fields, association names are validated via klass.join_for
+    #   and (optionally) required to be present in relation joins when +joins+ is provided.
     module Parser
       module_function
 
@@ -25,12 +28,13 @@ module SearchEngine
       # @param input [Hash, String, Array]
       # @param args [Array] optional, used only when +input+ is a template String
       # @param klass [Class] SearchEngine::Base subclass used for attribute validation
+      # @param joins [Array<Symbol>, nil] Optional list of applied join names on the relation
       # @return [SearchEngine::AST::Node, Array<SearchEngine::AST::Node>]
       # @raise [SearchEngine::Errors::InvalidField, SearchEngine::Errors::InvalidOperator, SearchEngine::Errors::InvalidType]
-      def parse(input, klass:, args: [])
+      def parse(input, klass:, args: [], joins: nil)
         case input
         when Hash
-          parse_hash(input, klass: klass)
+          parse_hash(input, klass: klass, joins: joins)
         when String
           if placeholders?(input)
             needed = count_placeholders(input)
@@ -40,7 +44,7 @@ module SearchEngine
             parse_raw(input)
           end
         when Array
-          parse_array_input(input, klass: klass)
+          parse_array_input(input, klass: klass, joins: joins)
         when Symbol
           # Back-compat: treat symbol as raw fragment name
           parse_raw(input.to_s)
@@ -52,8 +56,9 @@ module SearchEngine
       # Parse a list of heterogenous where arguments (as passed to Relation#where).
       # @param list [Array]
       # @param klass [Class]
+      # @param joins [Array<Symbol>, nil]
       # @return [Array<SearchEngine::AST::Node>]
-      def parse_list(list, klass:)
+      def parse_list(list, klass:, joins: nil)
         items = Array(list).flatten.compact
         return [] if items.empty?
 
@@ -63,7 +68,7 @@ module SearchEngine
           entry = items[i]
           case entry
           when Hash
-            nodes.concat(Array(parse_hash(entry, klass: klass)))
+            nodes.concat(Array(parse_hash(entry, klass: klass, joins: joins)))
             i += 1
           when String
             if placeholders?(entry)
@@ -80,7 +85,7 @@ module SearchEngine
             nodes << parse_raw(entry.to_s)
             i += 1
           when Array
-            nodes << parse_array_entry(entry, klass: klass)
+            nodes << parse_array_entry(entry, klass: klass, joins: joins)
             i += 1
           else
             raise ArgumentError, "Parser: unsupported where argument #{entry.class}"
@@ -91,9 +96,9 @@ module SearchEngine
 
       # --- Internals -------------------------------------------------------
 
-      def parse_array_entry(entry, klass:)
+      def parse_array_entry(entry, klass:, joins: nil)
         return parse_raw(entry.to_s) unless entry.first.is_a?(String)
-        return parse_list(entry, klass: klass) unless placeholders?(entry.first)
+        return parse_list(entry, klass: klass, joins: joins) unless placeholders?(entry.first)
 
         template = entry.first
         args_list = if entry.length == 2 && entry[1].is_a?(Array)
@@ -106,23 +111,46 @@ module SearchEngine
         parse_template(template, Array(args_list), klass: klass)
       end
 
-      def parse_hash(hash, klass:)
+      def parse_hash(hash, klass:, joins: nil)
         raise ArgumentError, 'Parser: hash input must be a Hash' unless hash.is_a?(Hash)
 
         attrs = safe_attributes_map(klass)
         validate_hash_keys!(hash, attrs, klass)
 
-        pairs = hash.map do |k, v|
-          field = k.to_sym
+        pairs = []
+
+        hash.each do |k, v|
+          key_sym = k.to_sym
           value = v
 
-          if array_like?(value)
-            values = normalize_array_values(value, field: field, klass: klass)
-            ensure_non_empty_values!(values, field: field, klass: klass)
-            SearchEngine::AST.in_(field, values)
+          if value.is_a?(Hash)
+            # assoc => { field => value }
+            validate_assoc_and_join!(klass, key_sym, joins)
+
+            value.each do |inner_field, inner_value|
+              field_sym = inner_field.to_sym
+              path = "$#{key_sym}.#{field_sym}"
+
+              if array_like?(inner_value)
+                values = normalize_array_values(inner_value, field: field_sym, klass: klass)
+                ensure_non_empty_values!(values, field: field_sym, klass: klass)
+                pairs << SearchEngine::AST.in_(path, values)
+              else
+                coerced = coerce_value_for_field(inner_value, field: field_sym, klass: klass)
+                pairs << SearchEngine::AST.eq(path, coerced)
+              end
+            end
           else
-            coerced = coerce_value_for_field(value, field: field, klass: klass)
-            SearchEngine::AST.eq(field, coerced)
+            field = key_sym
+
+            if array_like?(value)
+              values = normalize_array_values(value, field: field, klass: klass)
+              ensure_non_empty_values!(values, field: field, klass: klass)
+              pairs << SearchEngine::AST.in_(field, values)
+            else
+              coerced = coerce_value_for_field(value, field: field, klass: klass)
+              pairs << SearchEngine::AST.eq(field, coerced)
+            end
           end
         end
 
@@ -184,7 +212,7 @@ module SearchEngine
 
       # Heuristic: treat an Array input as a template+args when it starts with a
       # String that has placeholders; otherwise treat as list-of-inputs.
-      def parse_array_input(arr, klass:)
+      def parse_array_input(arr, klass:, joins: nil)
         return [] if arr.nil?
 
         arr = Array(arr)
@@ -200,7 +228,7 @@ module SearchEngine
           ensure_placeholder_arity!(needed, Array(args_list).length, template)
           parse_template(template, Array(args_list), klass: klass)
         else
-          parse_list(arr, klass: klass)
+          parse_list(arr, klass: klass, joins: joins)
         end
       end
 
@@ -233,7 +261,9 @@ module SearchEngine
         return if hash.nil? || hash.empty?
 
         known = attributes_map.keys.map(&:to_sym)
-        unknown = hash.keys.map(&:to_sym) - known
+        # Exclude keys whose values are Hash (treated as assoc => { ... })
+        candidate_keys = hash.reject { |_, v| v.is_a?(Hash) }.keys
+        unknown = candidate_keys.map(&:to_sym) - known
         return if unknown.empty?
 
         return unless strict_fields?
@@ -440,6 +470,17 @@ module SearchEngine
       def invalid_type_message(field:, klass:, expectation:, got:)
         klass_name = klass.respond_to?(:name) && klass.name ? klass.name : klass.to_s
         %(expected #{field.inspect} to be #{expectation} for #{klass_name} (got #{got.class}: #{got.inspect}))
+      end
+
+      def validate_assoc_and_join!(klass, assoc_name, joins)
+        # Validate association exists (raises UnknownJoin with suggestions)
+        klass.join_for(assoc_name)
+
+        # When enforcing applied joins, ensure relation has the association
+        return if joins.nil? || Array(joins).include?(assoc_name)
+
+        raise SearchEngine::Errors::JoinNotApplied,
+              "Call .joins(:#{assoc_name}) before filtering/sorting on #{assoc_name} fields"
       end
     end
   end
