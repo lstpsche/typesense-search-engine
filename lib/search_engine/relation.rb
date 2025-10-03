@@ -387,16 +387,12 @@ module SearchEngine
 
       # Filters and sorting
       ast_nodes = Array(@state[:ast]).flatten.compact
-      if !ast_nodes.empty?
-        compiled = SearchEngine::Compiler.compile(ast_nodes, klass: @klass)
-        params[:filter_by] = compiled unless compiled.to_s.empty?
-      else
-        filters = Array(@state[:filters])
-        params[:filter_by] = filters.join(' && ') unless filters.empty?
-      end
+      filter_str = compiled_filter_by(ast_nodes)
+      params[:filter_by] = filter_str if filter_str
 
       orders = Array(@state[:orders])
-      params[:sort_by] = orders.join(',') unless orders.empty?
+      sort_str = compiled_sort_by(orders)
+      params[:sort_by] = sort_str if sort_str
 
       # Field selection (nested first, then base)
       include_str = compile_include_fields_string
@@ -410,6 +406,10 @@ module SearchEngine
       # Keep infix last for stability; include when configured or overridden
       infix_val = option_value(opts, :infix) || cfg.default_infix
       params[:infix] = infix_val if infix_val
+
+      # Internal join context (for downstream components; may be stripped before HTTP)
+      join_ctx = build_join_context(ast_nodes: ast_nodes, orders: orders)
+      params[:_join] = join_ctx unless join_ctx.nil? || join_ctx.empty?
 
       params
     end
@@ -1216,6 +1216,126 @@ module SearchEngine
       # Validate against declared joins; rely on join_for to raise with suggestions
       names.each { |name| @klass.join_for(name) }
       names
+    end
+
+    # Compile filter_by string from AST nodes or legacy fragments.
+    # @param ast_nodes [Array<SearchEngine::AST::Node>]
+    # @return [String, nil]
+    def compiled_filter_by(ast_nodes)
+      unless ast_nodes.empty?
+        compiled = SearchEngine::Compiler.compile(ast_nodes, klass: @klass)
+        return nil if compiled.to_s.empty?
+
+        return compiled
+      end
+
+      fragments = Array(@state[:filters])
+      return nil if fragments.empty?
+
+      fragments.join(' && ')
+    end
+
+    # Compile sort_by from normalized order entries.
+    # @param orders [Array<String>]
+    # @return [String, nil]
+    def compiled_sort_by(orders)
+      list = Array(orders)
+      return nil if list.empty?
+
+      list.join(',')
+    end
+
+    # Build a JSON-serializable join context for Typesense.
+    # Internal, documented shape used by downstream layers for diagnostics and planning:
+    #   {
+    #     assocs: [:authors, ...],
+    #     fields_by_assoc: { authors: ["first_name", ...] },
+    #     referenced_in: { include: [:authors], filter: [:authors], sort: [:authors] }
+    #   }
+    # @param ast_nodes [Array<SearchEngine::AST::Node>]
+    # @param orders [Array<String>]
+    # @return [Hash]
+    def build_join_context(ast_nodes:, orders:)
+      applied = Array(@state[:joins])
+      return {} if applied.empty?
+
+      # Dedupe while preserving first occurrence order
+      assocs = []
+      applied.each { |a| assocs << a unless assocs.include?(a) }
+
+      nested_map = @state[:select_nested] || {}
+      nested_order = Array(@state[:select_nested_order])
+
+      fields_by_assoc = {}
+      assocs.each do |assoc|
+        fields = Array(nested_map[assoc]).map(&:to_s).reject(&:empty?)
+        fields_by_assoc[assoc] = fields unless fields.empty?
+      end
+
+      include_refs = nested_order.select { |a| Array(nested_map[a]).any? }
+      filter_refs = extract_assocs_from_ast(ast_nodes)
+      sort_refs = extract_assocs_from_orders(orders)
+
+      referenced_in = {}
+      referenced_in[:include] = include_refs unless include_refs.empty?
+      referenced_in[:filter] = filter_refs unless filter_refs.empty?
+      referenced_in[:sort] = sort_refs unless sort_refs.empty?
+
+      out = {}
+      out[:assocs] = assocs unless assocs.empty?
+      out[:fields_by_assoc] = fields_by_assoc unless fields_by_assoc.empty?
+      out[:referenced_in] = referenced_in unless referenced_in.empty?
+      out
+    end
+
+    # Walk AST nodes and collect association names used via "$assoc.field" LHS.
+    # @param nodes [Array<SearchEngine::AST::Node>]
+    # @return [Array<Symbol>] unique assoc names in first-mention order
+    def extract_assocs_from_ast(nodes)
+      list = Array(nodes).flatten.compact
+      return [] if list.empty?
+
+      seen = []
+      walker = lambda do |node|
+        return unless node.is_a?(SearchEngine::AST::Node)
+
+        if node.respond_to?(:field)
+          field = node.field.to_s
+          if field.start_with?('$')
+            m = field.match(/^\$(\w+)\./)
+            if m
+              name = m[1].to_sym
+              seen << name unless seen.include?(name)
+            end
+          end
+        end
+
+        Array(node.children).each { |child| walker.call(child) }
+      end
+
+      list.each { |n| walker.call(n) }
+      seen
+    end
+
+    # Parse order strings and collect assoc names used via "$assoc.field:dir".
+    # @param orders [Array<String>]
+    # @return [Array<Symbol>] unique assoc names in first-mention order
+    def extract_assocs_from_orders(orders)
+      list = Array(orders).flatten.compact
+      return [] if list.empty?
+
+      seen = []
+      list.each do |entry|
+        field, _dir = entry.to_s.split(':', 2)
+        next unless field&.start_with?('$')
+
+        m = field.match(/^\$(\w+)\./)
+        next unless m
+
+        name = m[1].to_sym
+        seen << name unless seen.include?(name)
+      end
+      seen
     end
   end
 end
