@@ -3,7 +3,7 @@
 Mountless Rails::Engine wrapping Typesense with idiomatic Rails integration and AR-like querying.
 
 ## Docs
-See [docs/index.md](./docs/index.md) for the full documentation set. Direct links: [Relation](./docs/relation.md), [JOINs](./docs/joins.md), [Query DSL](./docs/query_dsl.md), [Compiler](./docs/compiler.md), [Materializers](./docs/materializers.md), [Grouping](./docs/grouping.md), [Field Selection](./docs/field_selection.md), [Observability](./docs/observability.md), [Federated multi-search](./docs/multi_search.md), [Debugging](./docs/debugging.md).
+See [docs/index.md](./docs/index.md) for the full documentation set. Direct links: [Relation](./docs/relation.md), [JOINs](./docs/joins.md), [Query DSL](./docs/query_dsl.md), [Compiler](./docs/compiler.md), [Materializers](./docs/materializers.md), [Grouping](./docs/grouping.md), [Field Selection](./docs/field_selection.md), [Presets](./docs/presets.md), [Observability](./docs/observability.md), [Federated multi-search](./docs/multi_search.md), [Debugging](./docs/debugging.md).
 
 ## Quick Start
 

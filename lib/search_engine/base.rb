@@ -229,6 +229,7 @@ module SearchEngine
       # @param name [#to_sym] declared preset token (without namespace)
       # @return [void]
       # @raise [ArgumentError] when the token is nil, blank, or invalid
+      # @see docs/presets.md#config-default-preset
       def default_preset(name)
         raise ArgumentError, 'default_preset requires a name' if name.nil?
 
@@ -247,6 +248,7 @@ module SearchEngine
       # namespace is ignored and the token is returned as a String.
       #
       # @return [String, nil] effective preset name, or nil when no preset declared
+      # @see docs/presets.md#config-default-preset
       def default_preset_name
         token = if instance_variable_defined?(:@__declared_default_preset__)
                   instance_variable_get(:@__declared_default_preset__)

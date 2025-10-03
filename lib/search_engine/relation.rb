@@ -72,6 +72,7 @@ module SearchEngine
     # Falls back to :merge when not explicitly set.
     #
     # @return [Symbol] one of :merge, :only, :lock
+    # @see docs/presets.md#relation-dsl
     def preset_mode
       (@state[:preset_mode] || :merge).to_sym
     end
@@ -79,6 +80,7 @@ module SearchEngine
     # Return the effective preset token (namespaced if configured) or nil.
     #
     # @return [String, nil]
+    # @see docs/presets.md#config-default-preset
     def preset_name
       @state[:preset_name]
     end
@@ -238,6 +240,8 @@ module SearchEngine
     #
     #   # Locked preset (chain cannot override preset filters/sorts)
     #   SearchEngine::Product.preset(:brand_curated, mode: :lock).order(price: :asc) # order will be dropped
+    # @see docs/presets.md#relation-dsl
+    # @see docs/presets.md#strategies-merge-only-lock
     def preset(name, mode: :merge)
       raise ArgumentError, 'preset requires a name' if name.nil?
 
@@ -573,6 +577,7 @@ module SearchEngine
     # @example
     #   rel.to_typesense_params
     #   # => { q: "*", query_by: "name,description", filter_by: "brand_id:=[1,2] && active:=true", page: 2, per_page: 20 }
+    # @see docs/presets.md#compiler-mapping-pruning
     def to_typesense_params # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
       cfg = SearchEngine.config
       opts = @state[:options] || {}
@@ -718,6 +723,7 @@ module SearchEngine
     # @example
     #   rel.explain
     #   #=> "SearchEngine::Product Relation\n  where: active:=true AND brand_id IN [1,2]\n  order: updated_at:desc\n  select: id,name\n  page/per: 2/20"
+    # @see docs/presets.md#conflicts
     def explain(to: nil)
       params = to_typesense_params
 
@@ -979,12 +985,13 @@ module SearchEngine
     # Programmatic accessor for preset conflicts in :lock mode.
     # Builds a deterministic, frozen list of conflict entries. Keys only; no values.
     # @return [Array<Hash{Symbol=>Symbol}>] e.g., [{ key: :sort_by, reason: :locked_by_preset }]
+    # @see docs/presets.md#conflicts
     def preset_conflicts
       params = to_typesense_params
       keys = Array(params[:_preset_conflicts]).map { |k| k.respond_to?(:to_sym) ? k.to_sym : k }.grep(Symbol)
       return [].freeze if keys.empty?
 
-      keys.sort.map { |k| { key: k, reason: :locked_by_preset }.freeze }.freeze
+      keys.sort.map { |k| { key: k, reason: :locked_by_preset } }.freeze
     end
 
     protected

@@ -1,12 +1,44 @@
-# Presets: Relation#preset and Merge Strategies
-
-Back to: [Index](./index.md) · See also: [Relation](./relation.md) · Multi-search: [Multi](./multi_search.md#presets-in-multi-search)
+# Presets
 
 ## Overview
 
-Apply a server-side preset to a relation with a selectable merge strategy using `Relation#preset(name, mode: :merge)`.
+Presets are server-side bundles of query options that you can attach to a relation to enforce consistent filters, sorts, or selections. They provide a global config (optional namespace and enablement), per‑collection defaults, and a per‑relation `preset(name, mode:)` DSL.
 
-### Examples
+- **Why**: enforce consistent defaults, reuse across surfaces, and keep chains concise.
+- **Where**: global config under `SearchEngine.config.presets`; model-level `default_preset`; relation-level `Relation#preset`.
+
+## Config & Default preset
+
+Presets are namespaced when enabled. The effective name is computed as `"#{namespace}_#{token}"` when both `enabled` and `namespace` are set; otherwise the bare token is used.
+
+- **Global config**: `enabled`, `namespace`, and `locked_domains` (used by `:lock` mode)
+- **Model default**: declare `default_preset :token` on a `SearchEngine::Base` subclass
+- **Reader**: `YourModel.default_preset_name` returns the effective name (or `nil` if none)
+
+```ruby
+# Initializer (reused from earlier tickets)
+SearchEngine.configure do |c|
+  c.presets.enabled   = true
+  c.presets.namespace = "prod"
+  # Optional: customize locked domains for :lock mode
+  # c.presets.locked_domains = %i[filter_by sort_by include_fields exclude_fields]
+end
+
+class SearchEngine::Product < SearchEngine::Base
+  default_preset :popular_products
+end
+
+SearchEngine::Product.default_preset_name
+# => "prod_popular_products"
+```
+
+Notes:
+- Namespacing is ignored when `enabled` is false; tokens remain usable as declared.
+- `locked_domains` is normalized to Symbols and used by the compiler to prune keys in `:lock` mode.
+
+## Relation DSL
+
+Apply a preset with copy‑on‑write semantics, validate inputs, and keep chaining ergonomics:
 
 ```ruby
 # Merge (default)
@@ -21,7 +53,71 @@ SearchEngine::Product.preset(:aggressive_sale, mode: :only).page(1).per(24)
 SearchEngine::Product.preset(:brand_curated, mode: :lock).order(price: :asc) # order will be dropped
 ```
 
-#### Example (from ticket)
+- `Relation#preset(name, mode: :merge)` validates the name and mode
+- Readers: `rel.preset_name` and `rel.preset_mode` (defaults to `:merge`)
+- `inspect`/`explain` show the preset and, for `:lock`, any dropped keys
+- Presets affect the compiler stage only; no global config is mutated
+
+## Strategies (`:merge`, `:only`, `:lock`)
+
+| Mode  | What is sent | Who wins on overlaps | Conflicts recorded |
+|------|---------------|----------------------|--------------------|
+| merge | preset + all chain params | chain | no |
+| only  | preset + essentials (`q`, `page`, `per_page`) | n/a (others dropped) | no |
+| lock  | preset + chain minus locked domains | preset | yes (dropped keys) |
+
+- **merge**: Send preset and all compiled params. When Typesense sees overlapping knobs, the later param wins; here the chain wins. No conflicts are recorded.
+- **only**: Keep only essentials from the chain (`q`, `page`, `per_page`) and send the preset. Use for strict server‑defined queries with local pagination.
+- **lock**: Drop chain keys that belong to `SearchEngine.config.presets.locked_domains` (default: `filter_by`, `sort_by`, `include_fields`, `exclude_fields`), record dropped keys, and include them in `explain`.
+
+### Mermaid — Strategy flow
+
+```mermaid
+flowchart TD
+  A[Relation state: preset_name + preset_mode] --> B[Draft params from DSL]
+  B --> C{mode}
+  C -- merge --> D[Keep all + preset]
+  C -- only --> E[Keep essentials: q/page/per_page + preset]
+  C -- lock --> F[Drop keys in locked_domains + keep others + preset]
+  D --> G[Final Typesense params]
+  E --> G
+  F --> G
+```
+
+## Compiler mapping & pruning
+
+The compiler injects `preset: <effective_name>` into the params and prunes keys according to the chosen strategy.
+
+- **only**: keep `q`, `page`, `per_page`; drop the rest
+- **lock**: drop keys in `SearchEngine.config.presets.locked_domains` and record them
+- **merge**: no pruning
+
+Compact mapping:
+
+| Relation state               | Compiler output              |
+|-----------------------------|------------------------------|
+| `preset_name`, `preset_mode`| `preset`, `_preset_mode`     |
+| state → params              | `q`, `filter_by`, `sort_by`, `include_fields`, `page`, `per_page`, ... |
+| pruning (only)              | keep essentials only         |
+| pruning (lock)              | drop `locked_domains` keys   |
+
+### Mermaid — State → params mapping
+
+```mermaid
+flowchart LR
+  A[Relation State
+   • ast/orders/selection
+   • preset_name/mode] --> B[Compiler]
+  B --> C{mode}
+  C -- merge --> D[params + preset]
+  C -- only --> E[essentials + preset]
+  C -- lock --> F[params − locked_domains + preset]
+  D --> G[Final params]
+  E --> G
+  F --> G
+```
+
+Example (reused):
 
 ```ruby
 rel = SearchEngine::Product
@@ -31,64 +127,23 @@ rel.to_typesense_params
 # => { q: "*", page: 1, per_page: 10, preset: "prod_popular_products" }
 ```
 
-## Namespacing
-
-Effective preset name is computed using global presets configuration (`SearchEngine.config.presets`). When enabled and a non-empty `namespace` is present, the effective name is `"#{namespace}_#{token}"`; otherwise the token is used as-is.
-
-- **Enabled + namespace:** `prod_popular_products`
-- **Disabled or no namespace:** `popular_products`
-
-## Strategies
-
-- **mode=:merge (default)**: preset is emitted along with all chain-derived params; on key overlaps, chain wins (Typesense semantics). No conflicts recorded.
-- **mode=:only**: preset is emitted and only essential params are kept from the chain. Optional params like `filter_by`, `sort_by`, `include_fields` are dropped. No conflicts recorded.
-- **mode=:lock**: preset is emitted and chain params are kept except those managed by preset (`filter_by`, `sort_by`, `include_fields`, etc.). Dropped keys are recorded and surfaced by `explain`.
-
-### Strategy comparison
-
-| Mode  | What is sent | Who wins on overlaps | Conflicts recorded |
-|------|---------------|----------------------|--------------------|
-| merge | preset + all chain params | chain | no |
-| only  | preset + essentials (q, page, per_page) | n/a (others dropped) | no |
-| lock  | preset + chain minus locked domains | preset | yes (dropped keys) |
-
-## Configuration
-
-Customize which param keys are considered preset-managed in `:lock` mode:
-
-- **Default:** `SearchEngine.config.presets.locked_domains = %i[filter_by sort_by include_fields exclude_fields]`
-- The value is normalized to Symbols and used as a Set for deterministic pruning.
-
 ## Conflicts
 
-Conflicts are detected only in `mode: :lock` and occur when a compiled chain param key belongs to `SearchEngine.config.presets.locked_domains`. Such keys are dropped from the final params and recorded as conflicts.
+Conflicts are detected only in `mode: :lock` and occur when a compiled chain key belongs to `SearchEngine.config.presets.locked_domains`. Such keys are dropped from the final params and recorded.
 
-- **Accessor:** `Relation#preset_conflicts` → `[{ key: :filter_by, reason: :locked_by_preset }, ...]` (deterministic, frozen)
-- **Explain:** lists the effective preset and one line per dropped key with a humanized reason.
-- **Inspect:** appends a compact token: `preset=prod_brand_curated(mode=lock; conflicts=filter_by,sort_by)`
-- **Redaction:** keys only; raw values are not included anywhere.
+- Accessor: `Relation#preset_conflicts` → `[{ key: :filter_by, reason: :locked_by_preset }, ...]` (deterministic, frozen)
+- Explain: lists the effective preset and a line per dropped key with a humanized reason
+- Inspect: appends a compact token: `preset=prod_brand_curated(mode=lock; conflicts=filter_by,sort_by)`
+- Redaction: keys only; no raw values
 
 Verbatim example snippet:
 
-```
+```text
 Preset: prod_brand_curated (mode: lock)
 Dropped: sort_by (locked by preset)
 ```
 
-### Instrumentation
-
-When conflicts are present, a single event is emitted per compile:
-
-- **Event:** `search_engine.preset.conflict`
-- **Payload:**
-  - `keys` (Array<Symbol>) — dropped keys (redacted; names only)
-  - `mode` (Symbol) — preset mode (always `:lock` here)
-  - `preset_name` (String) — effective preset name
-  - `count` (Integer) — number of dropped keys
-
-Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Multi-search](./multi_search.md#presets-in-multi-search)
-
-### Mermaid — Conflict Resolution Flow
+### Mermaid — Conflict resolution
 
 ```mermaid
 flowchart TD
@@ -103,62 +158,59 @@ flowchart TD
   G --> H[Relation#explain includes preset + conflicts]
 ```
 
-## Explain & Inspect
+## Multi‑search
 
-- `inspect` adds a compact token, e.g., `preset=prod_popular_products(mode=lock; conflicts=filter_by,sort_by)` when applied and conflicts exist.
-- `explain` prints a `Preset:` header and, for `mode: :lock`, a deterministic list of `Dropped:` lines with humanized reasons (as above). Redaction-safe by construction.
+Presets are applied per search entry. Each `searches[]` item carries its own `preset` and respects that relation’s mode.
 
-## Mermaid: strategy flow
+- `:merge`: pass through compiled params (includes `preset`)
+- `:only`: keep only `collection`, `q`, `page`, `per_page`, and `preset`
+- `:lock`: drop keys listed in `SearchEngine.config.presets.locked_domains`
+
+Example (reused):
+
+```ruby
+res = SearchEngine.multi_search do |m|
+  m.add :products, SearchEngine::Product.preset(:popular_products).per(5)
+  m.add :brands,   SearchEngine::Brand.preset(:brand_popularity, mode: :only).per(3)
+end
+```
+
+### Mermaid — Multi‑search placement
 
 ```mermaid
 flowchart TD
-  A[Relation state: preset_name + preset_mode] --> B[Draft params from DSL]
-  B --> C{mode}
-  C -- merge --> D[Keep all + preset]
-  C -- only --> E[Keep essentials: q/page/per_page + preset]
-  C -- lock --> F[Drop keys in locked_domains + keep others + preset]
-  D --> G[Final Typesense params]
-  E --> G
-  F --> G
+  A[Relation] --> B[to_typesense_params]
+  B --> C[Per‑search payload]
+  C --> D{preset_mode}
+  D -- merge --> E[Pass through]
+  D -- only --> F[Keep collection,q,page,per_page + preset]
+  D -- lock --> G[Drop keys in locked_domains]
+  E --> H[searches[]]
+  F --> H
+  G --> H
 ```
-
-## Notes
-
-- Essential params include: `q`, `page`, `per_page`.
-- Locked domains default to: `filter_by`, `sort_by`, `include_fields`, `exclude_fields`.
-- The API is immutable and copy-on-write; invalid mode or name raises `ArgumentError`.
 
 ## Observability
 
-See also: [Observability](./observability.md)
+Events (keys and counts only; values redacted elsewhere):
 
-- **Event**: `search_engine.preset.apply` — emitted once per compile when a preset is present.
-- **Payload** (redacted; keys only):
-  - `preset_name` (String)
-  - `mode` (Symbol) — one of `:merge | :only | :lock`
-  - `locked_domains` (Array<Symbol>) — from configuration
-  - `pruned_keys` (Array<Symbol>) — keys dropped by the strategy
+- `search_engine.preset.apply` — emitted once per compile when a preset is present
+  - Payload: `preset_name`, `mode`, `locked_domains`, `pruned_keys`
+- `search_engine.preset.conflict` — emitted once per compile in `:lock` mode when keys were dropped
+  - Payload: `keys`, `count`, `mode`, `preset_name`
 
-- **Logging (compact subscriber)**:
-  - Text: appends `pz=<name>|m=<mode>|pk=<count>|ld=<count>`; when `pruned_keys.size <= 3` includes `pk=[k1,k2]`.
-  - JSON: adds `preset_name`, `preset_mode`, `preset_pruned_keys_count`, `preset_locked_domains_count`, and optionally `preset_pruned_keys`.
+Logging subscriber (compact):
+- Text: appends `pz=<name>|m=<mode>|pk=<count>|ld=<count>`; when `pruned_keys.size <= 3`, includes `pk=[k1,k2]`
+- JSON: adds `preset_name`, `preset_mode`, `preset_pruned_keys_count`, `preset_locked_domains_count`, and optionally `preset_pruned_keys`
 
-### Mermaid — Preset Observability Timeline
+## FAQ
 
-```mermaid
-sequenceDiagram
-  participant R as Relation
-  participant C as Compiler
-  participant I as Instrumentation
-  participant L as Logging Subscriber
+- **How does namespacing interact with `enabled: false`?** Namespacing is ignored when disabled; tokens are used as declared.
+- **Can I customize `locked_domains`?** Yes: `SearchEngine.config.presets.locked_domains = %i[filter_by sort_by include_fields exclude_fields]` (Array/Set/single value accepted; normalized to Symbols).
+- **What happens if a preset is missing on the server?** Typesense returns an error at request time; handle it like any search error. The client surfaces it via `SearchEngine::Errors`.
+- **How do presets interact with field selection?** In `:lock`, selection keys (`include_fields`, `exclude_fields`) belong to `locked_domains` by default and are dropped from the chain; the preset governs them.
+- **How does multi‑search resolve conflicting modes across entries?** Modes are per entry. Each relation’s `preset_mode` is applied independently when compiling `searches[]`.
 
-  R->>C: to_typesense_params
-  C->>C: Apply preset (mode rules) & compute pruned_keys
-  C-->>I: instrument "search_engine.preset.apply" {preset_name, mode, locked_domains, pruned_keys}
-  Note right of I: redacted payload (keys/counts only)
-  C-->>L: search event payload (includes preset summary counts)
-  L->>L: format compact token (text) / JSON fields
-  C-->>R: final params
-```
+---
 
-Backlinks: [Index](./index.md) · [Observability](./observability.md)
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Multi‑search](./multi_search.md) · [Observability](./observability.md)

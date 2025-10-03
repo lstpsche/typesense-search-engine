@@ -270,13 +270,16 @@ module SearchEngine
     # Controls namespacing and enablement.
     class PresetsConfig
       # @return [Boolean] when false, namespace is ignored but declared tokens remain usable
+      # @see docs/presets.md
       attr_accessor :enabled
       # @return [String, nil] optional namespace prepended to preset names when enabled
+      # @see docs/presets.md
       attr_accessor :namespace
 
       # @return [Array<Symbol>] list of request param keys that presets manage in :lock mode
       #   Any matching keys will be pruned from chain-compiled params. Defaults to
       #   %i[filter_by sort_by include_fields exclude_fields].
+      # @see docs/presets.md#strategies-merge-only-lock
 
       def initialize
         @enabled = true
@@ -289,6 +292,7 @@ module SearchEngine
       # Accepts true/false, or common String forms ("true","false","1","0","yes","no","on","off").
       # @param value [Object]
       # @return [Boolean]
+      # @see docs/presets.md#config-default-preset
       def self.normalize_enabled(value)
         return true  if value == true
         return false if value == false
@@ -305,6 +309,7 @@ module SearchEngine
       # Normalize namespace to a non-empty String or return original for validation.
       # @param value [Object]
       # @return [String, nil, Object]
+      # @see docs/presets.md#config-default-preset
       def self.normalize_namespace(value)
         return nil if value.nil?
 
@@ -322,6 +327,7 @@ module SearchEngine
       # normalized to Symbols. Internal membership checks use a frozen Set.
       # @param value [Array<#to_sym>, Set<#to_sym>, #to_sym, nil]
       # @return [void]
+      # @see docs/presets.md#strategies-merge-only-lock
       def locked_domains=(value)
         list =
           case value
@@ -337,12 +343,14 @@ module SearchEngine
 
       # Return the locked domains as an Array of Symbols.
       # @return [Array<Symbol>]
+      # @see docs/presets.md#strategies-merge-only-lock
       def locked_domains
         Array(@locked_domains).map(&:to_sym)
       end
 
       # Return a frozen Set of locked domains for fast membership checks.
       # @return [Set<Symbol>]
+      # @see docs/presets.md#strategies-merge-only-lock
       def locked_domains_set
         @locked_domains_set ||= locked_domains.to_set.freeze
       end
@@ -443,6 +451,7 @@ module SearchEngine
 
     # Expose presets configuration.
     # @return [SearchEngine::Config::PresetsConfig]
+    # @see docs/presets.md
     def presets
       @presets ||= PresetsConfig.new
     end
@@ -452,6 +461,7 @@ module SearchEngine
     # Normalizes values on assignment.
     # @param value [Object]
     # @return [void]
+    # @see docs/presets.md#config-default-preset
     def presets=(value)
       cfg = presets
       if value.is_a?(PresetsConfig)
