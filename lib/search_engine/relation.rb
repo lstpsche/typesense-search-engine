@@ -307,6 +307,80 @@ module SearchEngine
       end
     end
 
+    # Pin hits to the top of results by ID. Appends new IDs while de-duplicating
+    # and preserving first occurrence order.
+    #
+    # @param ids [Array<#to_s>] one or more IDs; arrays are flattened one level
+    # @return [SearchEngine::Relation]
+    def pin(*ids)
+      additions = normalize_curation_ids(ids)
+      return self if additions.empty?
+
+      spawn do |s|
+        cur = s[:curation] || { pinned: [], hidden: [], override_tags: [], filter_curated_hits: nil }
+        cur[:pinned] = (Array(cur[:pinned]) + additions).each_with_object([]) do |t, acc|
+          acc << t unless acc.include?(t)
+        end
+        s[:curation] = cur
+      end
+    end
+
+    # Hide hits by ID. Appends new IDs while de-duplicating with set semantics
+    # and preserving first-seen order for display.
+    #
+    # @param ids [Array<#to_s>] one or more IDs; arrays are flattened one level
+    # @return [SearchEngine::Relation]
+    def hide(*ids)
+      additions = normalize_curation_ids(ids)
+      return self if additions.empty?
+
+      spawn do |s|
+        cur = s[:curation] || { pinned: [], hidden: [], override_tags: [], filter_curated_hits: nil }
+        cur[:hidden] = (Array(cur[:hidden]) + additions).each_with_object([]) do |t, acc|
+          acc << t unless acc.include?(t)
+        end
+        s[:curation] = cur
+      end
+    end
+
+    # Set multiple curation knobs in one call. For provided keys, replaces the
+    # corresponding list/value; omitted keys retain previous values.
+    #
+    # @param pin [Array<#to_s>, nil]
+    # @param hide [Array<#to_s>, nil]
+    # @param override_tags [Array<#to_s>, nil]
+    # @param filter_curated_hits [true,false,nil,Symbol]
+    # @return [SearchEngine::Relation]
+    def curate(pin: nil, hide: nil, override_tags: nil, filter_curated_hits: :__unset__)
+      spawn do |s|
+        cur = s[:curation] || { pinned: [], hidden: [], override_tags: [], filter_curated_hits: nil }
+
+        unless pin.nil?
+          list = normalize_curation_ids(pin)
+          cur[:pinned] = list.each_with_object([]) { |t, acc| acc << t unless acc.include?(t) }
+        end
+        unless hide.nil?
+          list = normalize_curation_ids(hide)
+          cur[:hidden] = list.each_with_object([]) { |t, acc| acc << t unless acc.include?(t) }
+        end
+        cur[:override_tags] = normalize_curation_tags(override_tags) unless override_tags.nil?
+        if filter_curated_hits != :__unset__
+          cur[:filter_curated_hits] =
+            filter_curated_hits.nil? ? nil : coerce_boolean_strict(filter_curated_hits, :filter_curated_hits)
+        end
+
+        s[:curation] = cur
+      end
+    end
+
+    # Clear all curation state from the relation.
+    # @return [SearchEngine::Relation]
+    def clear_curation
+      spawn do |s|
+        s[:curation] = nil
+      end
+    end
+
     # Group results by a single field with optional limit and missing values policy.
     #
     # Stores normalized immutable grouping state under `@state[:grouping]`.
@@ -1097,6 +1171,8 @@ module SearchEngine
         normalized[:preset_name] = value&.to_s&.strip
       when :preset_mode
         normalized[:preset_mode] = value&.to_sym
+      when :curation
+        normalized[:curation] = normalize_curation_input(value)
       end
     end
 
@@ -1733,6 +1809,22 @@ module SearchEngine
       return lines unless params[:exclude_fields] && !params[:exclude_fields].to_s.strip.empty?
 
       lines << "  exclude: #{params[:exclude_fields]}"
+    end
+
+    def append_curation_explain_lines(lines)
+      cur = @state[:curation]
+      return lines unless cur
+
+      pinned = Array(cur[:pinned]).map(&:to_s).reject(&:empty?)
+      hidden = Array(cur[:hidden]).map(&:to_s).reject(&:empty?)
+      tags   = Array(cur[:override_tags]).map(&:to_s).reject(&:empty?)
+      fch    = cur[:filter_curated_hits]
+
+      lines << "  Pinned: #{pinned.join(', ')}" unless pinned.empty?
+      lines << "  Hidden: #{hidden.join(', ')}" unless hidden.empty?
+      lines << "  Override tags: #{tags.join(', ')}" unless tags.empty?
+      lines << "  Filter curated hits: #{fch}" unless fch.nil?
+      lines
     end
 
     def add_effective_selection_tokens!(lines)

@@ -19,6 +19,7 @@ Welcome to the SearchEngine documentation.
 - [Multi-search](./multi_search.md)
 - [Indexer](./indexer.md)
 - [Presets](./presets.md)
+- [Curation](./curation.md)
 
 ## Overview
 
