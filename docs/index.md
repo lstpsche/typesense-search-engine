@@ -9,6 +9,7 @@ Welcome to the SearchEngine documentation.
 - [Client](./client.md)
 - [Models](./models.md)
 - [Relation](./relation.md)
+- [Field Selection](./field_selection.md)
 - [Observability](./observability.md)
 - [Materializers](./materializers.md)
 - [Query DSL](./query_dsl.md)
