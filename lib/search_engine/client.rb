@@ -260,6 +260,8 @@ module SearchEngine
       payload.delete(:_preset_mode)
       payload.delete(:_preset_pruned_keys)
       payload.delete(:_preset_conflicts)
+      payload.delete(:_curation_conflict_type)
+      payload.delete(:_curation_conflict_count)
       payload
     end
 
@@ -277,7 +279,7 @@ module SearchEngine
         selection_exclude_count: sel[:exclude_count],
         selection_nested_assoc_count: sel[:nested_assoc_count]
       }
-      base.merge(build_preset_segment(params))
+      base.merge(build_preset_segment(params)).merge(build_curation_segment(params))
     end
 
     # Build preset segment (counts/keys only) from compiled params
@@ -298,6 +300,28 @@ module SearchEngine
         preset_locked_domains_count: locked_count,
         preset_pruned_keys: pruned.empty? ? nil : pruned
       }
+    end
+
+    # Build curation segment (counts/flags only) from compiled params
+    # @param params [Hash]
+    # @return [Hash]
+    def build_curation_segment(params)
+      pinned_str = params[:pinned_hits].to_s
+      hidden_str = params[:hidden_hits].to_s
+      tags_str   = params[:override_tags].to_s
+      pinned_count = pinned_str.empty? ? 0 : (pinned_str.count(',') + 1)
+      hidden_count = hidden_str.empty? ? 0 : (hidden_str.count(',') + 1)
+      has_override = !tags_str.empty?
+      conflict_type = params[:_curation_conflict_type]
+      conflict_count = params[:_curation_conflict_count]
+      out = {}
+      out[:curation_pinned_count] = pinned_count if pinned_count.positive?
+      out[:curation_hidden_count] = hidden_count if hidden_count.positive?
+      out[:curation_has_override_tags] = true if has_override
+      out[:curation_filter_flag] = params[:filter_curated_hits] if params.key?(:filter_curated_hits)
+      out[:curation_conflict_type] = conflict_type.to_s if conflict_type
+      out[:curation_conflict_count] = conflict_count if conflict_count
+      out
     end
 
     def typesense

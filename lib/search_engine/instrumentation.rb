@@ -52,6 +52,17 @@ module SearchEngine
     #   - :mode [Symbol] one of :merge, :only, :lock
     #   - :locked_domains [Array<Symbol>] configured locked domains for :lock mode
     #   - :pruned_keys [Array<Symbol>] keys removed by the chosen mode
+    # - "search_engine.curation.compile": emitted once per relation compile when curation state is present.
+    #   Payload keys:
+    #   - :pinned_count [Integer]
+    #   - :hidden_count [Integer]
+    #   - :has_override_tags [Boolean]
+    #   - :filter_curated_hits [true,false,nil]
+    # - "search_engine.curation.conflict": emitted when overlaps or limits are detected; at most once per compile.
+    #   Payload keys:
+    #   - :type [Symbol] one of :overlap, :limit_exceeded
+    #   - :count [Integer]
+    #   - :limit [Integer, optional] present when type==:limit_exceeded
     #   # See also: docs/presets.md#observability
     # Measure a block and attach duration_ms to payload.
     # @param event [String]

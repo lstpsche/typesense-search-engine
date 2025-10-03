@@ -2150,7 +2150,7 @@ module SearchEngine
     end
 
     def curated_indices_for_current_result
-      @__result_memo.to_a.each_with_index.select do |obj, idx|
+      @__result_memo.to_a.each_with_index.select do |obj, _idx|
         obj.respond_to?(:curated_hit?) && obj.curated_hit?
       end.map(&:last)
     end

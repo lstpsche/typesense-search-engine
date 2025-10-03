@@ -146,6 +146,7 @@ module SearchEngine
         parts.concat(url_parts(p))
         parts.concat(selection_parts(p)) unless multi
         parts.concat(preset_parts(p)) unless multi
+        parts.concat(curation_parts(p)) unless multi
 
         parts.concat(param_parts(p)) if include_params && !multi
 
@@ -448,6 +449,29 @@ module SearchEngine
       end
       private_class_method :preset_parts
 
+      # Compact curation parts for text logs
+      def self.curation_parts(payload)
+        pcount = (payload[:curation_pinned_count] || 0).to_i
+        hcount = (payload[:curation_hidden_count] || 0).to_i
+        fflag  = if payload.key?(:curation_filter_flag)
+                   payload[:curation_filter_flag].nil? ? '∅' : payload[:curation_filter_flag]
+                 end
+        has_tags = payload[:curation_has_override_tags] ? true : false
+        seg = ["cu=p:#{pcount}|h:#{hcount}"]
+        seg << "f:#{fflag}" unless fflag.nil?
+        seg << "t:#{has_tags ? 1 : 0}"
+
+        parts = [seg.join('|')]
+        if payload[:curation_conflict_type]
+          type = payload[:curation_conflict_type].to_s
+          parts << "cf=#{type}"
+        end
+        parts
+      rescue StandardError
+        []
+      end
+      private_class_method :curation_parts
+
       # Map a Symbol severity to Logger integer constant.
       def self.map_level(level)
         case level.to_s
@@ -526,7 +550,13 @@ module SearchEngine
             'preset_pruned_keys' => begin
               arr = Array(payload[:preset_pruned_keys])
               arr.empty? ? nil : arr.map(&:to_s)
-            end
+            end,
+            'curation_pinned_count' => payload[:curation_pinned_count],
+            'curation_hidden_count' => payload[:curation_hidden_count],
+            'curation_has_override_tags' => payload[:curation_has_override_tags],
+            'curation_filter_flag' => (payload.key?(:curation_filter_flag) ? payload[:curation_filter_flag] : nil),
+            'curation_conflict_type' => payload[:curation_conflict_type],
+            'curation_conflict_count' => payload[:curation_conflict_count]
           }
           # Grouping fields at top-level when present
           h['group_by'] = params_hash[:group_by] if params_hash.key?(:group_by)

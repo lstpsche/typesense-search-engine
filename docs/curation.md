@@ -161,4 +161,39 @@ rel.to_typesense_params
 # }
 ```
 
+Observability
+-------------
+
+- Events (counts/flags only; redacted):
+  - `search_engine.curation.compile` — emitted once per compile when curation state is present
+    - Payload: `pinned_count`, `hidden_count`, `has_override_tags`, `filter_curated_hits`
+  - `search_engine.curation.conflict` — emitted when overlaps or limits are detected; at most once per compile
+    - Payload: `type` (`:overlap`|`:limit_exceeded`), `count`, optional `limit`
+
+- Compact logging subscriber:
+  - Text token appended to single-search lines: `cu=p:<pinned>|h:<hidden>|f:<flag>|t:<tags>`; when present, also `cf=<type>`
+  - JSON keys: `curation_pinned_count`, `curation_hidden_count`, `curation_has_override_tags`, `curation_filter_flag`, optional `curation_conflict_type`, `curation_conflict_count`
+
+- Examples (no IDs/tags shown):
+  - Text: `[se.search] collection=products status=200 duration=12.3ms cu=p:2|h:1|f:false|t:1`
+  - JSON: `{ "event":"search", "collection":"products", "curation_pinned_count":2, "curation_hidden_count":1, "curation_has_override_tags":true, "curation_filter_flag":false }`
+
+```mermaid
+sequenceDiagram
+  participant R as Relation
+  participant C as Compiler
+  participant I as Instrumentation
+  participant L as Log Subscriber
+
+  R->>C: to_typesense_params()
+  C->>C: Encode curation params & counts
+  C-->>I: instrument "search_engine.curation.compile" {counts, flags}
+  Note right of I: redacted — no IDs/tags
+  C-->>I: instrument "search_engine.curation.conflict" {type, count, limit?}
+  C-->>L: search log context
+  L->>L: append cu=p:…|h:…|f:…|t:… (text) / JSON fields
+```
+
+Backlinks: [Index](./index.md) · [Relation](./relation.md) · [Observability](./observability.md)
+
 [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md)
