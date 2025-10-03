@@ -36,7 +36,7 @@ r2.empty?     #=> false
 - **all**: returns the relation itself (parity with AR).
 - **where(*args)**: add filters. Accepts Hash, String/Symbol, arrays thereof.
 - **order(value)**: add order expressions. Accepts Hash or String.
-- **select(*fields)**: add selected fields; deduplicates while preserving order.
+- **select(*fields)** / **exclude(*fields)** / **reselect(*fields)**: field selection DSL. See [Field Selection](./field_selection.md).
 - **limit(n)**, **offset(n)**, **page(n)**, **per(n)**: numeric setters; coerced with validation (see below).
 - **options(opts = {})**: shallow-merge additional options for future adapters.
 - **empty?**: true when state equals the default empty state.
@@ -120,7 +120,7 @@ SearchEngine::Product
 ```
 
 - **order(value)**: accepts a Hash like `{ field: :asc, other: :desc }` or a String like `"field:asc,other:desc"`. Directions are case-insensitive and normalized to `asc`/`desc`. Duplicate fields are de-duplicated with last-wins semantics.
-- **select(*fields)**: accepts symbols/strings or arrays; trims and de-duplicates preserving first occurrence. If the model declares attributes, unknown fields raise.
+- **select(*fields)**: accepts symbols/strings or arrays; trims and de-duplicates preserving first occurrence. If the model declares attributes, unknown fields raise. See [Field Selection](./field_selection.md).
 - **limit(n) / offset(n)**: numeric. `limit >= 1`, `offset >= 0`.
 - **page(n) / per(n)**: numeric. `page >= 1`, `per >= 1`. The `per(n)` method writes to `per_page` internally.
 
@@ -162,7 +162,7 @@ Dedupe behavior: **order last-wins by field**, **select first-wins**.
 | `ast: [..]`                     | `filter_by`        | compiled via Compiler; preferred |
 | `filters: [..]`                 | `filter_by`        | joined with ` && ` (fallback) |
 | `orders: [..]`                  | `sort_by`          | comma-joined |
-| `select: [..]`                  | `include_fields`   | comma-joined |
+| `select: [..]` + `exclude: [..]`| `include_fields`/`exclude_fields` | precedence rules apply |
 | `page` / `per_page`             | `page`, `per_page` | if present, they win |
 | `limit` / `offset`              | `page`, `per_page` | fallback: `per_page = limit`; `page = (offset / limit).floor + 1` |
 | `options[:q]` or default "*"    | `q`                | always present |

@@ -22,6 +22,10 @@ module SearchEngine
       # Nested include_fields selection state
       select_nested: {}.freeze,           # { assoc(Symbol) => [field(String), ...] }
       select_nested_order: [].freeze,     # [assoc(Symbol), ...] first-mention order
+      # Exclude fields state (root + nested)
+      exclude: [].freeze,
+      exclude_nested: {}.freeze,          # { assoc(Symbol) => [field(String), ...] }
+      exclude_nested_order: [].freeze,    # [assoc(Symbol), ...] first-mention order
       joins:   [].freeze,
       limit:   nil,
       offset:  nil,
@@ -170,6 +174,47 @@ module SearchEngine
       select(*fields)
     end
 
+    # Exclude a subset of fields from the final selection.
+    #
+    # Accepts the same shapes as {#select}: base symbols/strings and nested hashes
+    # keyed by association => [fields]. Entries are normalized, deduplicated, and
+    # merged immutably into exclude stores.
+    #
+    # @param fields [Array<Symbol,String,Hash,Array>]
+    # @return [SearchEngine::Relation]
+    # @raise [ArgumentError] when inputs are invalid
+    # @see #select
+    def exclude(*fields)
+      normalized = normalize_select_input(fields, context: 'excluding fields')
+      spawn do |s|
+        # Base excludes: first-mention order preserved
+        existing_base = Array(s[:exclude])
+        merged_base = (existing_base + normalized[:base]).each_with_object([]) do |f, acc|
+          acc << f unless acc.include?(f)
+        end
+        s[:exclude] = merged_base
+
+        # Nested excludes: preserve assoc order by first mention
+        existing_nested = s[:exclude_nested] || {}
+        existing_order = Array(s[:exclude_nested_order])
+
+        normalized[:nested_order].each do |assoc|
+          new_fields = Array(normalized[:nested][assoc])
+          next if new_fields.empty?
+
+          old_fields = Array(existing_nested[assoc])
+          merged_fields = (old_fields + new_fields).each_with_object([]) do |name, acc|
+            acc << name unless acc.include?(name)
+          end
+          existing_nested = existing_nested.merge(assoc => merged_fields)
+          existing_order << assoc unless existing_order.include?(assoc)
+        end
+
+        s[:exclude_nested] = existing_nested
+        s[:exclude_nested_order] = existing_order
+      end
+    end
+
     # Group results by a single field with optional limit and missing values policy.
     #
     # Stores normalized immutable grouping state under `@state[:grouping]`.
@@ -233,6 +278,10 @@ module SearchEngine
         s[:select] = normalized[:base]
         s[:select_nested] = normalized[:nested]
         s[:select_nested_order] = normalized[:nested_order]
+        # Clear excludes when reselecting (explicit reset)
+        s[:exclude] = []
+        s[:exclude_nested] = {}
+        s[:exclude_nested_order] = []
       end
     end
 
@@ -300,6 +349,9 @@ module SearchEngine
             s[:select] = []
             s[:select_nested] = {}
             s[:select_nested_order] = []
+            s[:exclude] = []
+            s[:exclude_nested] = {}
+            s[:exclude_nested_order] = []
           when :limit
             s[:limit] = nil
           when :offset
@@ -395,8 +447,7 @@ module SearchEngine
       sort_str = compiled[:sort_by]
       parts << %(sort="#{truncate_for_inspect(sort_str)}") if sort_str && !sort_str.to_s.empty?
 
-      selected = Array(@state[:select])
-      parts << "select=#{selected.length}" unless selected.empty?
+      append_selection_inspect_parts(parts, compiled)
 
       if (g = @state[:grouping])
         gparts = ["group_by=#{g[:field]}"]
@@ -449,9 +500,13 @@ module SearchEngine
       sort_str = compiled_sort_by(orders)
       params[:sort_by] = sort_str if sort_str
 
-      # Field selection (nested first, then base)
+      # Field selection (nested first, then base), honoring excludes
       include_str = compile_include_fields_string
       params[:include_fields] = include_str unless include_str.to_s.strip.empty?
+
+      # Exclude fields when provided and not fully derivable via include
+      exclude_str = compile_exclude_fields_string
+      params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
 
       # Pagination
       pagination = compute_pagination
@@ -618,9 +673,7 @@ module SearchEngine
         lines << "  group: #{gparts.join(' ')}"
       end
 
-      if params[:include_fields] && !params[:include_fields].to_s.strip.empty?
-        lines << "  select: #{params[:include_fields]}"
-      end
+      append_selection_explain_lines(lines, params)
 
       add_pagination_line!(lines, params)
 
@@ -885,6 +938,12 @@ module SearchEngine
         normalized[:select_nested] = (value || {})
       when :select_nested_order
         normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+      when :exclude
+        normalized[:exclude] = normalize_select(Array(value))
+      when :exclude_nested
+        normalized[:exclude_nested] = (value || {})
+      when :exclude_nested_order
+        normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
       when :joins
         normalized[:joins] = normalize_joins(Array(value))
       when :limit
@@ -1080,7 +1139,7 @@ module SearchEngine
 
     # Extended normalization supporting nested association selections.
     # Returns a Hash with keys: :base (Array<String>), :nested (Hash<Symbol,Array<String>>), :nested_order (Array<Symbol>).
-    def normalize_select_input(fields) # rubocop:disable Metrics/AbcSize
+    def normalize_select_input(fields, context: 'selecting fields') # rubocop:disable Metrics/AbcSize
       list = Array(fields).flatten.compact
       return { base: [], nested: {}, nested_order: [] } if list.empty?
 
@@ -1094,7 +1153,7 @@ module SearchEngine
         key = assoc.to_sym
         @klass.join_for(key)
         # Enforce that the relation has applied the join before selecting nested fields
-        SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, key, context: 'selecting fields')
+        SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, key, context: context)
 
         items = case values
                 when Array then values
@@ -1281,20 +1340,67 @@ module SearchEngine
 
     # Build include_fields string with nested association segments first, then base fields.
     def compile_include_fields_string
-      nested_order = Array(@state[:select_nested_order])
-      nested_map = @state[:select_nested] || {}
+      # Start from explicit selections
+      include_nested_map = @state[:select_nested] || {}
+      include_base = Array(@state[:select])
+
+      # Apply excludes if present (only to trim explicit includes)
+      exclude_base = Array(@state[:exclude])
+      exclude_nested_map = @state[:exclude_nested] || {}
+
+      # Base: only emit when include list is non-empty
+      base_segment = include_base.empty? ? [] : (include_base - exclude_base)
+
+      # Nested: only emit for associations with explicit includes; trim by nested excludes
+      applied_joins = joins_list
+      nested_segments = []
+      Array(@state[:select_nested_order]).each do |assoc|
+        next unless applied_joins.include?(assoc)
+
+        inc_fields = Array(include_nested_map[assoc])
+        next if inc_fields.empty?
+
+        exc_fields = Array(exclude_nested_map[assoc])
+        fields = (inc_fields - exc_fields).map(&:to_s).reject(&:empty?)
+        next if fields.empty?
+
+        nested_segments << "$#{assoc}(#{fields.join(',')})"
+      end
 
       segments = []
-      nested_order.each do |assoc|
-        fields = Array(nested_map[assoc]).map(&:to_s).reject(&:empty?)
+      segments.concat(nested_segments)
+      segments.concat(base_segment) unless base_segment.empty?
+
+      segments.join(',')
+    end
+
+    # Build exclude_fields string with nested association segments first, then base fields.
+    # Emitted only for parts we cannot derive into include_fields (e.g., no attributes available).
+    def compile_exclude_fields_string
+      exclude_nested_order = Array(@state[:exclude_nested_order])
+      exclude_nested_map = @state[:exclude_nested] || {}
+      exclude_base = Array(@state[:exclude])
+
+      # If includes are present for base, excludes are already applied via include_fields
+      include_base = Array(@state[:select])
+      base_part = include_base.empty? ? exclude_base : []
+
+      segments = []
+
+      # Nested excludes: only emit when there is no explicit include for that assoc
+      include_nested_map = @state[:select_nested] || {}
+
+      # Preserve order by first mention in excludes (stable)
+      exclude_nested_order.each do |assoc|
+        next if Array(include_nested_map[assoc]).any?
+
+        fields = Array(exclude_nested_map[assoc]).map(&:to_s).reject(&:empty?)
         next if fields.empty?
 
         segments << "$#{assoc}(#{fields.join(',')})"
       end
 
-      base = Array(@state[:select])
-      segments.concat(base) unless base.empty?
-
+      segments.concat(base_part) unless base_part.empty?
       segments.join(',')
     end
 
@@ -1456,6 +1562,25 @@ module SearchEngine
       elsif per
         lines << "  page/per: /#{per}"
       end
+    end
+
+    def append_selection_inspect_parts(parts, compiled)
+      selected_len = Array(@state[:select]).length
+      parts << "select=#{selected_len}" unless selected_len.zero?
+
+      inc_str = compiled[:include_fields]
+      parts << %(sel="#{truncate_for_inspect(inc_str)}") if inc_str && !inc_str.to_s.empty?
+      exc_str = compiled[:exclude_fields]
+      parts << %(xsel="#{truncate_for_inspect(exc_str)}") if exc_str && !exc_str.to_s.empty?
+    end
+
+    def append_selection_explain_lines(lines, params)
+      if params[:include_fields] && !params[:include_fields].to_s.strip.empty?
+        lines << "  select: #{params[:include_fields]}"
+      end
+      return lines unless params[:exclude_fields] && !params[:exclude_fields].to_s.strip.empty?
+
+      lines << "  exclude: #{params[:exclude_fields]}"
     end
 
     # Normalize and validate join names, preserving order and duplicates.
