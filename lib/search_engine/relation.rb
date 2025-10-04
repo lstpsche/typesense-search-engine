@@ -50,7 +50,8 @@ module SearchEngine
       use_synonyms: nil,
       use_stopwords: nil,
       # Ranking/typo tuning (nil when unset)
-      ranking: nil
+      ranking: nil,
+      hit_limits: {}.freeze
     }.freeze
 
     # Keys considered essential for :only preset mode.
@@ -843,6 +844,18 @@ module SearchEngine
 
       # Pagination
       pagination = compute_pagination
+      # Early limit (compiler mapping): Typesense has no canonical total-hits cap.
+      # Apply conservative fallback by adjusting per_page downward when it exceeds the limit.
+      hits_info = {}
+      if (hl = @state[:hit_limits]) && hl[:early_limit]
+        if pagination.key?(:per_page) && pagination[:per_page].to_i > hl[:early_limit].to_i
+          pagination = pagination.merge(per_page: hl[:early_limit].to_i)
+          hits_info[:per_adjusted] = true
+        else
+          hits_info[:per_adjusted] = false
+        end
+        hits_info[:early_limit] = hl[:early_limit].to_i
+      end
       params[:page] = pagination[:page] if pagination.key?(:page)
       params[:per_page] = pagination[:per_page] if pagination.key?(:per_page)
 
@@ -973,6 +986,12 @@ module SearchEngine
 
       # Attach internal-only runtime flags preview for observability; stripped in client
       params[:_runtime_flags] = runtime_flags unless runtime_flags.empty?
+
+      # Attach internal-only hit limits preview for DX surfaces; stripped client-side before HTTP
+      if (hl = @state[:hit_limits])
+        hits_info[:max] = hl[:max].to_i if hl[:max]
+        params[:_hits] = hits_info unless hits_info.empty?
+      end
 
       params
     end
@@ -1298,6 +1317,15 @@ module SearchEngine
       keys.sort.map { |k| { key: k, reason: :locked_by_preset } }.freeze
     end
 
+    # Read-only hit limits state for debugging/explain.
+    # @return [Hash, nil] frozen hash { early_limit: Integer/nil, max: Integer/nil } or nil
+    def hit_limits
+      hl = @state[:hit_limits]
+      return nil if hl.nil?
+
+      hl.frozen? ? hl : hl.dup.freeze
+    end
+
     protected
 
     # Spawn a new relation with a deep-duplicated mutable state.
@@ -1413,6 +1441,8 @@ module SearchEngine
         normalized[:highlight] = normalize_highlight_input(value)
       when :ranking
         normalized[:ranking] = normalize_ranking_input(value || {})
+      when :hit_limits
+        normalized[:hit_limits] = normalize_hit_limits_input(value || {})
       end
     end
 
@@ -1920,6 +1950,8 @@ module SearchEngine
       if selection_ctx || facets_ctx
         result = SearchEngine::Result.new(result.raw, klass: @klass, selection: selection_ctx, facets: facets_ctx)
       end
+      # One-shot validator, executed once per materialization
+      enforce_hit_validator_if_needed!(result.found, collection: collection)
       @__result_memo = result
       @__loaded = true
       result
@@ -1944,7 +1976,9 @@ module SearchEngine
       url_opts.merge!(overrides) unless overrides.empty?
 
       result = client.search(collection: collection, params: minimal, url_opts: url_opts)
-      result.found.to_i
+      count = result.found.to_i
+      enforce_hit_validator_if_needed!(count, collection: collection)
+      count
     end
 
     # Compile relation state into Typesense search params.
@@ -2700,6 +2734,67 @@ module SearchEngine
       end
 
       out
+    end
+
+    # Normalize hit limits input into a compact Hash.
+    # Accepts keys :early_limit and :max and coerces to positive Integers when possible.
+    # @param value [Hash]
+    # @return [Hash]
+    def normalize_hit_limits_input(value)
+      unless value.is_a?(Hash)
+        raise SearchEngine::Errors::InvalidOption.new(
+          'InvalidOption: hit_limits expects a Hash of options',
+          doc: 'docs/hit_limits.md'
+        )
+      end
+
+      out = {}
+      if value.key?(:early_limit) || value.key?('early_limit')
+        raw = value[:early_limit] || value['early_limit']
+        begin
+          iv = Integer(raw)
+          out[:early_limit] = iv if iv.positive?
+        rescue StandardError
+          # ignore; validation occurs in the public chainers
+        end
+      end
+      if value.key?(:max) || value.key?('max')
+        raw = value[:max] || value['max']
+        begin
+          iv = Integer(raw)
+          out[:max] = iv if iv.positive?
+        rescue StandardError
+          # ignore; validation occurs in the public chainers
+        end
+      end
+      out
+    end
+
+    # Raise when total hits exceed the configured validator ceiling.
+    # @param total_hits [Integer]
+    # @param collection [String, nil]
+    # @return [void]
+    def enforce_hit_validator_if_needed!(total_hits, collection: nil)
+      hl = @state[:hit_limits]
+      return unless hl && hl[:max]
+
+      th = total_hits.to_i
+      max = hl[:max].to_i
+      return unless th > max && max.positive?
+
+      coll = collection || begin
+        collection_name_for_klass
+      rescue StandardError
+        nil
+      end
+
+      msg = "HitLimitExceeded: #{th} results exceed max=#{max}"
+      raise SearchEngine::Errors::HitLimitExceeded.new(
+        msg,
+        hint: 'Increase `validate_hits!(max:)` or narrow filters. Prefer `limit_hits(n)` to avoid work when supported.',
+        doc: 'docs/hit_limits.md#validation',
+        details: { total_hits: th, max: max, collection: coll, relation_summary: inspect }
+      )
     end
   end
 end

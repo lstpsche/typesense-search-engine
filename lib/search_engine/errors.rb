@@ -271,5 +271,19 @@ module SearchEngine
     #     doc: 'docs/highlighting.md#options'
     #   )
     class InvalidOption < Error; end
+
+    # Raised when a query result exceeds the configured post-fetch hits ceiling.
+    #
+    # Use this for actionable messages when {Relation#validate_hits!} is set and
+    # the backend reports a total hits count above the allowed maximum.
+    #
+    # @example
+    #   raise SearchEngine::Errors::HitLimitExceeded.new(
+    #     'HitLimitExceeded: 12000 results exceed max=10000',
+    #     hint: 'Increase `validate_hits!(max:)` or narrow your filters.',
+    #     doc: 'docs/hit_limits.md#validation',
+    #     details: { total_hits: 12_000, max: 10_000, collection: 'products' }
+    #   )
+    class HitLimitExceeded < Error; end
   end
 end

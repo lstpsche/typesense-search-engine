@@ -44,6 +44,7 @@ module SearchEngine
       def dry_run!
         params = to_typesense_params
         body = JSON.generate(redact_body(params))
+        # Include _hits preview if present (redaction already applied at param level)
         { url: compiled_url, body: body, url_opts: compiled_url_opts.freeze }
       end
 
@@ -67,6 +68,7 @@ module SearchEngine
         append_selection_explain_lines(lines, params)
         add_effective_selection_tokens!(lines)
         add_pagination_line!(lines, params)
+        append_hit_limits_line(lines, params)
         append_ranking_line(lines, params)
         lines << overview_line(params)
         append_conflicts_line(lines, params)
@@ -207,6 +209,21 @@ module SearchEngine
         parts << "prefix=#{params[:infix]}" if params[:infix]
 
         lines << "  ranking: #{parts.join(' ')}" unless parts.empty?
+      end
+
+      def append_hit_limits_line(lines, params)
+        hits = params[:_hits]
+        return unless hits.is_a?(Hash) && (hits[:early_limit] || hits[:max])
+
+        segs = []
+        segs << "early_limit=#{hits[:early_limit]}" if hits[:early_limit]
+        if hits[:per_adjusted] == true
+          segs << 'per_adjusted=true'
+        elsif hits.key?(:per_adjusted)
+          segs << 'per_adjusted=false'
+        end
+        segs << "validator_max=#{hits[:max]}" if hits[:max]
+        lines << "  hits: #{segs.join(' ')}" unless segs.empty?
       end
     end
 
