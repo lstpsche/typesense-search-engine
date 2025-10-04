@@ -198,6 +198,22 @@ module SearchEngine
       instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
+    # Perform a server health check.
+    # @return [Hash] Typesense health response (symbolized where applicable)
+    def health
+      ts = typesense
+      start = current_monotonic_ms
+      path = '/health'
+
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.health.retrieve
+      end
+
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
     # Bulk import JSONL documents into a collection using Typesense import API.
     #
     # @param collection [String] physical collection name

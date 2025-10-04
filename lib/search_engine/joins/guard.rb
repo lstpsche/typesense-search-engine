@@ -126,7 +126,6 @@ module SearchEngine
         msg += suggestion_suffix(suggestions)
         raise SearchEngine::Errors::UnknownJoinField.new(
           msg,
-          doc: 'docs/field_selection.md#guardrails',
           details: { assoc: assoc_name, field: fname }
         )
       end
