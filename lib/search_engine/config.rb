@@ -43,6 +43,8 @@ module SearchEngine
     #     are still validated). Defaults to true in development/test.
     # @!attribute [rw] multi_search_limit
     #   @return [Integer] maximum number of searches allowed in a single multi-search call (default: 50)
+    # @!attribute [rw] default_console_model
+    #   @return [Class, String, nil] default model used by console helpers (SE.q/SE.rel)
     attr_accessor :api_key,
                   :host,
                   :port,
@@ -57,7 +59,8 @@ module SearchEngine
                   :cache_ttl_s,
                   :strict_fields,
                   :multi_search_limit,
-                  :client
+                  :client,
+                  :default_console_model
 
     # Lightweight nested configuration for schema lifecycle.
     class SchemaConfig
@@ -414,7 +417,7 @@ module SearchEngine
       @selection = SelectionConfig.new
       @presets = PresetsConfig.new
       @curation = CurationConfig.new
-      nil
+      @default_console_model = nil
     end
 
     # Expose schema lifecycle configuration.
@@ -650,6 +653,9 @@ module SearchEngine
         cache_ttl_s: cache_ttl_s,
         strict_fields: strict_fields ? true : false,
         multi_search_limit: multi_search_limit,
+        default_console_model: (
+          default_console_model.respond_to?(:name) ? default_console_model.name : default_console_model
+        ),
         schema: schema_hash_for_to_h,
         indexer: indexer_hash_for_to_h,
         sources: sources_hash_for_to_h,
