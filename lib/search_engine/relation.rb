@@ -48,7 +48,9 @@ module SearchEngine
       highlight_snippet_threshold: nil,
       # Runtime flags: per-relation overrides for synonyms/stopwords
       use_synonyms: nil,
-      use_stopwords: nil
+      use_stopwords: nil,
+      # Ranking/typo tuning (nil when unset)
+      ranking: nil
     }.freeze
 
     # Keys considered essential for :only preset mode.
@@ -276,6 +278,72 @@ module SearchEngine
       spawn do |s|
         s[:preset_name] = effective
         s[:preset_mode] = sym_mode
+      end
+    end
+
+    # Fine-grained ranking & typo tuning. Merges immutably; last-writer wins for scalars,
+    # and weight hashes are merged with later keys overriding earlier ones.
+    #
+    # @param num_typos [Integer, String, nil] one of 0, 1, 2
+    # @param drop_tokens_threshold [Float, String, nil] 0.0..1.0 inclusive
+    # @param prioritize_exact_match [Boolean, String, Integer, nil] strict boolean
+    # @param query_by_weights [Hash{Symbol,String=>Integer,#to_i}, nil] weights per field (>= 0)
+    # @return [SearchEngine::Relation]
+    # @raise [SearchEngine::Errors::InvalidOption] when inputs are invalid
+    # @see docs/ranking.md
+    def ranking(num_typos: nil, drop_tokens_threshold: nil, prioritize_exact_match: nil, query_by_weights: nil)
+      normalized = normalize_ranking_input(
+        num_typos: num_typos,
+        drop_tokens_threshold: drop_tokens_threshold,
+        prioritize_exact_match: prioritize_exact_match,
+        query_by_weights: query_by_weights
+      )
+
+      spawn do |s|
+        current = s[:ranking] || {}
+        merged = current.dup
+        %i[num_typos drop_tokens_threshold prioritize_exact_match].each do |k|
+          merged[k] = normalized[k] unless normalized[k].nil?
+        end
+        if normalized.key?(:query_by_weights)
+          existing = current[:query_by_weights] || {}
+          merged[:query_by_weights] = existing.merge(normalized[:query_by_weights])
+        end
+        s[:ranking] = merged
+      end
+    end
+
+    # Control Typesense infix/prefix matching per relation via a simple enum.
+    # Accepts :disabled, :fallback, or :always. Maps to authoritative `infix` tokens
+    # ("off", "fallback", "always").
+    #
+    # @param mode [Symbol, String]
+    # @return [SearchEngine::Relation]
+    # @raise [SearchEngine::Errors::InvalidOption] when mode is unknown
+    # @since 0.1.0
+    # @example
+    #   SearchEngine::Product.prefix(:fallback)
+    def prefix(mode)
+      sym = mode.to_s.strip.downcase.to_sym
+      valid = {
+        disabled: 'off',
+        fallback: 'fallback',
+        always: 'always'
+      }
+      unless valid.key?(sym)
+        raise SearchEngine::Errors::InvalidOption.new(
+          "InvalidOption: unknown prefix mode #{mode.inspect}",
+          hint: 'Use :disabled, :fallback, or :always',
+          doc: 'docs/ranking.md#prefix',
+          details: { provided: mode, allowed: valid.keys }
+        )
+      end
+
+      token = valid[sym]
+      spawn do |s|
+        opts = (s[:options] || {}).dup
+        opts[:infix] = token
+        s[:options] = opts
       end
     end
 
@@ -810,6 +878,22 @@ module SearchEngine
       infix_val = option_value(opts, :infix) || cfg.default_infix
       params[:infix] = infix_val if infix_val
 
+      # Ranking & typo tuning — authoritative mapping
+      if (rk = @state[:ranking])
+        begin
+          plan = SearchEngine::RankingPlan.new(relation: self, query_by: params[:query_by], ranking: rk)
+          rparams = plan.params
+          params.merge!(rparams) unless rparams.empty?
+        rescue SearchEngine::Errors::Error
+          raise
+        rescue StandardError => error
+          raise SearchEngine::Errors::InvalidOption.new(
+            "InvalidOption: ranking options could not be compiled (#{error.class}: #{error.message})",
+            doc: 'docs/ranking.md#options'
+          )
+        end
+      end
+
       # Internal join context (for downstream components; may be stripped before HTTP)
       join_ctx = build_join_context(ast_nodes: ast_nodes, orders: orders)
       params[:_join] = join_ctx unless join_ctx.nil? || join_ctx.empty?
@@ -1327,6 +1411,8 @@ module SearchEngine
         normalized[:facet_queries] = Array(value).flatten.compact
       when :highlight
         normalized[:highlight] = normalize_highlight_input(value)
+      when :ranking
+        normalized[:ranking] = normalize_ranking_input(value || {})
       end
     end
 
@@ -2507,11 +2593,113 @@ module SearchEngine
       {
         fields: fields,
         full_fields: full_fields,
-        start_tag: start_tag && start_tag.to_s,
-        end_tag: end_tag && end_tag.to_s,
+        start_tag: start_tag&.to_s,
+        end_tag: end_tag&.to_s,
         affix_tokens: affix,
         snippet_threshold: snippet
       }
+    end
+
+    # Normalize ranking DSL inputs into a compact, frozen Hash.
+    # Validates domains and coerces types; does not validate field membership for weights.
+    # That validation is deferred to compile when the effective query_by is known.
+    def normalize_ranking_input(value) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
+      h = value || {}
+      unless h.is_a?(Hash)
+        raise SearchEngine::Errors::InvalidOption.new(
+          'InvalidOption: ranking expects a Hash of options',
+          hint: 'Use ranking(num_typos: 1, drop_tokens_threshold: 0.2,'\
+                'prioritize_exact_match: true, query_by_weights: { name: 2 })',
+          doc: 'docs/ranking.md#options'
+        )
+      end
+
+      out = {}
+
+      if h.key?(:num_typos) || h.key?('num_typos')
+        raw = h[:num_typos] || h['num_typos']
+        unless raw.nil?
+          begin
+            iv = Integer(raw)
+            unless [0, 1, 2].include?(iv)
+              raise SearchEngine::Errors::InvalidOption.new(
+                "InvalidOption: num_typos must be 0, 1, or 2 (got #{raw.inspect})",
+                doc: 'docs/ranking.md#options'
+              )
+            end
+            out[:num_typos] = iv
+          rescue ArgumentError, TypeError
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: num_typos must be an Integer in {0,1,2} (got #{raw.inspect})",
+              doc: 'docs/ranking.md#options'
+            )
+          end
+        end
+      end
+
+      if h.key?(:drop_tokens_threshold) || h.key?('drop_tokens_threshold')
+        raw = h[:drop_tokens_threshold] || h['drop_tokens_threshold']
+        unless raw.nil?
+          begin
+            fv = Float(raw)
+            unless fv >= 0.0 && fv <= 1.0 && fv.finite?
+              raise SearchEngine::Errors::InvalidOption.new(
+                "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
+                doc: 'docs/ranking.md#options'
+              )
+            end
+            out[:drop_tokens_threshold] = fv
+          rescue ArgumentError, TypeError
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
+              doc: 'docs/ranking.md#options'
+            )
+          end
+        end
+      end
+
+      if h.key?(:prioritize_exact_match) || h.key?('prioritize_exact_match')
+        raw = h[:prioritize_exact_match] || h['prioritize_exact_match']
+        out[:prioritize_exact_match] = raw.nil? ? nil : coerce_boolean_strict(raw, :prioritize_exact_match)
+      end
+
+      if h.key?(:query_by_weights) || h.key?('query_by_weights')
+        raw = h[:query_by_weights] || h['query_by_weights']
+        unless raw.nil?
+          unless raw.is_a?(Hash)
+            raise SearchEngine::Errors::InvalidOption.new(
+              'InvalidOption: query_by_weights must be a Hash of { field => Integer }',
+              doc: 'docs/ranking.md#weights'
+            )
+          end
+          normalized = {}
+          raw.each do |k, v|
+            key = k.to_s.strip
+            next if key.empty?
+
+            begin
+              w = Integer(v)
+            rescue ArgumentError, TypeError
+              raise SearchEngine::Errors::InvalidOption.new(
+                "InvalidOption: weight for #{k.inspect} must be an Integer >= 0",
+                doc: 'docs/ranking.md#weights',
+                details: { field: k, weight: v }
+              )
+            end
+            if w.negative?
+              raise SearchEngine::Errors::InvalidOption.new(
+                "InvalidOption: weight for #{k.inspect} must be >= 0",
+                doc: 'docs/ranking.md#weights',
+                details: { field: k, weight: v }
+              )
+            end
+            normalized[key] = w
+          end
+          out[:query_by_weights] = normalized
+        end
+      end
+
+      out
     end
   end
 end

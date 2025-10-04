@@ -67,6 +67,7 @@ module SearchEngine
         append_selection_explain_lines(lines, params)
         add_effective_selection_tokens!(lines)
         add_pagination_line!(lines, params)
+        append_ranking_line(lines, params)
         lines << overview_line(params)
         append_conflicts_line(lines, params)
         append_events_line(lines, params)
@@ -180,6 +181,32 @@ module SearchEngine
         segs << "max=#{mv}" if mv
         segs << "queries=#{fq}" if fq && !fq.to_s.strip.empty?
         lines << "  facets: #{segs.join(' ')}" unless segs.empty?
+      end
+
+      def append_ranking_line(lines, params)
+        rk = @state[:ranking]
+        has_ranking_param = rk ||
+                            params.key?(:query_by_weights) || params.key?(:num_typos) ||
+                            params.key?(:drop_tokens_threshold) || params.key?(:prioritize_exact_match) ||
+                            params.key?(:infix)
+        return unless has_ranking_param
+
+        parts = []
+        begin
+          plan = SearchEngine::RankingPlan.new(relation: self, query_by: params[:query_by], ranking: rk || {})
+          fields = plan.effective_query_by_fields
+          parts << "query_by=[#{fields.join(', ')}]" unless fields.empty?
+        rescue StandardError
+          # ignore
+        end
+
+        parts << "weights=#{params[:query_by_weights]}" if params[:query_by_weights]
+        parts << "num_typos=#{params[:num_typos]}" if params.key?(:num_typos)
+        parts << "drop_tokens_threshold=#{params[:drop_tokens_threshold]}" if params.key?(:drop_tokens_threshold)
+        parts << "prioritize_exact_match=#{params[:prioritize_exact_match]}" if params.key?(:prioritize_exact_match)
+        parts << "prefix=#{params[:infix]}" if params[:infix]
+
+        lines << "  ranking: #{parts.join(' ')}" unless parts.empty?
       end
     end
 

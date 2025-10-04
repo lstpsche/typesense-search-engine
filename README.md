@@ -71,6 +71,7 @@ MIT — see [LICENSE](./LICENSE).
 
 - Quickstart → [Installation](./docs/quickstart.md#install-the-gem), [Configure initializer](./docs/quickstart.md#configure-the-initializer)
 - DX → [Helpers & examples (`dry_run!`, `to_params_json`, `to_curl`)](./docs/dx.md#helpers--examples)
+- Ranking → [Ranking & typo tuning](./docs/ranking.md)
 - CLI → [Doctor flow](./docs/cli.md#doctor-flow)
 
 <!-- Badge references (placeholders) -->
