@@ -88,9 +88,17 @@ rel = SearchEngine::Book
   .where(authors: { last_name: "Rowling" })
   .order(authors: { last_name: :asc })
 rel.to_typesense_params
-# => { q: "*", query_by: "name, description", include_fields: "$authors(first_name)", filter_by: "$authors.last_name:=\"Rowling\"", sort_by: "$authors.last_name:asc", _join: { assocs: [:authors], fields_by_assoc: { authors: ["first_name"] }, referenced_in: { include: [:authors], filter: [:authors], sort: [:authors] } } }
+# => { q: "*", query_by: "name, description", include_fields: "$authors(first_name)", filter_by: "$authors.last_name:\"Rowling\"", sort_by: "$authors.last_name:asc", _join: { assocs: [:authors], fields_by_assoc: { authors: ["first_name"] }, referenced_in: { include: [:authors], filter: [:authors], sort: [:authors] } } }
 ```
 
 Note: the `:_join` section is an internal context map for downstream components and may be removed by the HTTP layer before sending the request. See [Joins](./joins.md) for details.
 
 See also: [Relation](./relation.md) · [Query DSL](./query_dsl.md) · [Joins](./joins.md)
+
+## Troubleshooting
+
+- **Unsupported node**: Use `AST::Raw` for adapter‑specific fragments not supported by `filter_by`.
+- **Unexpected quoting**: All quoting is centralized in the sanitizer; ensure values are passed as plain Ruby objects.
+- **Complex precedence**: Wrap with `AST.group` to force explicit parentheses.
+
+Backlinks: [README](../README.md), [Query DSL](./query_dsl.md)

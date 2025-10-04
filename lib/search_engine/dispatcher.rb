@@ -17,9 +17,19 @@ module SearchEngine
     # @param metadata [Hash] small, JSON-safe tracing values
     # @return [Hash] descriptor of the action performed
     def self.dispatch!(klass, partition:, into: nil, mode: nil, queue: nil, metadata: {})
-      raise SearchEngine::Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
+      unless klass.is_a?(Class)
+        raise SearchEngine::Errors::InvalidParams.new(
+          'klass must be a Class',
+          doc: 'docs/indexer.md#troubleshooting',
+          details: { arg: :klass }
+        )
+      end
       unless klass.ancestors.include?(SearchEngine::Base)
-        raise SearchEngine::Errors::InvalidParams, 'klass must inherit from SearchEngine::Base'
+        raise SearchEngine::Errors::InvalidParams.new(
+          'klass must inherit from SearchEngine::Base',
+          doc: 'docs/indexer.md#troubleshooting',
+          details: { klass: klass.to_s }
+        )
       end
 
       effective_mode = resolve_mode(mode)

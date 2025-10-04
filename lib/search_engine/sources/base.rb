@@ -44,6 +44,11 @@ module SearchEngine
         if defined?(SearchEngine::Observability)
           payload[:adapter_options] = SearchEngine::Observability.redact(adapter_options)
         end
+        if error.respond_to?(:to_h)
+          h = error.to_h
+          payload[:error_hint] = h[:hint] if h[:hint]
+          payload[:error_doc] = h[:doc] if h[:doc]
+        end
         SearchEngine::Instrumentation.instrument('search_engine.source.error', payload) {}
       end
 

@@ -69,4 +69,11 @@ Public errors are exposed via `SearchEngine::Errors`:
 
 See `lib/search_engine/errors.rb` for details.
 
+#### Troubleshooting
+
+- **Timeout / Connection**: Check host/port/protocol and network reachability.
+- **API errors**: Inspect `status` and server body. 4xx are not retried; 5xx/429 may be transient.
+
+Backlinks: [README](../README.md)
+
 See [Observability](./observability.md) for emitted events and compact logging.

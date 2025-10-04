@@ -101,24 +101,13 @@ Misuse → behavior:
   - Raises `SearchEngine::Errors::UnsupportedGroupField`.
   - Example: `UnsupportedGroupField: grouping supports base fields only (got "$authors.last_name")`
 
-Warnings (non-fatal, can be suppressed via `SearchEngine.config.grouping.warn_on_ambiguous = false`):
+### Troubleshooting
 
-- Grouping with `order`: `order` affects hits, not group ordering; groups follow engine ranking. Use filters to control which items appear as the first hit per group.
-- Grouping by a field that is omitted from `include_fields`: Consider including the field or read it from `Group#key`.
-- `missing_values: true` while filters exclude `null` for the grouping field: May produce fewer "missing" groups than expected.
+- **Unknown field**: Use a base field declared via `attribute` on the model. Grouping does not support joined fields.
+- **Invalid limit**: Provide a positive integer; omit to use server default.
+- **Missing values flag**: Must be true/false; `nil` omits the parameter.
 
-Examples:
-
-```ruby
-# Raises unknown field with suggestion
-SearchEngine::Product.group_by(:brand)
-
-# Raises invalid limit
-SearchEngine::Product.group_by(:brand_id, limit: 0)
-
-# Warns about order not affecting group ordering
-SearchEngine::Product.group_by(:brand_id).order(updated_at: :desc).to_typesense_params
-```
+Backlinks: [README](../README.md), [Field Selection](./field_selection.md)
 
 ## Observability
 

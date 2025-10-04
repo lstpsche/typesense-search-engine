@@ -43,3 +43,16 @@ Provide a thin, mountless layer around Typesense for Rails apps. No routes/contr
 
 ## License
 See [LICENSE](./LICENSE).
+
+### Troubleshooting
+
+For common errors and fixes, see:
+- [Query DSL → Troubleshooting](./docs/query_dsl.md#operators)
+- [Compiler → Troubleshooting](./docs/compiler.md#troubleshooting)
+- [Field Selection → Troubleshooting](./docs/field_selection.md#guardrails)
+- [JOINs → Troubleshooting](./docs/joins.md#troubleshooting)
+- [Grouping → Troubleshooting](./docs/grouping.md#troubleshooting)
+- [Presets → Troubleshooting](./docs/presets.md#troubleshooting)
+- [Curation → Troubleshooting](./docs/curation.md#troubleshooting)
+- [Indexer → Troubleshooting](./docs/indexer.md#troubleshooting)
+- [Schema → Troubleshooting](./docs/schema.md#troubleshooting)

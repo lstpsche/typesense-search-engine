@@ -174,8 +174,11 @@ module SearchEngine
         args = Array(args)
         m = template.match(/\A\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=|!=|>=|<=|>|<|IN|NOT\s+IN|MATCHES|PREFIX)\s*\?\s*\z/i)
         unless m
-          raise SearchEngine::Errors::InvalidOperator,
-                "invalid template '#{template}'. Supported: =, !=, >, >=, <, <=, IN, NOT IN, MATCHES, PREFIX"
+          raise SearchEngine::Errors::InvalidOperator.new(
+            "invalid template '#{template}'. Supported: =, !=, >, >=, <, <=, IN, NOT IN, MATCHES, PREFIX",
+            doc: 'docs/query_dsl.md#troubleshooting',
+            details: { template: template }
+          )
         end
 
         field_raw = m[1]
@@ -254,8 +257,11 @@ module SearchEngine
       def ensure_placeholder_arity!(needed, provided, template)
         return if needed == provided
 
-        raise SearchEngine::Errors::InvalidOperator,
-              "expected #{needed} args for #{needed} placeholders in template '#{template}', got #{provided}."
+        raise SearchEngine::Errors::InvalidOperator.new(
+          "expected #{needed} args for #{needed} placeholders in template '#{template}', got #{provided}.",
+          doc: 'docs/query_dsl.md#troubleshooting',
+          details: { needed: needed, provided: provided, template: template }
+        )
       end
 
       def safe_attributes_map(klass)
@@ -303,8 +309,11 @@ module SearchEngine
       def ensure_non_empty_values!(values, field:, klass:)
         return if values.is_a?(Array) && !values.empty?
 
-        raise SearchEngine::Errors::InvalidType,
-              invalid_type_message(field: field, klass: klass, expectation: 'a non-empty Array', got: values)
+        raise SearchEngine::Errors::InvalidType.new(
+          invalid_type_message(field: field, klass: klass, expectation: 'a non-empty Array', got: values),
+          doc: 'docs/query_dsl.md#troubleshooting',
+          details: { field: field, got_class: values.class.name }
+        )
       end
 
       def coerce_value_for_field(value, field:, klass:)
@@ -313,7 +322,22 @@ module SearchEngine
         rescue StandardError
           nil
         end
-        coerce_value(value, type_hint: type, field: field, klass: klass)
+        coerced = coerce_value(value, type_hint: type, field: field, klass: klass)
+        return coerced unless coerced.equal?(:__no_coercion__)
+
+        # If coerce_value returned :__no_coercion__, try to coerce based on type hint
+        case type
+        when :boolean
+          coerce_boolean(value, type)
+        when :time
+          coerce_time(value, type, field: field, klass: klass)
+        when :integer
+          coerce_numeric(value, type, field: field, klass: klass)
+        when :float, :decimal
+          coerce_numeric(value, type, field: field, klass: klass)
+        else
+          value # No specific coercion for this type hint
+        end
       end
 
       def coerce_value(value, type_hint: nil, field: nil, klass: nil)
@@ -336,8 +360,11 @@ module SearchEngine
         return true if lc == 'true'
         return false if lc == 'false'
 
-        raise SearchEngine::Errors::InvalidType,
-              invalid_type_message(field: nil, klass: nil, expectation: 'boolean', got: value)
+        raise SearchEngine::Errors::InvalidType.new(
+          invalid_type_message(field: nil, klass: nil, expectation: 'boolean', got: value),
+          doc: 'docs/query_dsl.md#troubleshooting',
+          details: { got: value }
+        )
       end
       private_class_method :coerce_boolean
 
@@ -352,8 +379,11 @@ module SearchEngine
               require 'time'
               return Time.parse(value).utc
             rescue StandardError
-              raise SearchEngine::Errors::InvalidType,
-                    invalid_type_message(field: field, klass: klass, expectation: 'time', got: value)
+              raise SearchEngine::Errors::InvalidType.new(
+                invalid_type_message(field: field, klass: klass, expectation: 'time', got: value),
+                doc: 'docs/query_dsl.md#troubleshooting',
+                details: { field: field, got: value }
+              )
             end
           end
         end
@@ -371,14 +401,20 @@ module SearchEngine
               int_val = Integer(value, 10)
               return int_val
             rescue StandardError
-              raise SearchEngine::Errors::InvalidType,
-                    invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value)
+              raise SearchEngine::Errors::InvalidType.new(
+                invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value),
+                doc: 'docs/query_dsl.md#troubleshooting',
+                details: { field: field, got: value }
+              )
             end
           end
 
           if value.is_a?(Numeric)
-            raise SearchEngine::Errors::InvalidType,
-                  invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value)
+            raise SearchEngine::Errors::InvalidType.new(
+              invalid_type_message(field: field, klass: klass, expectation: 'integer', got: value),
+              doc: 'docs/query_dsl.md#troubleshooting',
+              details: { field: field, got: value }
+            )
           end
 
           return :__no_coercion__
@@ -392,8 +428,11 @@ module SearchEngine
             begin
               Float(value)
             rescue StandardError
-              raise SearchEngine::Errors::InvalidType,
-                    invalid_type_message(field: field, klass: klass, expectation: 'numeric', got: value)
+              raise SearchEngine::Errors::InvalidType.new(
+                invalid_type_message(field: field, klass: klass, expectation: 'numeric', got: value),
+                doc: 'docs/query_dsl.md#troubleshooting',
+                details: { field: field, got: value }
+              )
             end
             return value.to_f
           end
@@ -495,8 +534,11 @@ module SearchEngine
         # When enforcing applied joins, ensure relation has the association
         return if joins.nil? || Array(joins).include?(assoc_name)
 
-        raise SearchEngine::Errors::JoinNotApplied,
-              "Call .joins(:#{assoc_name}) before filtering/sorting on #{assoc_name} fields"
+        raise SearchEngine::Errors::JoinNotApplied.new(
+          "Call .joins(:#{assoc_name}) before filtering/sorting on #{assoc_name} fields",
+          doc: 'docs/joins.md#troubleshooting',
+          details: { assoc: assoc_name, used_for: 'filtering' }
+        )
       end
     end
   end

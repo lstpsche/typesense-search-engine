@@ -217,7 +217,11 @@ module SearchEngine
 
         message = "Missing required fields: #{stats[:missing_required].sort.inspect} for #{klass.name} mapper."
         instrument_error(error_class: 'SearchEngine::Errors::InvalidParams', message: message)
-        raise SearchEngine::Errors::InvalidParams, message
+        raise SearchEngine::Errors::InvalidParams.new(
+          message,
+          doc: 'docs/indexer.md#troubleshooting',
+          details: { missing_required: stats[:missing_required].sort }
+        )
       end
 
       def ensure_no_unknowns!(stats)
@@ -228,7 +232,11 @@ module SearchEngine
           "#{stats[:extras_samples].sort.inspect} (set mapper.strict_unknown_keys)."
         ].join(' ')
         instrument_error(error_class: 'SearchEngine::Errors::InvalidField', message: message)
-        raise SearchEngine::Errors::InvalidField, message
+        raise SearchEngine::Errors::InvalidField.new(
+          message,
+          doc: 'docs/indexer.md#troubleshooting',
+          details: { extras: stats[:extras_samples].sort }
+        )
       end
 
       def build_report(stats, docs_size, batch_index, duration)
