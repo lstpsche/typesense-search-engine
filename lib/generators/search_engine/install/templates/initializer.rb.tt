@@ -1,0 +1,31 @@
+# frozen_string_literal: true
+
+# SearchEngine configuration — ENV-based defaults
+#
+# This initializer is idempotent and safe for local development. Keep secrets
+# out of code: prefer ENV variables for API keys and sensitive config.
+#
+# Next steps:
+# - Define a model under `app/models/search_engine/` (see Quickstart)
+# - Run the CLI doctor to verify connectivity and config
+# - Explore queries in `rails console` using SE helpers: `SE.q("milk")`
+#
+# Docs:
+# - Quickstart: docs/quickstart.md
+# - CLI (Doctor): docs/cli.md#doctor-flow
+# - DX helpers: docs/dx.md
+SearchEngine.configure do |c|
+  c.host = ENV.fetch('TYPESENSE_HOST', 'localhost')
+  c.port = Integer(ENV.fetch('TYPESENSE_PORT', 8108))
+  c.protocol = ENV.fetch('TYPESENSE_PROTOCOL', 'http')
+  # Read API key from ENV; do not hardcode secrets here.
+  c.api_key = ENV['TYPESENSE_API_KEY']
+
+  # Default fields used when query_by is not provided explicitly.
+  # Uncomment and customize to your schema.
+  # c.default_query_by = 'name, description'
+
+  # Optional: set a default console model for SE.q/SE.rel helpers.
+  # Accepts a constant or String name (e.g., 'SearchEngine::Product').
+  # c.default_console_model = nil
+end

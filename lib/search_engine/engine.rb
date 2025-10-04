@@ -76,5 +76,16 @@ module SearchEngine
         SearchEngine::OTel.start!
       end
     end
+
+    initializer 'search_engine.console_helpers' do
+      if defined?(Rails::Console) || $PROGRAM_NAME&.end_with?('console')
+        begin
+          require 'search_engine/console_helpers'
+          SearchEngine::ConsoleHelpers.install!
+        rescue LoadError
+          # no-op; helpers are optional
+        end
+      end
+    end
   end
 end
