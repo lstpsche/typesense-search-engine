@@ -59,6 +59,7 @@ flowchart LR
 ## DX
 
 - [DX](./dx.md) — `explain`, `to_params_json`, `to_curl`, `dry_run!`
+- [Ranking & typo tuning](./ranking.md)
 - [Debugging](./debugging.md)
 
 ## Testing
