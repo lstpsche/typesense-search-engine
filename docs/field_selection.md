@@ -159,7 +159,7 @@ Validation happens during chaining (after normalization, before mutating state) 
 - **UnknownJoinField**: nested attribute not declared on the given association.
 - **ConflictingSelection**: invalid/ambiguous shapes that cannot be normalized deterministically.
 
-Example (verbatim):
+Example:
 
 ```
 UnknownJoinField: :middle_name is not declared on association :authors for SearchEngine::Book

@@ -33,7 +33,7 @@ Inspect/explain:
 - `inspect` emits a compact token only when non-empty, e.g. `curation=p:[p_12,p_34]|h:[p_99]|tags:[homepage]|fch:false`
 - `explain` adds a concise curation summary and a conflicts line when overlaps/limits occur
 
-Insert (verbatim from earlier ticket):
+Insert:
 
 ```ruby
 # Pin two products to the top and hide one, with an override tag
@@ -74,7 +74,7 @@ flowchart TD
   G --> H
 ```
 
-Insert (verbatim mapping example):
+Insert:
 
 ```ruby
 rel = SearchEngine::Product
@@ -120,7 +120,7 @@ end
 
 Per-search independence: each `m.add` relation carries its own curation keys in its body. Pinned order is preserved; omission rules apply; `filter_curated_hits` is scoped per entry.
 
-Insert (verbatim multi-search example):
+Insert:
 
 ```ruby
 res = SearchEngine.multi_search do |m|
@@ -140,7 +140,7 @@ Materializers reuse the memoized single response and apply curation in-memory.
 - Counts: when filtering is on, `count` reflects the curated view size; `exists?` follows server totals. To check curated emptiness, use `count > 0`.
 - `explain` adds a curation summary and a conflicts line.
 
-Verbatim explain excerpt:
+Explain excerpt:
 
 ```
 Curation: pinned=2 hidden=1 filter_curated_hits=false override_tags=[homepage]

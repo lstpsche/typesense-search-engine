@@ -16,7 +16,7 @@ Presets are namespaced when enabled. The effective name is computed as `"#{names
 - **Reader**: `YourModel.default_preset_name` returns the effective name (or `nil` if none)
 
 ```ruby
-# Initializer (reused from earlier tickets)
+# Initializer
 SearchEngine.configure do |c|
   c.presets.enabled   = true
   c.presets.namespace = "prod"
@@ -136,7 +136,7 @@ Conflicts are detected only in `mode: :lock` and occur when a compiled chain key
 - Inspect: appends a compact token: `preset=prod_brand_curated(mode=lock; conflicts=filter_by,sort_by)`
 - Redaction: keys only; no raw values
 
-Verbatim example snippet:
+Example snippet:
 
 ```text
 Preset: prod_brand_curated (mode: lock)

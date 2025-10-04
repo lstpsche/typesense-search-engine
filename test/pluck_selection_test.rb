@@ -23,13 +23,13 @@ class PluckSelectionTest < Minitest::Test
     SearchEngine::Result.new(raw, klass: Product)
   end
 
-  def test_verbatim_example_missing_field_suggests_reselect
+  def test_example_missing_field_suggests_reselect
     rel = Product.all.select(:id)
     # Ensure no network is attempted when invalid
     rel.instance_variable_set(:@__client, stub_client_raising_if_called)
 
     error = assert_raises(SearchEngine::Errors::InvalidSelection) do
-      # Verbatim example from ticket
+      # Example:
       #
       # SearchEngine::Product.select(:id).pluck(:name)
       # raises InvalidSelection: field :name not in effective selection. Use `reselect(:id,:name)`.

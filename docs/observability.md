@@ -87,6 +87,33 @@ Redaction rules:
 
 For URL/cache knobs, see [Configuration](./configuration.md).
 
+### Logging
+
+Configure the structured logging subscriber and choose an output mode and sampling rate:
+
+```ruby
+SearchEngine.configure do |c|
+  c.logging = OpenStruct.new(mode: :compact, level: :info, sample: 1.0, logger: Rails.logger)
+end
+```
+
+- **Modes**: `:compact` (default) and `:json`
+- **Sampling**: `sample` in 0.0..1.0; set `0.0` to disable emission
+- **Redaction**: never logs raw filters or secrets; uses `Instrumentation.redact` and `params_preview`
+- **Correlation ID**: included as a short token per line/object
+
+Examples:
+
+```text
+[se.search] id=2a1f coll=products status=200 dur=32.1ms groups=— preset=— cur=0/0
+```
+
+```json
+{"event":"search_engine.search","cid":"2a1f","collection":"products","status":200,"duration_ms":32.1}
+```
+
+Backlinks: [Client](./client.md), [Presets](./presets.md), [Curation](./curation.md), [Event Taxonomy](./index.md)
+
 ### Enable compact logging
 
 One-liner subscriber that logs compact, single-line entries for both events:
