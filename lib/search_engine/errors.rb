@@ -68,7 +68,8 @@ module SearchEngine
       private
 
       def to_base_message
-        super.to_s
+        # Call Exception#to_s directly to avoid our overridden to_s suffix
+        Exception.instance_method(:to_s).bind_call(self).to_s
       end
 
       def sanitize_details(obj)
