@@ -6,6 +6,8 @@ Related: [Observability](./observability.md), [Field selection](./field_selectio
 
 Server‑side joins require lightweight association metadata declared on your model class. This page documents the model‑level DSL, the per‑class registry, how the relation compiles joined selections/filters/sorts, and the instrumentation emitted during compile.
 
+See example: `examples/demo_shop/app/controllers/books_controller.rb`.
+
 ## Overview
 
 - **Declare** associations on your model with `join :name, collection:, local_key:, foreign_key:`.

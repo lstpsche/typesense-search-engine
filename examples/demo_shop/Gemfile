@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+source 'https://rubygems.org'
+
+gem 'propshaft'
+gem 'puma'
+gem 'rails', '>= 7.0'
+gem 'sqlite3'
+
+# Use the local gem under development
+# Path is relative to this Gemfile location
+# examples/demo_shop -> repo root
+# Idempotent: safe to re-run bundler
+
+gem 'search_engine', path: '../..'

@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative '../config/boot'
+require_relative '../config/environment'
+
+puts 'Products count (found):'
+rel = SearchEngine::Product.all.per(3)
+puts rel.fetch_found_only
+
+puts 'Multi-search labels and found:'
+mr = SearchEngine.multi_search_result(common: { query_by: SearchEngine.config.default_query_by }) do |m|
+  m.add :products, SearchEngine::Product.all.per(2)
+  m.add :brands,   SearchEngine::Brand.all.per(2)
+end
+mr.each_label { |(label, res)| puts "  #{label}: #{res.found}" }

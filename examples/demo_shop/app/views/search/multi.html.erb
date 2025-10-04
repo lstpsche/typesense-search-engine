@@ -1,0 +1,25 @@
+<h1>Multi-search</h1>
+
+<form method="get" action="/search/multi">
+  <input type="text" name="q" value="<%= params[:q].to_s %>" placeholder="Query across products & brands" />
+  <button type="submit">Search</button>
+</form>
+
+<div style="display:flex; gap: 2rem;">
+  <div>
+    <h2>Products (<%= @multi[:products]&.found.to_i %>)</h2>
+    <ul>
+      <% Array(@multi[:products]).each do |p| %>
+        <li><%= p.instance_variable_get(:@name) || p.name rescue p.to_s %></li>
+      <% end %>
+    </ul>
+  </div>
+  <div>
+    <h2>Brands (<%= @multi[:brands]&.found.to_i %>)</h2>
+    <ul>
+      <% Array(@multi[:brands]).each do |b| %>
+        <li><%= b.instance_variable_get(:@name) || b.name rescue b.to_s %></li>
+      <% end %>
+    </ul>
+  </div>
+</div>
