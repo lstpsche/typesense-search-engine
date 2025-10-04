@@ -73,7 +73,7 @@ flowchart LR
 - Order is preserved and duplicates are not deduped by default; explicit chaining is honored.
 - For debugging, `rel.joins_list` returns the frozen array of association names in state.
 
-Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md) · [Field Selection](./field_selection.md)
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md#observability) · [Field Selection](./field_selection.md)
 
 ## Filtering and Ordering on Joined Fields
 

@@ -1,6 +1,6 @@
 [← Back to Index](./index.md) · [Schema](./schema.md) · [Indexer](./indexer.md)
 
-# CLI / Rake Tasks
+# CLI
 
 Operator-focused tasks for schema lifecycle and indexing. All tasks are thin facades over documented APIs with small, structured instrumentation.
 
@@ -76,7 +76,10 @@ flowchart TD
   D --> E[Summary & exit code]
 ```
 
-See also: [Configuration](./configuration.md) and [Observability](./observability.md) for logging and OTel.
+Backlinks: [Observability](./observability.md#opentelemetry), [Installation](./installation.md), [Configuration](./configuration.md)
+
+
+See also: [Configuration](./configuration.md) and [Observability](./observability.md#opentelemetry) for logging and OTel.
 
 ## Safety notes
 

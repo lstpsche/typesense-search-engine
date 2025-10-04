@@ -12,6 +12,8 @@ module SearchEngine
       # Return the request body JSON after compile, fully redacted.
       # @param pretty [Boolean] pretty-print with stable key ordering when true
       # @return [String]
+      # @since M8
+      # @see docs/dx.md
       def to_params_json(pretty: true)
         params = to_typesense_params
         redacted = redact_body(params)
@@ -25,6 +27,8 @@ module SearchEngine
 
       # Return a single-line curl command with redacted API key and JSON body.
       # @return [String]
+      # @since M8
+      # @see docs/dx.md
       def to_curl
         url = compiled_url
         body_json = JSON.generate(redact_body(to_typesense_params))
@@ -35,6 +39,8 @@ module SearchEngine
       # Returns a structured hash with URL and post-redaction body.
       # @return [Hash] { url:, body:, url_opts: }
       # @raise [SearchEngine::Errors::*] same validation errors as runtime path
+      # @since M8
+      # @see docs/dx.md
       def dry_run!
         params = to_typesense_params
         body = JSON.generate(redact_body(params))
@@ -45,6 +51,8 @@ module SearchEngine
       # Builds a redaction-aware summary without network I/O.
       # @param to [Symbol, nil]
       # @return [String]
+      # @since M8
+      # @see docs/dx.md#helpers-\u0026-examples
       def explain(to: nil)
         params = to_typesense_params
         lines = []

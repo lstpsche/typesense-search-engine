@@ -1,10 +1,10 @@
 [← Back to Observability](./observability.md) · [DX helpers](./dx.md) · [Client](./client.md)
 
-## Testing utilities
+# Testing utilities
 
 Test-only helpers to run the search layer fully offline and write ergonomic assertions against unified events and compiled params.
 
-### Quick start
+## Quick start
 
 - Enable the stub client in your test setup:
 
@@ -39,7 +39,7 @@ stub.enqueue_response(:search, ->(req) { { 'hits' => [], 'found' => 42, 'out_of'
 stub.enqueue_response(:multi_search, RuntimeError.new('boom'))
 ```
 
-### Event assertions
+## Event assertions
 
 Unified events are emitted via ActiveSupport::Notifications. Capture them for a block and assert.
 
@@ -67,15 +67,15 @@ expect(rel.to_params_json).to include("filter_by")
 
 See also: `Relation#to_params_json`, `Relation#to_curl`, and `Relation#dry_run!`.
 
-### Safety and redaction
+## Offline strategy & safety
 
 - Captured bodies and event payloads are redacted via the central helper.
 - No API keys, raw filter literals, or PII are stored; long strings are truncated.
 - A `redacted?` marker is present on captured request entries.
 
-### Parallel test safety
+## Parallel test safety
 
 - Internals are protected by a lightweight mutex.
 - Use `stub.reset!` between examples if needed.
 
-Backlinks: [Observability](./observability.md), [DX](./dx.md), [Client](./client.md)
+Backlinks: [Observability](./observability.md), [DX](./dx.md), [CLI](./cli.md), [Client](./client.md)

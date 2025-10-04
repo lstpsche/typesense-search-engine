@@ -17,12 +17,17 @@ module SearchEngine
   #
   # Modes: :compact (default) or :json. Supports sampling and opt-out via
   # sample: 0.0 or mode: nil.
+  #
+  # @since M8
+  # @see docs/observability.md#logging
   module LoggingSubscriber
     class << self
       # Install the subscriber in a reloader-safe and idempotent way.
       #
       # @param config [#mode,#level,#sample,#logger,nil]
       # @return [Object, nil] subscription handle
+      # @since M8
+      # @see docs/observability.md#logging
       def install!(config = nil)
         uninstall!
 
@@ -52,6 +57,8 @@ module SearchEngine
 
       # Uninstall previously installed subscriber.
       # @return [Boolean]
+      # @since M8
+      # @see docs/observability.md#logging
       def uninstall!
         return false unless defined?(ActiveSupport::Notifications)
         return false unless @handle

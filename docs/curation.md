@@ -2,6 +2,8 @@
 
 # Curation
 
+[See also: Observability](./observability.md#logging)
+
 Curate results by pinning or hiding specific IDs, optionally tagging with override tags, and optionally filtering hidden hits from the materialized view. Purely declarative; encoded as body params only.
 
 ## Overview

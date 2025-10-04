@@ -9,11 +9,16 @@ module SearchEngine
     # Public API: SearchEngine::CLI::Doctor.run
     #
     # Supports FORMAT env var (table/json) and redaction-aware details.
+    #
+    # @since M8
+    # @see docs/cli.md#doctor
     module Doctor
       class << self
         # Run all checks and print output to STDOUT.
         # Returns exit code (0 success, 1 failure).
         # @return [Integer]
+        # @since M8
+        # @see docs/cli.md#doctor
         def run
           runner = Runner.new
           result = runner.execute

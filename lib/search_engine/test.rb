@@ -9,6 +9,9 @@ module SearchEngine
   # - Framework adapters (RSpec matcher `emit_event`, Minitest assertions)
   #
   # These helpers are allocation-light, thread-safe, and never perform network I/O.
+  #
+  # @since M8
+  # @see docs/testing.md
   module Test
     class << self
       # Subscribe to `search_engine.*` for the duration of the block and return captured events.
@@ -17,6 +20,8 @@ module SearchEngine
       # @param name [String, Regexp, nil]
       # @yield block within which events are captured
       # @return [Array<Hash>]
+      # @since M8
+      # @see docs/testing.md#event-assertions
       def capture_events(name = nil)
         require 'active_support/notifications'
         pattern = name.is_a?(Regexp) ? name : /^search_engine\./

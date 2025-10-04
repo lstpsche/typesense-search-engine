@@ -14,6 +14,9 @@ module SearchEngine
     # Usage:
     #   SearchEngine::Notifications::CompactLogger.subscribe
     #   SearchEngine::Notifications::CompactLogger.unsubscribe
+    #
+    # @since M8
+    # @see docs/observability.md#logging
     class CompactLogger
       EVENT_SEARCH = 'search_engine.search'
       EVENT_MULTI  = 'search_engine.multi_search'
@@ -37,6 +40,8 @@ module SearchEngine
       # @param include_params [Boolean] when true, include whitelisted params for single-search
       # @param format [Symbol, nil] :kv or :json; defaults to config.observability.log_format
       # @return [Array<Object>] subscription handles that can be passed to {.unsubscribe}
+      # @since M8
+      # @see docs/observability.md#logging
       def self.subscribe(logger: default_logger, level: :info, include_params: false, format: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         return [] unless defined?(ActiveSupport::Notifications)
 
@@ -117,6 +122,8 @@ module SearchEngine
       # Unsubscribe a previous subscription set.
       # @param handle [Array<Object>, Object, nil] handles returned by {.subscribe}
       # @return [Boolean] true when unsubscribed
+      # @since M8
+      # @see docs/observability.md#logging
       def self.unsubscribe(handle = @last_handle)
         return false unless handle
 

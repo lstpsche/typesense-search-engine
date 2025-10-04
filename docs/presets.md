@@ -190,7 +190,7 @@ flowchart TD
   G --> H
 ```
 
-## Observability
+## Observability & troubleshooting
 
 Events (keys and counts only; values redacted elsewhere):
 
