@@ -426,19 +426,25 @@ module SearchEngine
       if error.respond_to?(:http_code)
         status = error.http_code
         body = parse_error_body(error)
-        err = Errors::Api.new("typesense api error: #{status}", status: status || 500, body: body)
+        err = Errors::Api.new(
+          "typesense api error: #{status}",
+          status: status || 500,
+          body: body,
+          doc: 'docs/client.md#errors',
+          details: { http_status: status, body: body.is_a?(String) ? body[0, 120] : body }
+        )
         instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: err.class.name)
         raise err
       end
 
       if timeout_error?(error)
         instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: Errors::Timeout.name)
-        raise Errors::Timeout, error.message
+        raise Errors::Timeout.new(error.message, doc: 'docs/client.md#errors', details: { op: method, path: path })
       end
 
       if connection_error?(error)
         instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: Errors::Connection.name)
-        raise Errors::Connection, error.message
+        raise Errors::Connection.new(error.message, doc: 'docs/client.md#errors', details: { op: method, path: path })
       end
 
       instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: error.class.name)

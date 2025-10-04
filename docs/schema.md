@@ -106,3 +106,10 @@ After a successful swap, older physicals that match the naming pattern and are n
 `SearchEngine::Schema.rollback(klass)` will swap the alias back to the most recent retained physical (behind the current). If no previous physical exists, it raises an error (e.g., when `keep_last` is 0). No collections are deleted during rollback.
 
 See also: [Client](./client.md), [Configuration](./configuration.md), and [Compiler](./compiler.md).
+
+## Troubleshooting
+
+- **Reindex step missing**: Provide a block to `apply!` or implement `klass.reindex_all_to(name)`.
+- **Retention errors**: Ensure `keep_last` is set appropriately; rollback requires a previous retained physical.
+
+Backlinks: [README](../README.md), [Indexer](./indexer.md)

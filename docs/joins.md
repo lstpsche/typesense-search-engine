@@ -139,37 +139,14 @@ Misuse scenarios are validated early with actionable errors and suggestions:
 - Multi‑hop paths (e.g. `$authors.publisher.name`) → `SearchEngine::Errors::UnsupportedJoinNesting`.
 - Duplicate selections/orders are deduped; first mention wins.
 
-Examples:
+### Troubleshooting
 
-```ruby
-# Using a missing association
-SearchEngine::Book.where(authors: { last_name: "Rowling" })
-# => raises InvalidJoin: association :authors is not declared on SearchEngine::Book (declare with `join :authors, ...`)
+- **Unknown association**: Declare it on the model via `join :name, collection:, local_key:, foreign_key:`.
+- **Join not applied**: Chain `.joins(:assoc)` before filtering/sorting/selecting nested fields.
+- **Unknown joined field**: Verify the target collection’s attributes and spelling; suggestions may be provided.
+- **Multi‑hop path**: Only `$assoc.field` is supported. Denormalize deeper paths first.
 
-# Joined field without applying join
-SearchEngine::Book.where(authors: { last_name: "Rowling" })
-# ^ when used via Relation, call .joins(:authors) first
-
-# Incomplete config
-SearchEngine::Book.joins(:authors)
-# => raises InvalidJoinConfig if either key is missing
-
-# Unknown joined field (best‑effort)
-SearchEngine::Book.joins(:authors).where(authors: { lats_name: "Rowling" })
-# => raises UnknownJoinField (did you mean :last_name?) when target attributes are known
-```
-
-Notes:
-- Suggestion strings are provided when the distance is small; otherwise omitted.
-- Field validation for joined collections is best‑effort and skipped when the target model is not registered.
-
-## FAQ
-
-- Inheritance: subclasses start with a snapshot of parent joins and can add their own. Overriding an existing name raises to avoid ambiguity.
-- Types: the normalized record stores `:name, :collection, :local_key, :foreign_key`. Future compiler passes may add type hints; the DSL remains unchanged.
-- Compiler usage: the compiler reads `joins_config`/`join_for` to determine target collection and key mapping for server‑side joins without loading foreign models.
-
----
+Backlinks: [README](../README.md), [Field Selection](./field_selection.md)
 
 ## Nested field selection for joined collections
 

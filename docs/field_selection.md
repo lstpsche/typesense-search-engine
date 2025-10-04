@@ -171,13 +171,11 @@ Notes:
 
 See also: [Relation](./relation.md), [JOINs](./joins.md), and [Materializers](./materializers.md#pluck--selection).
 
-## Observability
+## Troubleshooting
 
-- **Event**: `search_engine.selection.compile`
-- **Payload**: `{ include_count, exclude_count, nested_assoc_count }` — counts only; no field names
-- **Log token (text)**: `sel=I:<include>|X:<exclude>|N:<nested>`
-- **JSON keys**: `selection_include_count`, `selection_exclude_count`, `selection_nested_assoc_count`
-- **Redaction**: counts only; raw field names and raw query params are never logged
+- **Invalid selection on pluck**: Ensure the field is within the effective selection; either include it or remove it from excludes. Consider `reselect(:id,:name)`.
+- **Unknown nested field**: Verify the association is joined and the field exists on the target collection.
+- **Strict missing**: Disable `strict_missing` or adjust selection when hydrating strict.
 
-Backlinks: [Observability](./observability.md), [Relation](./relation.md), [JOINs](./joins.md), [Materializers](./materializers.md).
+Backlinks: [README](../README.md), [Query DSL](./query_dsl.md), [JOINs](./joins.md)
 

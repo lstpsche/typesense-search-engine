@@ -352,7 +352,12 @@ module SearchEngine
             'They may be excluded by selection or upstream Typesense mapping. ' \
             'Fix by adjusting select/exclude/reselect, relaxing strictness, or ' \
             'ensuring the mapping includes these fields.'
-      raise SearchEngine::Errors::MissingField, msg
+      raise SearchEngine::Errors::MissingField.new(
+        msg,
+        hint: 'Adjust select/exclude or disable strict_missing to avoid raising.',
+        doc: 'docs/field_selection.md#strict-vs-lenient-selection',
+        details: { requested: requested, present_keys: present_keys }
+      )
     end
   end
 end

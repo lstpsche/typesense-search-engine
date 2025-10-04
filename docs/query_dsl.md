@@ -174,3 +174,11 @@ Allowed example message:
 ```text
 InvalidField: unknown field :colour for SearchEngine::Product (did you mean :color?)
 ```
+
+## Troubleshooting
+
+- **Unknown field**: Ensure the field exists on your model via `attribute`. Did you mean a nearby name? See suggestions in the error.
+- **Operators**: Use only supported operators; for template fragments, ensure the number of `?` matches the provided args.
+- **Type errors**: Coercions follow attribute types; strings like "true"/"false" only coerce for boolean fields.
+
+Backlinks: [README](../README.md), [Compiler](./compiler.md), [Field Selection](./field_selection.md)

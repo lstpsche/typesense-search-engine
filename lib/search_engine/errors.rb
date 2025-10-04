@@ -7,8 +7,111 @@ module SearchEngine
   # underlying HTTP client or the Typesense gem's internal error types.
   module Errors
     # Base error for all SearchEngine failures.
+    # Carries optional structured metadata for enhanced DX.
+    #
+    # Keyword options are optional and backwards-compatible. Existing call sites
+    # that pass only a message remain valid.
+    #
+    # @!attribute [r] hint
+    #   @return [String, nil] short actionable suggestion (no secrets)
+    # @!attribute [r] doc
+    #   @return [String, nil] docs path with optional anchor (e.g., "docs/query_dsl.md#operators")
+    # @!attribute [r] details
+    #   @return [Object, nil] machine-readable context (JSON-serializable)
+    # @!attribute [r] code
+    #   @return [Symbol, nil] stable symbolic code when defined by subclasses
     # @abstract
-    class Error < StandardError; end
+    class Error < StandardError
+      attr_reader :hint, :doc, :details, :code
+
+      # @param message [String]
+      # @param hint [String, nil]
+      # @param doc [String, nil]
+      # @param details [Object, nil]
+      # @param code [Symbol, nil]
+      def initialize(message = nil, hint: nil, doc: nil, details: nil, code: nil, **_ignore)
+        super(message)
+        @hint = presence_or_nil(hint)
+        @doc = presence_or_nil(doc)
+        @details = sanitize_details(details)
+        @code = code
+      end
+
+      # Return a stable, redaction-aware hash for logging/telemetry.
+      # Keys are predictable for downstream processing.
+      # @return [Hash]
+      def to_h
+        base = {
+          type: self.class.name,
+          message: to_base_message,
+          hint: @hint,
+          doc: @doc,
+          details: @details
+        }
+        base[:code] = @code if @code
+        prune_nils(base)
+      end
+
+      # Preserve historic message but append a concise suffix when hint/doc present.
+      # Single-line for log friendliness.
+      # @return [String]
+      def to_s
+        base = to_base_message
+        suffix = []
+        suffix << "Hint: #{@hint}" if @hint
+        suffix << "see #{@doc}" if @doc
+        return base if suffix.empty?
+
+        "#{base} — #{suffix.join(' ')}"
+      end
+
+      private
+
+      def to_base_message
+        super.to_s
+      end
+
+      def sanitize_details(obj)
+        return nil if obj.nil?
+
+        if defined?(SearchEngine::Observability)
+          begin
+            red = SearchEngine::Observability.redact(obj)
+            return jsonable(red)
+          rescue StandardError
+            return jsonable(obj)
+          end
+        end
+
+        jsonable(obj)
+      end
+
+      def jsonable(obj)
+        case obj
+        when Hash
+          obj.each_with_object({}) { |(k, v), h| h[k.to_sym] = jsonable(v) }
+        when Array
+          obj.map { |v| jsonable(v) }
+        when Numeric, TrueClass, FalseClass, NilClass, String
+          obj
+        else
+          obj.to_s
+        end
+      end
+
+      def prune_nils(h)
+        h.each_with_object({}) do |(k, v), acc|
+          acc[k] = v unless v.nil?
+        end
+      end
+
+      def presence_or_nil(v)
+        return nil if v.nil?
+
+        s = v.to_s
+        s.strip.empty? ? nil : s
+      end
+    end
 
     # Raised when a request exceeds the configured timeout budget.
     #
@@ -36,8 +139,8 @@ module SearchEngine
       # @param msg [String]
       # @param status [Integer]
       # @param body [Object, nil]
-      def initialize(msg, status:, body: nil)
-        super(msg)
+      def initialize(msg, status:, body: nil, **kw)
+        super(msg, **kw)
         @status = status
         @body = body
       end

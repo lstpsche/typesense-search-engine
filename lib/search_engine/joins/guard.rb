@@ -25,7 +25,12 @@ module SearchEngine
         msg = "association :#{key} is not declared on #{model_name} "
         msg += "(declare with `join :#{key}, ...`)"
         msg += suggestion_suffix(suggestions)
-        raise SearchEngine::Errors::InvalidJoin, msg
+        raise SearchEngine::Errors::InvalidJoin.new(
+          msg,
+          hint: (suggestions&.any? ? "Did you mean #{suggestions.map { |s| ":#{s}" }.join(', ')}?" : nil),
+          doc: 'docs/joins.md#troubleshooting',
+          details: { assoc: key, known: safe_joins_config(klass).keys }
+        )
       end
 
       # Ensure the association config is complete (local_key and foreign_key present and non-blank).
@@ -53,7 +58,12 @@ module SearchEngine
         msg += missing.map { |m| ":#{m}" }.join(' and ')
         msg += ' (declare with `join '
         msg += ":#{key}, collection: ..., local_key: ..., foreign_key: ...`)"
-        raise SearchEngine::Errors::InvalidJoinConfig, msg
+        raise SearchEngine::Errors::InvalidJoinConfig.new(
+          msg,
+          hint: 'Declare local_key and foreign_key in join config.',
+          doc: 'docs/joins.md#troubleshooting',
+          details: { assoc: key, missing: missing }
+        )
       end
 
       # Ensure the relation has applied the association via .joins(:assoc) before use.
@@ -68,8 +78,11 @@ module SearchEngine
         list = Array(joins)
         return if list.include?(key)
 
-        raise SearchEngine::Errors::JoinNotApplied,
-              "Call .joins(:#{key}) before #{context} on #{key} fields"
+        raise SearchEngine::Errors::JoinNotApplied.new(
+          "Call .joins(:#{key}) before #{context} on #{key} fields",
+          doc: 'docs/joins.md#troubleshooting',
+          details: { assoc: key, context: context }
+        )
       end
 
       # Validate that a joined field exists on the target collection when the
@@ -111,7 +124,11 @@ module SearchEngine
         end
         msg = "UnknownJoinField: :#{fname} is not declared on association :#{assoc_name} for #{model_name}"
         msg += suggestion_suffix(suggestions)
-        raise SearchEngine::Errors::UnknownJoinField, msg
+        raise SearchEngine::Errors::UnknownJoinField.new(
+          msg,
+          doc: 'docs/field_selection.md#guardrails',
+          details: { assoc: assoc_name, field: fname }
+        )
       end
 
       # Reject multi-hop paths like $authors.publisher.name
@@ -122,9 +139,11 @@ module SearchEngine
       def ensure_single_hop_path!(path)
         return if path.to_s.count('.') <= 1
 
-        raise SearchEngine::Errors::UnsupportedJoinNesting,
-              'Only one join hop is supported: `$assoc.field`.' \
-              ' Use a separate pipeline step to denormalize deeper paths.'
+        raise SearchEngine::Errors::UnsupportedJoinNesting.new(
+          'Only one join hop is supported: `$assoc.field`. Use a separate pipeline step to denormalize deeper paths.',
+          doc: 'docs/joins.md#troubleshooting',
+          details: { path: path }
+        )
       end
 
       # --- internals -------------------------------------------------------

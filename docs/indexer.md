@@ -148,8 +148,6 @@ Notes:
 
 Backlinks: [Index](./index.md), [Partitioning](./indexer.md#partitioning), [Dispatcher](./indexer.md#dispatcher), [CLI](./cli.md)
 
-DSL:
-
 ```ruby
 class SearchEngine::Product < SearchEngine::Base
   stale_filter_by do |partition: nil|
@@ -157,8 +155,6 @@ class SearchEngine::Product < SearchEngine::Base
   end
 end
 ```
-
-API:
 
 ```ruby
 SearchEngine::Indexer.delete_stale!(SearchEngine::Product, partition: nil)
@@ -218,16 +214,11 @@ end
 ActiveJob job: `SearchEngine::IndexPartitionJob`.
 
 - **Args:** `collection_class_name` (String), `partition` (JSON-serializable), optional `into` (String), optional `metadata` (Hash).
-- **Queueing:** `queue_as` resolves at runtime from config; dispatcher may override per enqueue via `set(queue: ...)`.
-- **Retries:** transient errors (timeouts, connection, 429, 5xx) are retried with exponential backoff based on `SearchEngine.config.indexer.retries`.
 
-Instrumentation events (small payloads):
+## Troubleshooting
 
-- `search_engine.dispatcher.enqueued` — `{ collection, partition, into, queue, job_id }`
-- `search_engine.dispatcher.job_started` — `{ collection, partition, into, queue, job_id }`
-- `search_engine.dispatcher.job_finished` — `{ collection, partition, into, queue, job_id, duration_ms, status }`
-- `search_engine.dispatcher.job_error` — `{ collection, partition, into, queue, job_id, error_class, message_truncated }`
+- **Bulk import shape errors**: Ensure each document is a flat Hash with required keys and valid types.
+- **Retry exhaustion**: Inspect `search_engine.indexer.batch_import` events; increase backoff or fix upstream issues.
+- **Stale deletes strict block**: Verify your filter is not a catch-all; use partition guards.
 
-Job arguments are JSON-safe; constants are passed as class name strings and reified at runtime.
-
-[← Back to Index](./index.md)
+Backlinks: [README](../README.md), [Schema](./schema.md)

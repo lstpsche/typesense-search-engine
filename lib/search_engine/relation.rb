@@ -1022,7 +1022,14 @@ module SearchEngine
         include_base: include_base,
         exclude_base: exclude_base
       )
-      raise SearchEngine::Errors::InvalidSelection, msg
+      field = missing.map(&:to_s).min
+      hint = exclude_base.include?(field) ? "Remove exclude(:#{field})." : nil
+      raise SearchEngine::Errors::InvalidSelection.new(
+        msg,
+        hint: hint,
+        doc: 'docs/field_selection.md#guardrails',
+        details: { requested: names, include_base: include_base, exclude_base: exclude_base }
+      )
     end
 
     # Return total number of matching documents.
@@ -1488,8 +1495,11 @@ module SearchEngine
       # Disallow joined/path fields like "$assoc.field"
       field_str = field.to_s
       if field_str.start_with?('$') || field_str.include?('.')
-        raise SearchEngine::Errors::UnsupportedGroupField,
-              %(UnsupportedGroupField: grouping supports base fields only (got #{field_str.inspect}))
+        raise SearchEngine::Errors::UnsupportedGroupField.new(
+          %(UnsupportedGroupField: grouping supports base fields only (got #{field_str.inspect})),
+          doc: 'docs/grouping.md#troubleshooting',
+          details: { field: field_str }
+        )
       end
 
       # Validate existence against declared attributes when available
@@ -1498,21 +1508,31 @@ module SearchEngine
         sym = field.to_sym
         unless attrs.key?(sym)
           msg = build_invalid_group_unknown_field_message(sym)
-          raise SearchEngine::Errors::InvalidGroup, msg
+          raise SearchEngine::Errors::InvalidGroup.new(
+            msg,
+            doc: 'docs/grouping.md#troubleshooting',
+            details: { field: sym }
+          )
         end
       end
 
       # Validate limit positivity when provided
       if !limit.nil? && !(limit.is_a?(Integer) && limit >= 1)
         got = limit.nil? ? 'nil' : limit.inspect
-        raise SearchEngine::Errors::InvalidGroup,
-              "InvalidGroup: limit must be a positive integer (got #{got})"
+        raise SearchEngine::Errors::InvalidGroup.new(
+          "InvalidGroup: limit must be a positive integer (got #{got})",
+          doc: 'docs/grouping.md#troubleshooting',
+          details: { limit: limit }
+        )
       end
 
       # Validate missing_values strict boolean
       unless [true, false].include?(missing_values)
-        raise SearchEngine::Errors::InvalidGroup,
-              "InvalidGroup: missing_values must be boolean (got #{missing_values.inspect})"
+        raise SearchEngine::Errors::InvalidGroup.new(
+          "InvalidGroup: missing_values must be boolean (got #{missing_values.inspect})",
+          doc: 'docs/grouping.md#troubleshooting',
+          details: { missing_values: missing_values }
+        )
       end
 
       { field: field.to_sym, limit: limit, missing_values: missing_values }
