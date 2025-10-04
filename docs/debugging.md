@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
+[← Back to Index](./index.md)
 
 ### Overview
+
+Related: [DX](./dx.md), [Observability](./observability.md)
 
 Add compile-time instrumentation and a developer-friendly introspection helper for relations.
 

@@ -1,4 +1,6 @@
-[← Back to Index](./index.md) · [Client](./client.md)
+[← Back to Index](./index.md)
+
+Related: [Client](./client.md), [Materializers](./materializers.md)
 
 ## Models and the Collection Registry
 

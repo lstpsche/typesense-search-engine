@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Multi-search](./multi_search.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
+[← Back to Index](./index.md)
 
 # Curation
+
+Related: [Observability](./observability.md#logging), [Troubleshooting → Curation](./troubleshooting.md#curation)
 
 [See also: Observability](./observability.md#logging)
 

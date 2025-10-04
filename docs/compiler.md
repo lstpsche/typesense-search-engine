@@ -1,8 +1,10 @@
-[← Back to Index](./index.md) · [Query DSL](./query_dsl.md) · [Relation](./relation.md) · [Presets](./presets.md) · [Debugging](./debugging.md) · [Curation](./curation.md)
-
-> Instrumentation: `search_engine.compile` is emitted by the compiler. See [Debugging](./debugging.md).
+[← Back to Index](./index.md)
 
 # Compiler (AST → Typesense `filter_by`)
+
+Related: [Query DSL](./query_dsl.md), [Relation](./relation.md), [Debugging](./debugging.md)
+
+> Instrumentation: `search_engine.compile` is emitted by the compiler. See [Debugging](./debugging.md).
 
 The compiler turns a Predicate AST under `SearchEngine::AST` into a deterministic Typesense `filter_by` string. It is pure (no I/O), safe (centralized quoting/escaping), and consistent with the `where` DSL.
 

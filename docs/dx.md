@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
+[← Back to Index](./index.md)
 
 # Developer Experience (DX)
+
+Related: [Debugging](./debugging.md), [Troubleshooting → DX](./troubleshooting.md#dx)
 
 Developer‑experience helpers on `Relation` visualize compiled requests and enable a safe, zero‑I/O dry run.
 

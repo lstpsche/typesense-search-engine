@@ -2,12 +2,10 @@
 
 # Installation
 
+Related: [Quickstart](./quickstart.md), [Configuration](./configuration.md), [CLI](./cli.md)
+
 Add the gem to your host app:
 
-```ruby
-gem "search_engine", path: "../search_engine" # for local dev
-```
-or when published:
 ```ruby
 gem "search_engine"
 ```

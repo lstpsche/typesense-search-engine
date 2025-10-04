@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [JOINs](./joins.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
+[← Back to Index](./index.md)
 
 # Field Selection DSL (select / exclude / reselect)
+
+Related: [Joins](./joins.md), [Materializers](./materializers.md), [Troubleshooting](./troubleshooting.md)
 
 A concise, immutable DSL on `Relation` for selecting or excluding fields, with support for nested join fields and normalization.
 

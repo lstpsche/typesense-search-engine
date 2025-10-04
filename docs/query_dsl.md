@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md) · [Debugging](./debugging.md)
+[← Back to Index](./index.md)
 
 # Query DSL (Predicate AST)
+
+Related: [Compiler](./compiler.md), [Debugging](./debugging.md)
 
 The Predicate AST models query predicates in a compiler‑agnostic, immutable structure under `SearchEngine::AST`. It separates predicate construction from compilation to Typesense `filter_by`, enabling safer composition, inspection, and future optimizations.
 

@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
+[← Back to Index](./index.md)
 
 # Grouping
+
+Related: [Observability](./observability.md), [Relation](./relation.md), [Troubleshooting → Grouping](./troubleshooting.md#grouping)
 
 Group results by a field and optionally control the number of hits per group and whether documents with missing values form their own group.
 

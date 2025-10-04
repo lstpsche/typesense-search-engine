@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Client](./client.md) · [Presets](./presets.md) · [Curation](./curation.md)
+[← Back to Index](./index.md)
 
 ### Observability
+
+Related: [DX](./dx.md), [Troubleshooting → Observability](./troubleshooting.md#observability)
 
 This engine emits lightweight ActiveSupport::Notifications events around client calls and provides an opt-in compact logging subscriber. Events are redacted and stable to keep logs useful without leaking secrets.
 

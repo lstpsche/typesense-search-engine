@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Schema](./schema.md) · [Indexer](./indexer.md)
+[← Back to Index](./index.md)
 
 # CLI
+
+Related: [Troubleshooting → CLI](./troubleshooting.md#cli), [Observability → OpenTelemetry](./observability.md#opentelemetry)
 
 Operator-focused tasks for schema lifecycle and indexing. All tasks are thin facades over documented APIs with small, structured instrumentation.
 

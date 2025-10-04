@@ -2,6 +2,8 @@
 
 # Configuration
 
+Related: [Installation](./installation.md), [Client](./client.md), [CLI](./cli.md)
+
 This engine centralizes all knobs under `SearchEngine.config`. These values drive the future client and relation layers and are hydrated from ENV at boot by the engine initializer.
 
 - See also: [Installation](./installation.md)

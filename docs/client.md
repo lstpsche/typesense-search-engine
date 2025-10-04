@@ -1,6 +1,6 @@
 [← Back to Index](./index.md)
 
-[Installation](./installation.md) · [Configuration](./configuration.md) · [Observability](./observability.md)
+Related: [Installation](./installation.md), [Configuration](./configuration.md), [Observability](./observability.md)
 
 ## SearchEngine::Client
 
