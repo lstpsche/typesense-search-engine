@@ -55,22 +55,28 @@ module SearchEngine
     # @return [Integer] number of documents searched
     # @return [Array<Hash>, nil] facet counts as returned by Typesense
     # @return [Hash] raw Typesense response (unmodified)
-    attr_reader :hits, :found, :out_of, :facets, :raw
+    attr_reader :hits, :found, :out_of, :raw
 
     # Build a new result wrapper.
     #
     # @param raw [Hash] Parsed Typesense response ("hits"/"grouped_hits", "found", "out_of", "facet_counts")
     # @param klass [Class, nil] Optional model class used to hydrate each document
-    def initialize(raw, klass: nil)
+    # @param selection [Hash, nil] Optional selection context for strict missing checks
+    # @param facets [Hash, nil] Optional facets context carrying declared facet queries/labels
+    def initialize(raw, klass: nil, selection: nil, facets: nil)
       require 'ostruct'
 
       @raw   = raw || {}
       @found = @raw['found']
       @out_of = @raw['out_of']
-      @facets = @raw['facet_counts']
+      # raw facet_counts preserved in @raw; parsed via #facets helper
       @klass  = klass
+      @selection_ctx = selection if selection
+      @facets_ctx = facets if facets
 
       @__groups_memo = nil
+      # Precompute facets memo before freeze to avoid later mutation
+      @__facets_parsed_memo = build_parsed_facets(@raw, @facets_ctx).freeze
 
       if grouped?
         groups_built = build_groups
@@ -193,7 +199,73 @@ module SearchEngine
       @__groups_memo.last
     end
 
+    # Facets helpers
+    # ---------------
+    #
+    # Parse Typesense facet_counts into a stable Hash mapping field => [ { value:, count:, highlighted:, label: } ].
+    # Returns an empty Hash when no facets are present.
+    # Arrays/hashes in the returned structure are defensive copies and can be safely mutated by callers.
+    # @return [Hash{String=>Array<Hash{Symbol=>Object}>}]
+    def facets
+      parsed = parse_facets
+      parsed.dup
+    end
+
+    # Facet values for a given field name.
+    # @param name [#to_s]
+    # @return [Array<Hash{Symbol=>Object}>]
+    def facet_values(name)
+      field = name.to_s
+      arr = parse_facets[field] || []
+      arr.dup
+    end
+
+    # Optional convenience: map of value => count for a given facet field.
+    # @param name [#to_s]
+    # @return [Hash{Object=>Integer}]
+    def facet_value_map(name)
+      facet_values(name).each_with_object({}) { |h, acc| acc[h[:value]] = h[:count] }
+    end
+
     private
+
+    def parse_facets
+      @__facets_parsed_memo || {}.freeze
+    end
+
+    def build_parsed_facets(raw, ctx)
+      raw_facets = (raw && (raw['facet_counts'] || raw[:facet_counts])) || []
+      result = {}
+      Array(raw_facets).each do |entry|
+        field = (entry['field_name'] || entry[:field_name]).to_s
+        next if field.empty?
+
+        values = Array(entry['counts'] || entry[:counts])
+        list = values.map do |v|
+          value = v['value'] || v[:value]
+          count = v['count'] || v[:count]
+          highlighted = v['highlighted'] || v[:highlighted]
+          { value: value, count: Integer(count || 0), highlighted: highlighted, label: nil }
+        end
+
+        if ctx && Array(ctx[:queries]).any?
+          q_for_field = Array(ctx[:queries]).select { |q| (q[:field] || q['field']).to_s == field }
+          if q_for_field.any?
+            list.each do |h|
+              val_str = h[:value].to_s
+              match = q_for_field.find { |q| (q[:expr] || q['expr']).to_s == val_str }
+              h[:label] = ((match && (match[:label] || match['label'])) || nil)
+            end
+          end
+        end
+
+        result[field] = list.freeze
+      end
+
+      result
+    rescue StandardError
+      {}
+    end
 
     # Attempt to read a total groups count from the raw payload using common keys.
     # Returns +nil+ when the backend does not provide a value.
