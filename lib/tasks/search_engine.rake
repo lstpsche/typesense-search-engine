@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'time'
 require 'search_engine'
 require 'search_engine/cli'
 

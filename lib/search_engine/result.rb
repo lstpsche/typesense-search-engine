@@ -288,7 +288,7 @@ module SearchEngine
       @__facets_parsed_memo || {}.freeze
     end
 
-    def build_parsed_facets(raw, ctx)
+    def build_parsed_facets(raw, ctx) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
       raw_facets = (raw && (raw['facet_counts'] || raw[:facet_counts])) || []
       result = {}
       Array(raw_facets).each do |entry|
@@ -318,8 +318,6 @@ module SearchEngine
       end
 
       result
-    rescue StandardError
-      {}
     end
 
     # Attempt to read a total groups count from the raw payload using common keys.
