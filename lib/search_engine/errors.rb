@@ -237,7 +237,7 @@ module SearchEngine
     # and {SearchEngine::Relation#ids} to fail fast before any network call.
     class InvalidSelection < Error; end
 
-    # Raised when curated ID does not match the configured pattern.
+    # Raised when a curated ID does not match the configured pattern.
     #
     # @see docs/curation.md
     # @example
@@ -257,5 +257,19 @@ module SearchEngine
     # @example
     #   raise SearchEngine::Errors::InvalidOverrideTag, 'InvalidOverrideTag: "" is invalid. Use non-blank strings that match the allowed pattern.'
     class InvalidOverrideTag < Error; end
+
+    # Raised when an option value is invalid or unsupported for a public API.
+    #
+    # Used by DSL methods to fail fast with actionable hints.
+    # Typical causes: invalid HTML tag tokens, negative integers for thresholds,
+    # or empty field lists where at least one field is required.
+    #
+    # @example
+    #   raise SearchEngine::Errors::InvalidOption.new(
+    #     'InvalidOption: tag must be a simple HTML-like token',
+    #     hint: 'Use a simple tag like <em> or <mark>',
+    #     doc: 'docs/highlighting.md#options'
+    #   )
+    class InvalidOption < Error; end
   end
 end

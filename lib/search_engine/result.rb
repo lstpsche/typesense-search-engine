@@ -63,7 +63,8 @@ module SearchEngine
     # @param klass [Class, nil] Optional model class used to hydrate each document
     # @param selection [Hash, nil] Optional selection context for strict missing checks
     # @param facets [Hash, nil] Optional facets context carrying declared facet queries/labels
-    def initialize(raw, klass: nil, selection: nil, facets: nil)
+    # @param highlight [Hash, nil] Optional highlight context carrying configured tags and knobs
+    def initialize(raw, klass: nil, selection: nil, facets: nil, highlight: nil)
       require 'ostruct'
 
       @raw   = raw || {}
@@ -73,6 +74,7 @@ module SearchEngine
       @klass  = klass
       @selection_ctx = selection if selection
       @facets_ctx = facets if facets
+      @highlight_ctx = highlight if highlight
 
       @__groups_memo = nil
       # Precompute facets memo before freeze to avoid later mutation
@@ -85,8 +87,15 @@ module SearchEngine
         @hits = first_hits.freeze
         instrument_group_parse(groups_built) if defined?(SearchEngine::Instrumentation)
       else
-        documents = Array(@raw['hits']).map { |h| h && h['document'] }.compact
-        hydrated = documents.map { |doc| hydrate(doc) }
+        entries = Array(@raw['hits']).map { |h| symbolize_hit(h) }
+        hydrated = []
+        entries.each do |entry|
+          next unless entry[:document]
+
+          obj = hydrate(entry[:document])
+          attach_highlighting!(obj, entry)
+          hydrated << obj
+        end
         @hits = hydrated.freeze
       end
 
@@ -229,6 +238,52 @@ module SearchEngine
 
     private
 
+    # Per-hit highlighting mixin: added onto hydrated objects.
+    module HitHighlighting
+      # @return [Hash{String=>Array<Hash{Symbol=>Object}>}] normalized highlights by field
+      def highlights
+        h = instance_variable_get(:@__se_highlights_map__)
+        h ? h.dup : {}
+      end
+
+      # Return a sanitized HTML snippet or full highlighted value for a field.
+      # @param field [Symbol, String]
+      # @param full [Boolean] when true, prefer full highlighted value
+      # @return [String] HTML-safe string; SafeBuffer when ActiveSupport present
+      def snippet_for(field, full: false)
+        map = instance_variable_get(:@__se_highlights_map__)
+        return nil unless map && field
+
+        key = field.to_s
+        list = map[key]
+        return nil unless Array(list).any?
+
+        ctx = instance_variable_get(:@__se_highlight_ctx__)
+        entry = if full
+                  list.find { |h| h[:snippet] == false } || list.first
+                else
+                  list.find { |h| h[:snippet] == true } || list.first
+                end
+
+        return nil unless entry
+
+        value = entry[:value].to_s
+        matched = Array(entry[:matched_tokens]).map(&:to_s)
+        ctx && ctx[:affix_tokens]
+        threshold = ctx && ctx[:snippet_threshold]
+
+        html = SearchEngine::Result.send(:sanitize_highlight_html, value, ctx)
+        return SearchEngine::Result.send(:wrap_safe_if_rails, html) if entry[:snippet] == true
+
+        # Full value requested or only full value available
+        return SearchEngine::Result.send(:wrap_safe_if_rails, html) if full || threshold.nil?
+
+        # Compute a minimal snippet when server didn't provide one
+        snippet = SearchEngine::Result.send(:compute_snippet_from_full, html, matched, ctx)
+        SearchEngine::Result.send(:wrap_safe_if_rails, snippet)
+      end
+    end
+
     def parse_facets
       @__facets_parsed_memo || {}.freeze
     end
@@ -317,8 +372,16 @@ module SearchEngine
         key_values = Array(entry['group_key'] || entry[:group_key])
         key_hash = build_group_key_hash(fields, key_values)
 
-        docs = Array(entry['hits'] || entry[:hits]).map { |h| h && (h['document'] || h[:document]) }.compact
-        hydrated = docs.map { |doc| hydrate(doc) }
+        subhits = Array(entry['hits'] || entry[:hits])
+        hydrated = []
+        subhits.each do |sub|
+          doc = sub && (sub['document'] || sub[:document])
+          next unless doc
+
+          obj = hydrate(doc)
+          attach_highlighting!(obj, symbolize_hit(sub))
+          hydrated << obj
+        end
 
         Group.new(key: key_hash, hits: hydrated)
       end
@@ -430,6 +493,154 @@ module SearchEngine
         doc: 'docs/field_selection.md#strict-vs-lenient-selection',
         details: { requested: requested, present_keys: present_keys }
       )
+    end
+
+    # --- Highlight internals -------------------------------------------------
+
+    def symbolize_hit(h)
+      return {} unless h.is_a?(Hash)
+
+      out = {}
+      h.each { |k, v| out[k.is_a?(String) ? k.to_sym : k] = v }
+      out
+    rescue StandardError
+      {}
+    end
+
+    def attach_highlighting!(obj, hit_entry)
+      raw_list = Array(hit_entry[:highlights])
+      return obj if raw_list.empty?
+
+      map = normalize_highlights(raw_list)
+      return obj if map.empty?
+
+      # Extend object once and inject context + normalized map
+      obj.extend(HitHighlighting) unless obj.singleton_class.included_modules.include?(HitHighlighting)
+      obj.instance_variable_set(:@__se_highlights_map__, map)
+      obj.instance_variable_set(:@__se_highlight_ctx__, safe_highlight_ctx)
+      obj
+    rescue StandardError
+      obj
+    end
+
+    def safe_highlight_ctx
+      ctx = @highlight_ctx || {}
+      return {} unless ctx.is_a?(Hash)
+
+      out = {}
+      out[:fields] = Array(ctx[:fields]).map(&:to_s).reject(&:empty?) if ctx[:fields]
+      out[:full_fields] = Array(ctx[:full_fields]).map(&:to_s).reject(&:empty?) if ctx[:full_fields]
+      out[:start_tag] = ctx[:start_tag].to_s if ctx[:start_tag]
+      out[:end_tag] = ctx[:end_tag].to_s if ctx[:end_tag]
+      out[:affix_tokens] = ctx[:affix_tokens] if ctx.key?(:affix_tokens)
+      out[:snippet_threshold] = ctx[:snippet_threshold] if ctx.key?(:snippet_threshold)
+      out
+    rescue StandardError
+      {}
+    end
+
+    def normalize_highlights(list)
+      result = {}
+      Array(list).each do |h|
+        field = (h['field'] || h[:field]).to_s
+        next if field.empty?
+
+        value = h['snippet'] || h[:snippet] || h['value'] || h[:value]
+        h.key?('snippet') || h.key?(:snippet)
+        snippet_flag = !(h['snippet'] || h[:snippet]).nil?
+        tokens = h['matched_tokens'] || h[:matched_tokens] || []
+
+        entry = {
+          value: value.to_s,
+          matched_tokens: Array(tokens).map(&:to_s),
+          snippet: snippet_flag
+        }
+
+        (result[field] ||= []) << entry
+      end
+
+      result
+    rescue StandardError
+      {}
+    end
+
+    class << self
+      # Replace allowed highlight tags with placeholders, escape HTML, then restore configured tags.
+      def sanitize_highlight_html(text, ctx)
+        s = text.to_s
+        return '' if s.empty?
+
+        start_tag = (ctx && ctx[:start_tag]) || '<mark>'
+        end_tag   = (ctx && ctx[:end_tag])   || '</mark>'
+        placeholders = {
+          start: "\u0001__SE_HL_START__\u0001",
+          end:   "\u0001__SE_HL_END__\u0001"
+        }
+
+        # Normalize known tokens from server (<mark>) and configured ones
+        start_tokens = [start_tag, '<mark>'].uniq
+        end_tokens   = [end_tag, '</mark>'].uniq
+        start_tokens.each { |tok| s = s.gsub(tok, placeholders[:start]) }
+        end_tokens.each   { |tok| s = s.gsub(tok, placeholders[:end]) }
+
+        # Escape everything
+        require 'cgi'
+        escaped = CGI.escapeHTML(s)
+
+        # Restore configured tags; any other tags remain escaped
+        escaped = escaped.gsub(placeholders[:start], start_tag)
+        escaped.gsub(placeholders[:end], end_tag)
+      rescue StandardError
+        text.to_s
+      end
+
+      # Build a minimal snippet around first matched token when server didn't provide one
+      def compute_snippet_from_full(html, matched_tokens, ctx)
+        plain = strip_tags_preserving_space(html)
+        return sanitize_highlight_html(html, ctx) if plain.empty?
+
+        tokens = tokenize(plain)
+        return sanitize_highlight_html(html, ctx) if tokens.empty?
+
+        # Find first occurrence of any matched token (case-insensitive)
+        target = matched_tokens.find { |t| !t.to_s.strip.empty? }
+        return sanitize_highlight_html(html, ctx) unless target
+
+        target_down = target.downcase
+        idx = tokens.index { |t| t.downcase.include?(target_down) } || 0
+        window = (ctx && ctx[:affix_tokens]).to_i
+        window = 8 if window.negative? || window.zero?
+        left = [idx - window, 0].max
+        right = [idx + window, tokens.size - 1].min
+        segment = tokens[left..right].join(' ')
+        # Wrap the first occurrence with configured tags
+        start_tag = (ctx && ctx[:start_tag]) || '<mark>'
+        end_tag   = (ctx && ctx[:end_tag])   || '</mark>'
+        highlighted = segment.sub(/(#{Regexp.escape(target)})/i, "#{start_tag}\\1#{end_tag}")
+        sanitize_highlight_html(highlighted, ctx)
+      rescue StandardError
+        sanitize_highlight_html(html, ctx)
+      end
+
+      def strip_tags_preserving_space(html)
+        s = html.to_s
+        # Remove any HTML tags
+        s.gsub(/<[^>]*>/, '')
+      rescue StandardError
+        html.to_s
+      end
+
+      def tokenize(text)
+        text.to_s.split(/\s+/).reject(&:empty?)
+      end
+
+      def wrap_safe_if_rails(html)
+        if defined?(ActiveSupport::SafeBuffer)
+          ActiveSupport::SafeBuffer.new(html.to_s)
+        else
+          html.to_s
+        end
+      end
     end
   end
 end
