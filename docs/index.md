@@ -35,6 +35,7 @@ flowchart LR
 - [Field selection](./field_selection.md)
 - [JOINs](./joins.md)
 - [Grouping](./grouping.md)
+- [Faceting](faceting.md)
 - [Presets](./presets.md)
 - [Curation](./curation.md)
 - [Materializers](./materializers.md)

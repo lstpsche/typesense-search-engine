@@ -20,6 +20,7 @@ Copy these minimal patterns and adapt fields to your models. Prefer `dry_run!` a
 - [Price range + sort](#price-range--sort)
 - [Pagination](#pagination)
 - [Facet filters](#facet-filters)
+- [Faceting DSL](#faceting-dsl)
 - [Pinned/hidden curation](#pinnedhidden-curation)
 - [Grouping top‑N](#grouping-topn)
 - [Joins — basic](#joins--basic)
@@ -214,3 +215,18 @@ Redaction policy hides literals and secrets; bodies remain copyable.
 Related links: [Query DSL](./query_dsl.md), [Compiler](./compiler.md), [DX](./dx.md),
 [Observability](./observability.md), [Joins](./joins.md), [Grouping](./grouping.md),
 [Presets](./presets.md), [Curation](./curation.md)
+
+### Faceting DSL
+
+Add facets and facet queries:
+
+```ruby
+rel = SearchEngine::Product
+  .facet_by(:brand_id, max_values: 20)
+  .facet_query(:price, "[0..9]", label: "under_10")
+
+res = rel.execute
+res.facet_values("brand_id") # => array of { value:, count:, ... }
+```
+
+See `docs/faceting.md` for details.

@@ -159,6 +159,10 @@ See: [Compiler](./compiler.md#integration) for precedence, quoting rules, and jo
 
 [Back to top ⤴](#relation-and-query-dsl-%E2%80%94-guide)
 
+### Selection, grouping & faceting
+
+See `docs/faceting.md` for first-class faceting DSL: `facet_by`, `facet_query`, compiler mapping and result helpers.
+
 ---
 
 Related links: [Query DSL](./query_dsl.md), [Compiler](./compiler.md), [DX](./dx.md),

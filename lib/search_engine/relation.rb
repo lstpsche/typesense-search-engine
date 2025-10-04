@@ -35,7 +35,10 @@ module SearchEngine
       options: {}.freeze,
       # Presets: immutable relation-level preset state
       preset_name: nil,
-      preset_mode: nil
+      preset_mode: nil,
+      facet_fields: [].freeze,
+      facet_max_values: [].freeze,
+      facet_queries: [].freeze
     }.freeze
 
     # Keys considered essential for :only preset mode.
@@ -686,6 +689,28 @@ module SearchEngine
       exclude_str = compile_exclude_fields_string
       params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
 
+      # Faceting
+      facet_fields = Array(@state[:facet_fields]).map(&:to_s).reject(&:empty?)
+      params[:facet_by] = facet_fields.join(',') unless facet_fields.empty?
+
+      caps = Array(@state[:facet_max_values]).compact
+      if caps.any?
+        valid_caps = []
+        caps.each do |v|
+          valid_caps << Integer(v)
+        rescue ArgumentError, TypeError
+          # skip invalid cap
+        end
+        max_cap = valid_caps.max
+        params[:max_facet_values] = max_cap if max_cap&.positive?
+      end
+
+      queries = Array(@state[:facet_queries])
+      if queries.any?
+        tokens = queries.map { |q| "#{q[:field]}:#{q[:expr]}" }
+        params[:facet_query] = tokens.join(',') unless tokens.empty?
+      end
+
       # Curation (body params only)
       if (cur = @state[:curation])
         pinned = Array(cur[:pinned]).map(&:to_s).reject(&:empty?)
@@ -1230,6 +1255,12 @@ module SearchEngine
         normalized[:preset_mode] = value&.to_sym
       when :curation
         normalized[:curation] = normalize_curation_input(value)
+      when :facet_fields
+        normalized[:facet_fields] = Array(value).flatten.compact
+      when :facet_max_values
+        normalized[:facet_max_values] = Array(value).flatten.compact
+      when :facet_queries
+        normalized[:facet_queries] = Array(value).flatten.compact
       end
     end
 
@@ -1731,9 +1762,12 @@ module SearchEngine
       url_opts.merge!(overrides) unless overrides.empty?
 
       result = client.search(collection: collection, params: params, url_opts: url_opts)
-      # Wrap with selection context for hydration strictness
+      # Wrap with selection/facets context for hydration strictness and facet labels
       selection_ctx = build_selection_context
-      result = SearchEngine::Result.new(result.raw, klass: @klass, selection: selection_ctx) if selection_ctx
+      facets_ctx = build_facets_context
+      if selection_ctx || facets_ctx
+        result = SearchEngine::Result.new(result.raw, klass: @klass, selection: selection_ctx, facets: facets_ctx)
+      end
       @__result_memo = result
       @__loaded = true
       result
@@ -2208,6 +2242,140 @@ module SearchEngine
 
     def curation_filter_curated_hits?
       @state[:curation] && @state[:curation][:filter_curated_hits]
+    end
+
+    # Faceting DSL
+    # ------------
+    # @see docs/faceting.md
+    def facet_by(field, max_values: nil, sort: nil, stats: nil)
+      name = field.to_s.strip
+      raise SearchEngine::Errors::InvalidParams, 'facet_by: field name must be non-empty' if name.empty?
+
+      if name.start_with?('$') || name.include?('.')
+        raise SearchEngine::Errors::InvalidParams.new(
+          %(facet_by: supports base fields only (got #{name.inspect})),
+          doc: 'docs/faceting.md#supported-options',
+          details: { field: name }
+        )
+      end
+
+      attrs = safe_attributes_map
+      unless attrs.nil? || attrs.empty? || attrs.key?(name.to_sym)
+        suggestions = suggest_fields(name.to_sym, attrs.keys.map(&:to_sym))
+        suggest = if suggestions.empty?
+                    ''
+                  elsif suggestions.length == 1
+                    " (did you mean :#{suggestions.first}?)"
+                  else
+                    last = suggestions.last
+                    others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
+                    " (did you mean #{others}, or :#{last}?)"
+                  end
+        raise SearchEngine::Errors::UnknownField,
+              "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
+      end
+
+      unless sort.nil?
+        raise SearchEngine::Errors::InvalidParams.new(
+          "facet_by: option :sort is not supported by Typesense facets (got #{sort.inspect})",
+          hint: 'Supported: default count-desc only at present.',
+          doc: 'docs/faceting.md#supported-options',
+          details: { sort: sort }
+        )
+      end
+
+      unless stats.nil?
+        raise SearchEngine::Errors::InvalidParams.new(
+          'facet_by: option :stats is not supported at present',
+          doc: 'docs/faceting.md#supported-options',
+          details: { stats: stats }
+        )
+      end
+
+      cap = nil
+      unless max_values.nil?
+        begin
+          cap = Integer(max_values)
+        rescue ArgumentError, TypeError
+          raise SearchEngine::Errors::InvalidParams, 'facet_by: max_values must be an Integer or nil'
+        end
+        raise SearchEngine::Errors::InvalidParams, 'facet_by: max_values must be >= 1' if cap < 1
+      end
+
+      spawn do |s|
+        fields = Array(s[:facet_fields])
+        s[:facet_fields] = fields.include?(name) ? fields : (fields + [name])
+
+        caps = Array(s[:facet_max_values])
+        s[:facet_max_values] = cap.nil? ? caps : (caps + [cap])
+      end
+    end
+
+    def facet_query(field, expression, label: nil)
+      name = field.to_s.strip
+      raise SearchEngine::Errors::InvalidParams, 'facet_query: field name must be non-empty' if name.empty?
+
+      if name.start_with?('$') || name.include?('.')
+        raise SearchEngine::Errors::InvalidParams.new(
+          %(facet_query: supports base fields only (got #{name.inspect})),
+          doc: 'docs/faceting.md#supported-options',
+          details: { field: name }
+        )
+      end
+
+      attrs = safe_attributes_map
+      unless attrs.nil? || attrs.empty? || attrs.key?(name.to_sym)
+        suggestions = suggest_fields(name.to_sym, attrs.keys.map(&:to_sym))
+        suggest = if suggestions.empty?
+                    ''
+                  elsif suggestions.length == 1
+                    " (did you mean :#{suggestions.first}?)"
+                  else
+                    last = suggestions.last
+                    others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
+                    " (did you mean #{others}, or :#{last}?)"
+                  end
+        raise SearchEngine::Errors::UnknownField,
+              "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
+      end
+
+      expr = expression.to_s.strip
+      raise SearchEngine::Errors::InvalidParams, 'facet_query: expression must be a non-empty String' if expr.empty?
+
+      if expr.include?('[') ^ expr.include?(']')
+        raise SearchEngine::Errors::InvalidParams.new(
+          %(facet_query: invalid range syntax #{expr.inspect} (unbalanced brackets)),
+          hint: 'Use shapes like "[0..9]", "[10..19]"',
+          doc: 'docs/faceting.md#facet-query-expressions',
+          details: { expr: expr }
+        )
+      end
+
+      label_str = label&.to_s&.strip
+
+      spawn do |s|
+        queries = Array(s[:facet_queries])
+        rec = { field: name, expr: expr }
+        rec[:label] = label_str unless label_str.nil? || label_str.empty?
+        exists = queries.any? { |q| q[:field] == rec[:field] && q[:expr] == rec[:expr] && q[:label] == rec[:label] }
+        s[:facet_queries] = exists ? queries : (queries + [rec])
+      end
+    end
+
+    public :facet_by, :facet_query
+
+    protected
+
+    def build_facets_context
+      fields = Array(@state[:facet_fields]).map(&:to_s)
+      queries = Array(@state[:facet_queries]).map do |q|
+        h = { field: q[:field].to_s, expr: q[:expr].to_s }
+        h[:label] = q[:label].to_s if q[:label]
+        h
+      end
+      return nil if fields.empty? && queries.empty?
+
+      { fields: fields.freeze, queries: queries.freeze }.freeze
     end
   end
 end

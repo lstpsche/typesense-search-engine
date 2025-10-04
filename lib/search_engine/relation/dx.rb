@@ -63,6 +63,7 @@ module SearchEngine
         append_where_line(lines, params)
         append_order_line(lines, params)
         append_group_line(lines)
+        append_facets_line(lines, params)
         append_selection_explain_lines(lines, params)
         add_effective_selection_tokens!(lines)
         add_pagination_line!(lines, params)
@@ -168,6 +169,17 @@ module SearchEngine
       def append_events_line(lines, params)
         events = predicted_events_for_plan(params)
         lines << "Events that would fire: #{events.join(' → ')}" unless events.empty?
+      end
+
+      def append_facets_line(lines, params)
+        fb = params[:facet_by]
+        fq = params[:facet_query]
+        mv = params[:max_facet_values]
+        segs = []
+        segs << "facet_by=#{fb}" if fb && !fb.to_s.strip.empty?
+        segs << "max=#{mv}" if mv
+        segs << "queries=#{fq}" if fq && !fq.to_s.strip.empty?
+        lines << "  facets: #{segs.join(' ')}" unless segs.empty?
       end
     end
 
