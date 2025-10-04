@@ -423,6 +423,7 @@ module SearchEngine
       payload.delete(:_curation_conflict_type)
       payload.delete(:_curation_conflict_count)
       payload.delete(:_runtime_flags)
+      payload.delete(:_hits)
       payload
     end
 
