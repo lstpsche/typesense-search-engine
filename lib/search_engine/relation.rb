@@ -38,7 +38,14 @@ module SearchEngine
       preset_mode: nil,
       facet_fields: [].freeze,
       facet_max_values: [].freeze,
-      facet_queries: [].freeze
+      facet_queries: [].freeze,
+      highlight: {}.freeze,
+      highlight_fields: [].freeze,
+      highlight_full_fields: [].freeze,
+      highlight_start_tag: nil,
+      highlight_end_tag: nil,
+      highlight_affix_num_tokens: nil,
+      highlight_snippet_threshold: nil
     }.freeze
 
     # Keys considered essential for :only preset mode.
@@ -689,6 +696,21 @@ module SearchEngine
       exclude_str = compile_exclude_fields_string
       params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
 
+      # Highlighting
+      if (h = @state[:highlight])
+        hf = Array(h[:fields]).map(&:to_s).reject(&:empty?)
+        params[:highlight_fields] = hf.join(',') unless hf.empty?
+
+        hff = Array(h[:full_fields]).map(&:to_s).reject(&:empty?)
+        params[:highlight_full_fields] = hff.join(',') unless hff.empty?
+
+        params[:highlight_start_tag] = h[:start_tag] if h[:start_tag]
+        params[:highlight_end_tag] = h[:end_tag] if h[:end_tag]
+
+        params[:highlight_affix_num_tokens] = h[:affix_tokens] unless h[:affix_tokens].nil?
+        params[:snippet_threshold] = h[:snippet_threshold] unless h[:snippet_threshold].nil?
+      end
+
       # Faceting
       facet_fields = Array(@state[:facet_fields]).map(&:to_s).reject(&:empty?)
       params[:facet_by] = facet_fields.join(',') unless facet_fields.empty?
@@ -893,6 +915,20 @@ module SearchEngine
 
       append_selection_explain_lines(lines, params)
       add_effective_selection_tokens!(lines)
+
+      # Highlight explain
+      if (h = @state[:highlight])
+        parts = []
+        f = Array(h[:fields]).map(&:to_s).reject(&:empty?)
+        parts << "fields=#{f.join(',')}" unless f.empty?
+        ff = Array(h[:full_fields]).map(&:to_s).reject(&:empty?)
+        parts << "full=#{ff.join(',')}" unless ff.empty?
+        parts << "start_tag=#{h[:start_tag]}" if h[:start_tag]
+        parts << "end_tag=#{h[:end_tag]}" if h[:end_tag]
+        parts << "affix_tokens=#{h[:affix_tokens]}" unless h[:affix_tokens].nil?
+        parts << "snippet_threshold=#{h[:snippet_threshold]}" unless h[:snippet_threshold].nil?
+        lines << "  highlight: #{parts.join(' ')}" unless parts.empty?
+      end
 
       add_pagination_line!(lines, params)
 
@@ -1261,6 +1297,8 @@ module SearchEngine
         normalized[:facet_max_values] = Array(value).flatten.compact
       when :facet_queries
         normalized[:facet_queries] = Array(value).flatten.compact
+      when :highlight
+        normalized[:highlight] = normalize_highlight_input(value)
       end
     end
 
@@ -2376,6 +2414,22 @@ module SearchEngine
       return nil if fields.empty? && queries.empty?
 
       { fields: fields.freeze, queries: queries.freeze }.freeze
+    end
+
+    def build_highlight_context
+      h = @state[:highlight]
+      return nil unless h
+
+      out = {}
+      f = Array(h[:fields]).map(&:to_s).reject(&:empty?)
+      out[:fields] = f unless f.empty?
+      ff = Array(h[:full_fields]).map(&:to_s).reject(&:empty?)
+      out[:full_fields] = ff unless ff.empty?
+      out[:start_tag] = h[:start_tag] if h[:start_tag]
+      out[:end_tag] = h[:end_tag] if h[:end_tag]
+      out[:affix_tokens] = h[:affix_tokens] unless h[:affix_tokens].nil?
+      out[:snippet_threshold] = h[:snippet_threshold] unless h[:snippet_threshold].nil?
+      out
     end
   end
 end
