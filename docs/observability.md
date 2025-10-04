@@ -183,3 +183,32 @@ sequenceDiagram
 ```
 
 Backlinks: [Relation](./relation.md), [Materializers](./materializers.md), [Client](./client.md), [Schema](./schema.md), [Indexer](./indexer.md)
+
+### OpenTelemetry (optional)
+
+This adapter translates unified events into OpenTelemetry spans when enabled and when the `opentelemetry-sdk` gem is present. It is disabled by default and adds ~zero overhead when disabled.
+
+Enable via configuration:
+
+```ruby
+SearchEngine.configure do |c|
+  c.opentelemetry = OpenStruct.new(enabled: false, service_name: "search_engine")
+end
+```
+
+Event flow:
+
+```mermaid
+flowchart LR
+  Events -->|adapter| Spans
+  Spans --> Exporter
+```
+
+Notes:
+- Activation is gated by SDK presence and `config.opentelemetry.enabled`.
+- Spans are named after events (e.g., `search_engine.search`, `search_engine.compile`).
+- Attributes are minimal and redacted; no raw query/filter strings are recorded.
+- Correlation ID is attached as `se.cid` when present.
+- Span status is set to ERROR when payload `status=:error` or `http_status>=400`.
+
+Backlinks: [Index](./index.md), [Logging](./observability.md#logging), [Client](./client.md)
