@@ -457,7 +457,7 @@ module SearchEngine
 
     # Replace all predicates with a new where input.
     #
-    # Clears prior predicate state (AST and legacy string fragments) and parses
+    # Clears prior predicate state (AST and legacy filters) and parses
     # the provided input into a fresh AST using the DSL parser.
     # Accepts the same input forms as {#where}.
     #
@@ -831,6 +831,10 @@ module SearchEngine
     #
     # Returns a concise, multi-line String summarizing chainers and compiled
     # parameters. When `to: :stdout` is provided, also prints the summary.
+    # Includes overview (collection, page/per_page, preset, grouping), selection,
+    # joins count, curation flags, conflicts (e.g., preset :lock drops), and a
+    # predictive list of events that would fire. Correlation ID is previewed via
+    # instrumentation when available.
     #
     # @param to [Symbol, nil] when `:stdout`, prints to STDOUT in addition to returning
     # @return [String]

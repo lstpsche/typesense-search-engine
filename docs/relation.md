@@ -1,6 +1,6 @@
 [← Back to Index](./index.md) · [Client](./client.md) · [Compiler](./compiler.md) · [Presets](./presets.md) · [Observability](./observability.md) · [Materializers](./materializers.md) · [Query DSL](./query_dsl.md) · [Debugging](./debugging.md) · [Curation](./curation.md)
 
-> See also: [Debugging & Explain](./debugging.md)
+> See also: [Debugging & Explain](./debugging.md) and [DX helpers](./dx.md)
 
 # Relation
 
