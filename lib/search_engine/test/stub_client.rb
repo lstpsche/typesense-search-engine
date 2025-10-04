@@ -18,6 +18,9 @@ module SearchEngine
     #
     # Queued responses are FIFO. You may enqueue Exceptions to simulate errors
     # or Procs that receive the captured request and return a response.
+    #
+    # @since M8
+    # @see docs/testing.md
     class StubClient
       Call = Struct.new(
         :timestamp,
@@ -41,6 +44,8 @@ module SearchEngine
       # @param method [Symbol] :search or :multi_search
       # @param value [Hash, Exception, Proc]
       # @return [void]
+      # @since M8
+      # @see docs/testing.md#quick-start
       def enqueue_response(method, value)
         @lock.synchronize do
           queue_for(method) << value
@@ -48,6 +53,8 @@ module SearchEngine
       end
 
       # Reset all internal state (queues and captures).
+      # @since M8
+      # @see docs/testing.md#parallel-test-safety
       def reset!
         @lock.synchronize do
           @queues.each_value(&:clear)
@@ -57,18 +64,24 @@ module SearchEngine
 
       # Return captured calls for search.
       # @return [Array<Call>]
+      # @since M8
+      # @see docs/testing.md
       def search_calls
         @lock.synchronize { @calls[:search].dup }
       end
 
       # Return captured calls for multi_search.
       # @return [Array<Call>]
+      # @since M8
+      # @see docs/testing.md
       def multi_search_calls
         @lock.synchronize { @calls[:multi_search].dup }
       end
 
       # All calls in chronological order.
       # @return [Array<Call>]
+      # @since M8
+      # @see docs/testing.md
       def all_calls
         @lock.synchronize { (@calls[:search] + @calls[:multi_search]).sort_by(&:timestamp) }
       end
@@ -77,6 +90,8 @@ module SearchEngine
       # @param collection [String]
       # @param params [Hash]
       # @param url_opts [Hash]
+      # @since M8
+      # @see docs/testing.md
       def search(collection:, params:, url_opts: {})
         unless collection.is_a?(String) && !collection.strip.empty?
           raise ArgumentError, 'collection must be a non-empty String'
@@ -91,6 +106,8 @@ module SearchEngine
       # Public API: multi search. Mirrors top-level helper client usage: returns raw Hash from Typesense.
       # @param searches [Array<Hash>]
       # @param url_opts [Hash]
+      # @since M8
+      # @see docs/testing.md
       def multi_search(searches:, url_opts: {})
         unless searches.is_a?(Array) && searches.all? { |h| h.is_a?(Hash) }
           raise ArgumentError, 'searches must be an Array of Hashes'

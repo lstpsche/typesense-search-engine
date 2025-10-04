@@ -112,7 +112,7 @@ Examples:
 {"event":"search_engine.search","cid":"2a1f","collection":"products","status":200,"duration_ms":32.1}
 ```
 
-Backlinks: [Client](./client.md), [Presets](./presets.md), [Curation](./curation.md), [Event Taxonomy](./index.md)
+Backlinks: [README](../README.md), [DX](./dx.md), [Testing](./testing.md), [CLI](./cli.md), [Client](./client.md), [Presets](./presets.md), [Curation](./curation.md), [Grouping](./grouping.md), [JOINs](./joins.md)
 
 ### Enable compact logging
 
@@ -150,15 +150,23 @@ JSON example (one line):
 
 ```mermaid
 flowchart TD
-  A[Schema Diff] -->|schema.diff| N[Notifications]
-  B[Schema Apply] -->|schema.apply| N
-  C[Partition Start] -->|indexer.partition_start| N
-  D[Batch Import] -->|indexer.batch_import| N
-  E[Delete Stale] -->|indexer.delete_stale| N
-  C2[Partition Finish] -->|indexer.partition_finish| N
-  G[Grouping Compile] -->|grouping.compile| N
-  J[JOINs Compile] -->|joins.compile| N
-  N --> L[Compact Logger]
+  UE[Unified Events] --> L[Logging Subscriber]
+  UE --> O[OpenTelemetry Adapter]
+  O --> X[Exporters]
+```
+
+Additional emitters:
+
+```mermaid
+flowchart TD
+  A[Schema Diff] -->|schema.diff| UE
+  B[Schema Apply] -->|schema.apply| UE
+  C[Partition Start] -->|indexer.partition_start| UE
+  D[Batch Import] -->|indexer.batch_import| UE
+  E[Delete Stale] -->|indexer.delete_stale| UE
+  C2[Partition Finish] -->|indexer.partition_finish| UE
+  G[Grouping Compile] -->|grouping.compile| UE
+  J[JOINs Compile] -->|joins.compile| UE
 ```
 
 ---
@@ -184,7 +192,7 @@ sequenceDiagram
 
 Backlinks: [Relation](./relation.md), [Materializers](./materializers.md), [Client](./client.md), [Schema](./schema.md), [Indexer](./indexer.md)
 
-### OpenTelemetry (optional)
+### OpenTelemetry
 
 This adapter translates unified events into OpenTelemetry spans when enabled and when the `opentelemetry-sdk` gem is present. It is disabled by default and adds ~zero overhead when disabled.
 

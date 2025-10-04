@@ -1,6 +1,6 @@
 [← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
 
-# DX helpers
+# Developer Experience (DX)
 
 Developer‑experience helpers on `Relation` visualize compiled requests and enable a safe, zero‑I/O dry run.
 
@@ -9,7 +9,7 @@ Developer‑experience helpers on `Relation` visualize compiled requests and ena
 - `Relation#dry_run!` — compiles and validates without network I/O; returns `{ url:, body:, url_opts: }`.
 - `Relation#explain` — extended overview with grouping, joins, presets/curation, conflicts, correlation ID preview (when present), and predicted events.
 
-## Examples
+## Helpers & examples
 
 ```ruby
 rel = SearchEngine::Product
@@ -30,9 +30,18 @@ rel.dry_run!
 puts rel.explain
 ```
 
-Notes:
+### Event prediction (no emit)
+
+Use `rel.explain` to preview which events would fire without emitting them:
+
+```text
+Events that would fire: search_engine.compile → search_engine.joins.compile → search_engine.grouping.compile → search_engine.search
+```
+
+### Redaction policy
+
 - All helpers are pure and do not mutate the relation.
 - `dry_run!` validates and returns a redacted body; no HTTP requests are made.
-- Redaction follows the same rules as observability, masking secrets and literals.
+- Redaction follows observability rules, masking secrets and literals.
 
-Backlinks: [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
+Backlinks: [Observability](./observability.md), [Testing](./testing.md), [Relation](./relation.md) · [Compiler](./compiler.md)

@@ -83,7 +83,7 @@ When grouping is enabled, Typesense applies `per_page` to the number of groups r
 
 ## Guardrails & errors
 
-Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md) · [Observability](./observability.md)
+Backlinks: [← Back to Index](./index.md) · [Relation](./relation.md) · [Materializers](./materializers.md) · [Observability](./observability.md#logging)
 
 Misuse → behavior:
 
@@ -109,7 +109,7 @@ Misuse → behavior:
 
 Backlinks: [README](../README.md), [Field Selection](./field_selection.md)
 
-## Observability
+## Observability & troubleshooting
 
 - **Compile-time event**: `search_engine.grouping.compile`
   - Payload: `{ field, limit, missing_values, collection?, duration_ms? }` (nil/empty keys omitted)
