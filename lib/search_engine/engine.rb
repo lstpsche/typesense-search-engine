@@ -62,5 +62,19 @@ module SearchEngine
         )
       end
     end
+
+    initializer 'search_engine.opentelemetry' do
+      SearchEngine.config
+      begin
+        require 'search_engine/otel'
+      rescue LoadError
+        # no-op; adapter is fully optional
+      end
+
+      if defined?(SearchEngine::OTel)
+        # Start adapter only when SDK is present and config enables it
+        SearchEngine::OTel.start!
+      end
+    end
   end
 end

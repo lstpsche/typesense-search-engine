@@ -494,6 +494,40 @@ module SearchEngine
       @logging ||= OpenStruct.new(mode: :compact, level: :info, sample: 1.0, logger: logger)
     end
 
+    # Expose OpenTelemetry configuration. Optional and disabled by default.
+    # @return [OpenStruct]
+    def opentelemetry
+      require 'ostruct'
+      @opentelemetry ||= OpenStruct.new(enabled: false, service_name: 'search_engine')
+    end
+
+    # Assign OpenTelemetry configuration from a compatible object.
+    # Accepts an OpenStruct, a Hash-like, or an object responding to :enabled, :service_name.
+    # @param value [Object]
+    # @return [void]
+    def opentelemetry=(value)
+      require 'ostruct'
+      if value.is_a?(OpenStruct)
+        @opentelemetry = value
+        return
+      end
+
+      source = if value.respond_to?(:to_h)
+                 value.to_h
+               else
+                 hash = {}
+                 hash[:enabled] = value.enabled if value.respond_to?(:enabled)
+                 hash[:service_name] = value.service_name if value.respond_to?(:service_name)
+                 hash
+               end
+
+      otel = opentelemetry
+      otel.enabled = !!source[:enabled] if source.key?(:enabled) # rubocop:disable Style/DoubleNegation
+      return unless source.key?(:service_name)
+
+      otel.service_name = (source[:service_name].to_s.empty? ? 'search_engine' : source[:service_name])
+    end
+
     # Assign curation configuration from a compatible object.
     # Accepts a CurationConfig, a Hash-like, or an object responding to :max_pins, :max_hidden, :id_regex.
     # Validates basic types on assignment.
