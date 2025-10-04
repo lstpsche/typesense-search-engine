@@ -214,6 +214,149 @@ module SearchEngine
       instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
+    # --- Admin: Synonyms ----------------------------------------------------
+    # NOTE: We rely on the official client's endpoints; names are mapped here.
+
+    # @param collection [String]
+    # @param id [String]
+    # @param terms [Array<String>]
+    # @return [Hash]
+    def synonyms_upsert(collection:, id:, terms:)
+      c = collection.to_s
+      s = id.to_s
+      list = Array(terms)
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/synonyms/#{s}"
+
+      result = with_exception_mapping(:put, path, {}, start) do
+        ts.collections[c].synonyms[s].upsert({ synonyms: list })
+      end
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:put, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # @return [Array<Hash>]
+    def synonyms_list(collection:)
+      c = collection.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/synonyms"
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.collections[c].synonyms.retrieve
+      end
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # @return [Hash, nil]
+    def synonyms_get(collection:, id:)
+      c = collection.to_s
+      s = id.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/synonyms/#{s}"
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.collections[c].synonyms[s].retrieve
+      end
+      symbolize_keys_deep(result)
+    rescue Errors::Api => error
+      return nil if error.status.to_i == 404
+
+      raise
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # @return [Hash]
+    def synonyms_delete(collection:, id:)
+      c = collection.to_s
+      s = id.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/synonyms/#{s}"
+      result = with_exception_mapping(:delete, path, {}, start) do
+        ts.collections[c].synonyms[s].delete
+      end
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # --- Admin: Stopwords ---------------------------------------------------
+
+    # @param collection [String]
+    # @param id [String]
+    # @param terms [Array<String>]
+    # @return [Hash]
+    def stopwords_upsert(collection:, id:, terms:)
+      c = collection.to_s
+      s = id.to_s
+      list = Array(terms)
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/stopwords/#{s}"
+
+      result = with_exception_mapping(:put, path, {}, start) do
+        ts.collections[c].stopwords[s].upsert({ stopwords: list })
+      end
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:put, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # @return [Array<Hash>]
+    def stopwords_list(collection:)
+      c = collection.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/stopwords"
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.collections[c].stopwords.retrieve
+      end
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # @return [Hash, nil]
+    def stopwords_get(collection:, id:)
+      c = collection.to_s
+      s = id.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/stopwords/#{s}"
+      result = with_exception_mapping(:get, path, {}, start) do
+        ts.collections[c].stopwords[s].retrieve
+      end
+      symbolize_keys_deep(result)
+    rescue Errors::Api => error
+      return nil if error.status.to_i == 404
+
+      raise
+    ensure
+      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # @return [Hash]
+    def stopwords_delete(collection:, id:)
+      c = collection.to_s
+      s = id.to_s
+      ts = typesense
+      start = current_monotonic_ms
+      path = "/collections/#{c}/stopwords/#{s}"
+      result = with_exception_mapping(:delete, path, {}, start) do
+        ts.collections[c].stopwords[s].delete
+      end
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
+    # -----------------------------------------------------------------------
+
     # Bulk import JSONL documents into a collection using Typesense import API.
     #
     # @param collection [String] physical collection name
@@ -279,6 +422,7 @@ module SearchEngine
       payload.delete(:_preset_conflicts)
       payload.delete(:_curation_conflict_type)
       payload.delete(:_curation_conflict_count)
+      payload.delete(:_runtime_flags)
       payload
     end
 

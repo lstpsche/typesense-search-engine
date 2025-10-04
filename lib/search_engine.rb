@@ -26,6 +26,7 @@ require 'search_engine/partitioner'
 require 'search_engine/dispatcher'
 require 'search_engine/stale_filter'
 require 'search_engine/joins/guard'
+require 'search_engine/admin'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
@@ -270,7 +271,7 @@ module SearchEngine
     # @param error [SearchEngine::Errors::Api]
     # @param labels [Array<Symbol>] ordered labels for the search list
     # @return [SearchEngine::Errors::Api]
-    def augment_multi_api_error(error, labels) # rubocop:disable Metrics/PerceivedComplexity
+    def augment_multi_api_error(error, labels)
       body = error.body
       failing_index = nil
       failing_status = nil
@@ -298,17 +299,16 @@ module SearchEngine
       # Fallback: summarize
       codes = []
       if body.is_a?(Hash)
-        res = body['results'] || body[:results]
-        if res.is_a?(Array)
-          res.each do |item|
-            c = item.is_a?(Hash) ? (item['status'] || item[:status] || item['code'] || item[:code]) : nil
-            codes << c.to_i if c
+        results = body['results'] || body[:results]
+        if results.is_a?(Array)
+          results.each do |item|
+            codes << (item['status'] || item[:status] || item['code'] || item[:code])
           end
         end
       end
-      msg = "multi_search failed for #{labels.size} searches (status #{error.status})."
-      msg += " Codes=#{codes}." unless codes.empty?
-      Errors::Api.new(msg, status: error.status, body: error.body)
+      Errors::Api.new("Multi-search failed (statuses: #{codes.compact.join(', ')})", status: error.status,
+body: error.body
+      )
     end
   end
 end

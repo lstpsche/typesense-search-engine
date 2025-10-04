@@ -45,7 +45,10 @@ module SearchEngine
       highlight_start_tag: nil,
       highlight_end_tag: nil,
       highlight_affix_num_tokens: nil,
-      highlight_snippet_threshold: nil
+      highlight_snippet_threshold: nil,
+      # Runtime flags: per-relation overrides for synonyms/stopwords
+      use_synonyms: nil,
+      use_stopwords: nil
     }.freeze
 
     # Keys considered essential for :only preset mode.
@@ -671,6 +674,7 @@ module SearchEngine
       opts = @state[:options] || {}
 
       params = {}
+      runtime_flags = {}
 
       # Query basics
       q_val = option_value(opts, :q) || '*'
@@ -868,6 +872,24 @@ module SearchEngine
         end
       end
 
+      # Synonyms/Stopwords toggles — map to authoritative server params.
+      # If server uses inverse semantics for stopwords (e.g., remove_stop_words),
+      # flip here while keeping the DSL stable.
+      unless @state[:use_synonyms].nil?
+        params[:enable_synonyms] = @state[:use_synonyms]
+        runtime_flags[:use_synonyms] = @state[:use_synonyms]
+      end
+      unless @state[:use_stopwords].nil?
+        # Typesense expects remove_stop_words=true to disable stopwords; invert our DSL if needed.
+        # Authoritative mapping assumption: param name is :remove_stop_words.
+        remove = !@state[:use_stopwords]
+        params[:remove_stop_words] = remove
+        runtime_flags[:use_stopwords] = @state[:use_stopwords]
+      end
+
+      # Attach internal-only runtime flags preview for observability; stripped in client
+      params[:_runtime_flags] = runtime_flags unless runtime_flags.empty?
+
       params
     end
 
@@ -889,7 +911,7 @@ module SearchEngine
     #   rel.explain
     #   #=> "SearchEngine::Product Relation\n  where: active:=true AND brand_id IN [1,2]\n  order: updated_at:desc\n  select: id,name\n  page/per: 2/20"
     # @see docs/presets.md#conflicts
-    def explain(to: nil)
+    def explain(to: nil) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
       params = to_typesense_params
 
       lines = []
@@ -898,6 +920,12 @@ module SearchEngine
 
       append_preset_explain_line(lines, params)
       append_curation_explain_lines(lines)
+
+      # Runtime flags explain
+      lines << "  use_synonyms: #{@state[:use_synonyms]}" if @state.key?(:use_synonyms) && !@state[:use_synonyms].nil?
+      if @state.key?(:use_stopwords) && !@state[:use_stopwords].nil?
+        lines << "  use_stopwords: #{@state[:use_stopwords]} (maps to remove_stop_words=#{!@state[:use_stopwords]})"
+      end
 
       if params[:filter_by] && !params[:filter_by].to_s.strip.empty?
         where_str = friendly_where(params[:filter_by].to_s)
@@ -1236,7 +1264,7 @@ module SearchEngine
       normalized
     end
 
-    def apply_initial_state_key!(normalized, key, value) # rubocop:disable Metrics/AbcSize
+    def apply_initial_state_key!(normalized, key, value) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
       k = key.to_sym
       case k
       when :filters
@@ -2285,7 +2313,7 @@ module SearchEngine
     # Faceting DSL
     # ------------
     # @see docs/faceting.md
-    def facet_by(field, max_values: nil, sort: nil, stats: nil)
+    def facet_by(field, max_values: nil, sort: nil, stats: nil) # rubocop:disable Metrics/AbcSize
       name = field.to_s.strip
       raise SearchEngine::Errors::InvalidParams, 'facet_by: field name must be non-empty' if name.empty?
 
@@ -2349,7 +2377,7 @@ module SearchEngine
       end
     end
 
-    def facet_query(field, expression, label: nil)
+    def facet_query(field, expression, label: nil) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
       name = field.to_s.strip
       raise SearchEngine::Errors::InvalidParams, 'facet_query: field name must be non-empty' if name.empty?
 
@@ -2430,6 +2458,60 @@ module SearchEngine
       out[:affix_tokens] = h[:affix_tokens] unless h[:affix_tokens].nil?
       out[:snippet_threshold] = h[:snippet_threshold] unless h[:snippet_threshold].nil?
       out
+    end
+
+    # Control usage of synonyms at query time.
+    #
+    # @param value [true,false,nil] when nil, clears the override (inherit server default)
+    # @return [SearchEngine::Relation]
+    # @since 0.1.0
+    # @example
+    #   SearchEngine::Product.where(q: "red color").use_synonyms(true)
+    def use_synonyms(value)
+      v = value.nil? ? nil : coerce_boolean_strict(value, :use_synonyms)
+      spawn do |s|
+        s[:use_synonyms] = v
+      end
+    end
+
+    # Control usage of stopwords at query time.
+    #
+    # @param value [true,false,nil] when nil, clears the override (inherit server default)
+    # @return [SearchEngine::Relation]
+    # @since 0.1.0
+    # @example
+    #   SearchEngine::Product.where(q: "red color").use_stopwords(false)
+    def use_stopwords(value)
+      v = value.nil? ? nil : coerce_boolean_strict(value, :use_stopwords)
+      spawn do |s|
+        s[:use_stopwords] = v
+      end
+    end
+
+    def normalize_highlight_input(value)
+      h = value || {}
+      raise SearchEngine::Errors::InvalidOption, 'highlight must be a Hash of options' unless h.is_a?(Hash)
+
+      fields = Array(h[:fields] || h['fields']).flatten.compact.map { |f| f.to_s.strip }.reject(&:empty?)
+      full_fields = Array(h[:full_fields] || h['full_fields']).flatten.compact.map { |f| f.to_s.strip }.reject(&:empty?)
+      start_tag = h[:start_tag] || h['start_tag']
+      end_tag = h[:end_tag] || h['end_tag']
+      affix = h.key?(:affix_tokens) ? h[:affix_tokens] : h['affix_tokens']
+      snippet = h.key?(:snippet_threshold) ? h[:snippet_threshold] : h['snippet_threshold']
+
+      affix = nil if affix.nil?
+      affix = coerce_integer_min(affix, :highlight_affix_num_tokens, 0) unless affix.nil?
+      snippet = nil if snippet.nil?
+      snippet = coerce_integer_min(snippet, :highlight_snippet_threshold, 0) unless snippet.nil?
+
+      {
+        fields: fields,
+        full_fields: full_fields,
+        start_tag: start_tag && start_tag.to_s,
+        end_tag: end_tag && end_tag.to_s,
+        affix_tokens: affix,
+        snippet_threshold: snippet
+      }
     end
   end
 end
