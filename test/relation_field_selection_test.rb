@@ -10,10 +10,9 @@ class RelationFieldSelectionTest < Minitest::Test
     attribute :active, :boolean
   end
 
-  # Model to reproduce ticket example verbatim
   module ::SearchEngine
     class Book < SearchEngine::Base
-      collection 'books_field_selection_ticket'
+      collection 'books_field_selection'
       attribute :id, :integer
       attribute :title, :string
       attribute :author_id, :integer
@@ -70,7 +69,7 @@ class RelationFieldSelectionTest < Minitest::Test
     refute params.key?(:exclude_fields)
   end
 
-  def test_ticket_example_verbatim
+  def test_example
     rel = SearchEngine::Book
           .all
           .joins(:authors, :brands)
@@ -91,11 +90,10 @@ class RelationFieldSelectionTest < Minitest::Test
     assert_match(/did you mean/i, error.message)
   end
 
-  def test_unknown_join_field_raises_with_verbatim_example_and_suggestion
+  def test_unknown_join_field_raises_with_example_and_suggestion
     error = assert_raises(SearchEngine::Errors::UnknownJoinField) do
       SearchEngine::Book.all.joins(:authors).select(authors: [:middle_name])
     end
-    # Verbatim prefix must match the ticket example
     prefix = 'UnknownJoinField: :middle_name is not declared on association :authors for SearchEngine::Book'
     assert_equal prefix, error.message.split(' (did you mean').first
   end

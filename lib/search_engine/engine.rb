@@ -23,6 +23,27 @@ module SearchEngine
 
     initializer 'search_engine.observability' do
       cfg = SearchEngine.config
+
+      # Prefer new structured LoggingSubscriber when configured; otherwise
+      # fall back to legacy Notifications::CompactLogger gated by cfg.observability.
+      begin
+        require 'search_engine/logging_subscriber'
+      rescue LoadError
+        # no-op; allow running without ActiveSupport
+      end
+
+      if defined?(SearchEngine::LoggingSubscriber)
+        logging_cfg = cfg.respond_to?(:logging) ? cfg.logging : nil
+        # Opt-out when mode is nil or sample is explicitly 0.0
+        if logging_cfg.respond_to?(:mode) && !logging_cfg.mode.nil?
+          sample = logging_cfg.respond_to?(:sample) ? logging_cfg.sample : nil
+          if sample.nil? || sample.to_f > 0.0
+            SearchEngine::LoggingSubscriber.install!(logging_cfg)
+            next
+          end
+        end
+      end
+
       next unless cfg.observability&.enabled
 
       # Defer requiring subscriber to runtime to avoid eager load issues

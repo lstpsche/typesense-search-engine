@@ -258,7 +258,7 @@ Curation parameters are computed per relation via `Relation#to_typesense_params`
 - **Pinned order**: `pinned_hits` preserves first‑occurrence order
 - **Omission**: empty arrays are omitted; `filter_curated_hits` omitted when `nil`
 
-Verbatim example from the ticket:
+Example:
 
 ```ruby
 res = SearchEngine.multi_search do |m|

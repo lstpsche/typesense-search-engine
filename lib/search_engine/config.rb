@@ -487,6 +487,13 @@ module SearchEngine
       @observability ||= ObservabilityConfig.new
     end
 
+    # Expose structured logging configuration.
+    # @return [OpenStruct]
+    def logging
+      require 'ostruct'
+      @logging ||= OpenStruct.new(mode: :compact, level: :info, sample: 1.0, logger: logger)
+    end
+
     # Assign curation configuration from a compatible object.
     # Accepts a CurationConfig, a Hash-like, or an object responding to :max_pins, :max_hidden, :id_regex.
     # Validates basic types on assignment.
