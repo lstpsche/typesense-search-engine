@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Relation](./relation.md) · [Compiler](./compiler.md) · [Observability](./observability.md)
+[← Back to Index](./index.md)
 
 # Join Declarations on Base
+
+Related: [Observability](./observability.md), [Field selection](./field_selection.md), [Troubleshooting → Joins](./troubleshooting.md#joins)
 
 Server‑side joins require lightweight association metadata declared on your model class. This page documents the model‑level DSL, the per‑class registry, how the relation compiles joined selections/filters/sorts, and the instrumentation emitted during compile.
 

@@ -1,4 +1,8 @@
+[← Back to Index](./index.md)
+
 # Presets
+
+Related: [Observability](./observability.md), [Troubleshooting → Presets](./troubleshooting.md#presets)
 
 ## Overview
 

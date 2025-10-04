@@ -1,6 +1,8 @@
-[← Back to Observability](./observability.md) · [DX helpers](./dx.md) · [Client](./client.md)
+[← Back to Index](./index.md)
 
 # Testing utilities
+
+Related: [Observability](./observability.md), [DX](./dx.md), [Client](./client.md)
 
 Test-only helpers to run the search layer fully offline and write ergonomic assertions against unified events and compiled params.
 

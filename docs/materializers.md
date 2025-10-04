@@ -1,6 +1,6 @@
 [← Back to Index](./index.md)
 
-[Client](./client.md) · [Relation](./relation.md) · [Observability](./observability.md) · [Curation](./curation.md)
+Related: [Client](./client.md), [Field selection](./field_selection.md), [Models](./models.md)
 
 ## Result materialization and hydration
 

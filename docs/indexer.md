@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Schema](./schema.md) · [Observability](./observability.md) · [CLI](./cli.md)
+[← Back to Index](./index.md)
 
 ## Indexer
+
+Related: [CLI](./cli.md), [Observability](./observability.md), [Troubleshooting → Indexer](./troubleshooting.md#indexer)
 
 Stream documents into a physical collection via JSONL bulk import with retries, stable memory, and notifications.
 

@@ -1,6 +1,8 @@
-[← Back to Index](./index.md) · [Indexer](./indexer.md) · [CLI](./cli.md)
+[← Back to Index](./index.md)
 
 # Schema Compiler & Diff
+
+Related: [CLI](./cli.md), [Troubleshooting → Schema](./troubleshooting.md#schema)
 
 The schema layer turns a model class (our DSL) into a Typesense-compatible schema hash and compares it to the live, currently aliased physical collection to surface drift.
 
