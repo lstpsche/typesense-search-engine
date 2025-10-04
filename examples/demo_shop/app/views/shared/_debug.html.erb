@@ -1,0 +1,8 @@
+<%# frozen_string_literal: true %>
+<% if defined?(@relation) && @relation %>
+  <details>
+    <summary>Debug</summary>
+    <pre><%= @relation.explain %></pre>
+    <pre><%= @relation.to_params_json %></pre>
+  </details>
+<% end %>

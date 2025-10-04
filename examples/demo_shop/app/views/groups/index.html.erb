@@ -1,0 +1,22 @@
+<h1>Products by Brand (Grouped)</h1>
+
+<p>Total groups: <%= @result.total_groups || @result.groups_count %></p>
+
+<% if @result.grouped? %>
+  <% @result.each_group do |group| %>
+    <h3>Brand ID: <%= group.key['brand_id'] || group.key['group'] %> (size: <%= group.size %>)</h3>
+    <ul>
+      <% group.hits.each do |p| %>
+        <li><%= p.instance_variable_get(:@name) || p.name rescue p.to_s %></li>
+      <% end %>
+    </ul>
+  <% end %>
+<% else %>
+  <p>No groups present.</p>
+<% end %>
+
+<details>
+  <summary>Explain</summary>
+  <pre><%= @relation.explain %></pre>
+  <pre><%= @relation.to_params_json %></pre>
+</details>

@@ -1,7 +1,13 @@
+inherit_mode:
+  merge:
+    - Exclude
+
 plugins:
   - rubocop-performance
 
 AllCops:
+  Exclude:
+    - examples/**/*
   NewCops: disable
   SuggestExtensions: false
   TargetRubyVersion: 3.1

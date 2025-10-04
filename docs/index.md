@@ -13,6 +13,7 @@ flowchart LR
   Index --> Testing
   Index --> Troubleshooting
   Index --> Contributing
+  Index --> Examples
 
   Guides --> Joins
   Guides --> Grouping
@@ -71,3 +72,11 @@ flowchart LR
 
 - [Docs style guide](./contributing/docs_style.md)
 - Project overview: [README](../README.md)
+
+## Examples
+
+- Demo app: `examples/demo_shop` — Quickstart in its README
+- Seeds: `examples/demo_shop/lib/docs/seed_demo.rb`
+- Multi‑search controller: `examples/demo_shop/app/controllers/search_controller.rb`
+- JOINs demo: `examples/demo_shop/app/controllers/books_controller.rb`
+- Grouping demo: `examples/demo_shop/app/controllers/groups_controller.rb`

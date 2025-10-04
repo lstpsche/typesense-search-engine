@@ -39,6 +39,8 @@ Minimal variations:
   end
   ```
 
+See example controller: `examples/demo_shop/app/controllers/search_controller.rb`.
+
 ### Per‑search overrides
 
 Per‑relation chainers and `options(...)` override or augment `common:` on a per‑entry basis:

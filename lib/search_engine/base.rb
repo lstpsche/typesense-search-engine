@@ -104,11 +104,18 @@ module SearchEngine
       #
       # @yieldparam dsl [SearchEngine::Mapper::Dsl]
       # @return [void]
-      def index
-        raise ArgumentError, 'block required' unless block_given?
+      def index(&block)
+        raise ArgumentError, 'index requires a block' unless block
 
         dsl = SearchEngine::Mapper::Dsl.new(self)
-        yield dsl
+        # Support both styles:
+        # - index { source :active_record, ...; map { ... } }
+        # - index { |dsl| dsl.source :active_record, ...; dsl.map { ... } }
+        if block.arity == 1
+          yield dsl
+        else
+          dsl.instance_eval(&block)
+        end
 
         definition = dsl.to_definition
         unless definition[:map].respond_to?(:call)

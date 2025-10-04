@@ -1,0 +1,26 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative '../config/boot'
+require_relative '../config/environment'
+
+begin
+  require 'search_engine/test'
+rescue LoadError => error
+  warn("search_engine/test not available: #{error.message}")
+end
+
+# Ensure offline mode unless explicitly disabled
+SearchEngine.configure { |c| c.client = SearchEngine::Test::StubClient.new } if ENV['SEARCH_ENGINE_OFFLINE'] == '1'
+
+# Seed if empty
+if Brand.count.zero?
+  require_relative '../lib/docs/seed_demo'
+  Docs::SeedDemo.run
+end
+
+rel = SearchEngine::Product.all.page(1).per(1)
+preview = rel.dry_run!
+puts preview[:url]
+puts preview[:body]
+puts 'OK'
