@@ -1,62 +1,82 @@
 # SearchEngine
 
-Mountless Rails::Engine wrapping Typesense with idiomatic Rails integration and AR-like querying.
+Mountless Rails::Engine for Typesense. Expressive Relation/DSL with JOINs, grouping, presets/curation — with strong DX and observability.
 
-## Docs
-See [docs/index.md](./docs/index.md) for the full documentation set.
+<!-- Badges: replace ORG/REPO and endpoints when available -->
+[![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
 
-Start here: [Quickstart](./docs/quickstart.md).
-
-Quick links: [Relation](./docs/relation.md) · [JOINs](./docs/joins.md) · [Query DSL](./docs/query_dsl.md) · [Compiler](./docs/compiler.md) · [Materializers](./docs/materializers.md) · [Grouping](./docs/grouping.md) · [Field Selection](./docs/field_selection.md) · [Presets](./docs/presets.md) · [Curation](./docs/curation.md) · [DX](./docs/dx.md) · [Observability](./docs/observability.md) · [Testing](./docs/testing.md) · [CLI](./docs/cli.md) · [Federated multi-search](./docs/multi_search.md) · [Debugging](./docs/debugging.md).
-
-## Quick Start
-
-1) Add the gem to your host app:
+## Quickstart
 
 ```ruby
-gem "search_engine"
+# Gemfile
+gem "typesense_search_engine"
 ```
 
-2) Configure minimal connection settings (initializer):
-
 ```ruby
-# config/initializers/search_engine.rb
+# config/initializers/typesense_search_engine.rb
 SearchEngine.configure do |c|
-  c.api_key  = ENV["TYPESENSE_API_KEY"]
-  c.host     = ENV.fetch("TYPESENSE_HOST", "localhost")
-  c.port     = ENV.fetch("TYPESENSE_PORT", 8108).to_i
-  c.protocol = ENV.fetch("TYPESENSE_PROTOCOL", "http")
+  c.host = ENV.fetch("TYPESENSE_HOST", "localhost")
+  c.port = 8108; c.protocol = "http"; c.api_key = ENV.fetch("TYPESENSE_API_KEY")
+  c.default_query_by = "name, description"
 end
 ```
 
-3) Perform your first search:
-
 ```ruby
-client = SearchEngine::Client.new
-client.search(
-  collection: "products",
-  params: { q: "milk", query_by: SearchEngine.config.default_query_by || "name" },
-  url_opts: { use_cache: true }
-)
+class SearchEngine::Product < SearchEngine::Base
+  collection "products"
+  attribute :id, :integer
+  attribute :name, :string
+end
+
+SearchEngine::Product.where(name: "milk").select(:id, :name).limit(5).to_a
 ```
 
-Next: tune defaults in [docs/configuration.md](./docs/configuration.md), explore field selection in [docs/field_selection.md](./docs/field_selection.md), and see the client API in [docs/client.md](./docs/client.md).
+See Quickstart for details → [docs/quickstart.md](./docs/quickstart.md).
 
-## Purpose
-Provide a thin, mountless layer around Typesense for Rails apps. No routes/controllers are included by default.
+## Documentation
+
+- **Quickstart**: [docs/quickstart.md](./docs/quickstart.md)
+- **Relation & DSL Guide**: [docs/relation_guide.md](./docs/relation_guide.md)
+- **Cookbook (patterns)**: [docs/cookbook_queries.md](./docs/cookbook_queries.md)
+- **Multi‑search Guide**: [docs/multi_search_guide.md](./docs/multi_search_guide.md)
+- **JOINs, Selection & Grouping**: [docs/joins_selection_grouping.md](./docs/joins_selection_grouping.md)
+- **Presets & Curation playbook**: [docs/presets_curation_playbook.md](./docs/presets_curation_playbook.md)
+- **Observability, DX & Testing**: [docs/observability_dx_testing.md](./docs/observability_dx_testing.md)
+- **CLI (doctor)**: [docs/cli.md](./docs/cli.md)
+- **Schema & Indexer E2E**: [docs/schema_indexer_e2e.md](./docs/schema_indexer_e2e.md)
+- **Testing utilities**: [docs/testing.md](./docs/testing.md)
+
+## Example app
+
+See `examples/demo_shop` — demonstrates single/multi search, JOINs, grouping, presets/curation, and DX/observability. Supports offline mode via the stub client (see [docs/testing.md](./docs/testing.md)).
+
+## Mermaid & screenshots
+
+Small diagrams illustrate key flows:
+- Request flow: [docs/quickstart.md → Request flow](./docs/quickstart.md#request-flow)
+- Doctor flow: [docs/cli.md → Doctor flow](./docs/cli.md#doctor-flow)
+- Docs portal overview: [docs/index.md](./docs/index.md)
+
+## Contributing
+
+See [docs/contributing/docs_style.md](./docs/contributing/docs_style.md). Follow YARDoc for public APIs, add backlinks on docs landing pages, and redact secrets in examples.
 
 ## License
-See [LICENSE](./LICENSE).
 
-### Troubleshooting
+MIT — see [LICENSE](./LICENSE).
 
-For common errors and fixes, see:
-- [Query DSL → Troubleshooting](./docs/query_dsl.md#operators)
-- [Compiler → Troubleshooting](./docs/compiler.md#troubleshooting)
-- [Field Selection → Troubleshooting](./docs/field_selection.md#guardrails)
-- [JOINs → Troubleshooting](./docs/joins.md#troubleshooting)
-- [Grouping → Troubleshooting](./docs/grouping.md#troubleshooting)
-- [Presets → Troubleshooting](./docs/presets.md#troubleshooting)
-- [Curation → Troubleshooting](./docs/curation.md#troubleshooting)
-- [Indexer → Troubleshooting](./docs/indexer.md#troubleshooting)
-- [Schema → Troubleshooting](./docs/schema.md#troubleshooting)
+---
+
+### Deep links
+
+- Quickstart → [Installation](./docs/quickstart.md#install-the-gem), [Configure initializer](./docs/quickstart.md#configure-the-initializer)
+- DX → [Helpers & examples (`dry_run!`, `to_params_json`, `to_curl`)](./docs/dx.md#helpers--examples)
+- CLI → [Doctor flow](./docs/cli.md#doctor-flow)
+
+<!-- Badge references (placeholders) -->
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/lstpsche/typesense-search-engine/ci.yml?branch=main
+[ci-url]: #
+[gem-badge]: https://img.shields.io/gem/v/search_engine.svg?label=gem
+[gem-url]: https://rubygems.org/gems/typesense_search_engine
+[docs-badge]: https://img.shields.io/badge/docs-index-blue
+[docs-url]: ./docs/index.md
