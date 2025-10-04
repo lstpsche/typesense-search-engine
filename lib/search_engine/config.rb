@@ -56,7 +56,8 @@ module SearchEngine
                   :use_cache,
                   :cache_ttl_s,
                   :strict_fields,
-                  :multi_search_limit
+                  :multi_search_limit,
+                  :client
 
     # Lightweight nested configuration for schema lifecycle.
     class SchemaConfig

@@ -1830,7 +1830,7 @@ module SearchEngine
     end
 
     def client
-      @__client ||= SearchEngine::Client.new # rubocop:disable Naming/MemoizedInstanceVariableName
+      @__client ||= (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new # rubocop:disable Naming/MemoizedInstanceVariableName
     end
 
     def option_value(hash, key)

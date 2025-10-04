@@ -177,7 +177,8 @@ module SearchEngine
         }
         begin
           SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
-            raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+            client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+            raw = client_obj.multi_search(searches: payloads, url_opts: url_opts)
             ctx[:http_status] = 200
           rescue Errors::Api => error
             ctx[:http_status] = error.status
@@ -188,7 +189,8 @@ module SearchEngine
         end
       else
         begin
-          raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+          client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+          raw = client_obj.multi_search(searches: payloads, url_opts: url_opts)
         rescue Errors::Api => error
           raise augment_multi_api_error(error, labels)
         end
@@ -239,7 +241,8 @@ module SearchEngine
         }
         begin
           SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
-            SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts).tap do
+            client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+            client_obj.multi_search(searches: payloads, url_opts: url_opts).tap do
               ctx[:http_status] = 200
             end
           rescue Errors::Api => error
@@ -250,7 +253,8 @@ module SearchEngine
           raise augment_multi_api_error(error, labels)
         end
       else
-        SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
+        client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+        client_obj.multi_search(searches: payloads, url_opts: url_opts)
       end
     rescue Errors::Api => error
       raise augment_multi_api_error(error, labels)
