@@ -1,0 +1,468 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# STDLib-only scanner for coupling & inbound calls to SearchEngine::Relation
+# - Parses Relation public surface (Ripper-first, fallback allowlist)
+# - Scans lib/ and app/ Ruby files (excludes test/spec/tmp/vendor/log/db/examples/**/db)
+# - Heuristically counts inbound calls to Relation methods
+# - Computes module co-occurrence across files
+# - Prints a concise summary and writes JSON to tmp/refactor/coupling_calls.json
+
+require 'ripper'
+require 'json'
+require 'set'
+require 'find'
+require 'pathname'
+require 'fileutils'
+
+ROOT = File.expand_path('..', __dir__)
+
+MATERIALIZER_METHODS = %w[
+  to_a each count first last take size empty? any? none? pluck explain
+  groups grouped? grouped group_by? to_params_json to_curl dry_run!
+].to_set
+
+# Fallback DSL surface when parsing fails
+FALLBACK_SURFACE = %w[
+  all where order select include_fields exclude joins limit offset page per per_page
+  group_by ranking prefix facet_by facet_fields preset pin hide explain
+  to_params_json to_curl dry_run! count first last take each to_a pluck size empty? any? none?
+].freeze
+
+COOCC_TOKENS = {
+  'relation'       => [/SearchEngine::Relation/, /\.(where|order|select|include_fields|joins|preset)\b/],
+  'compiler'       => [/SearchEngine::Compiler/, %r{search_engine/compiler}],
+  'client'         => [/SearchEngine::Client/, %r{search_engine/client}],
+  'result'         => [/SearchEngine::Result/, %r{search_engine/multi_result}],
+  'preset'         => [/\bpreset\s*\(/, /SearchEngine\.config\.presets/],
+  'curation'       => [/\bpin\s*\(/, /\bhide\s*\(/],
+  'grouping'       => [/\bgroup_by\s*\(/],
+  'joins'          => [/\bjoins\s*\(/, /SearchEngine::Joins/],
+  'dx'             => [/ConsoleHelpers/],
+  'observability'  => [/SearchEngine::Instrumentation/, /ActiveSupport::Notifications/, /SearchEngine::Otel/,
+                       /logging_subscriber/i],
+  'schema'         => [/SearchEngine::Schema/],
+  'indexer'        => [/SearchEngine::Indexer/]
+}.freeze
+
+# ----------------- Helpers -----------------
+
+def read_file(path)
+  File.read(path)
+rescue StandardError
+  ''
+end
+
+# Return array of absolute Ruby file paths to scan
+# Scan only lib/ and app/ under project root
+# Exclude test/spec/tmp/vendor/log/db examples/**/db
+
+def ruby_files_to_scan
+  roots = %w[lib app].map { |d| File.join(ROOT, d) }.select { |p| Dir.exist?(p) }
+  files = []
+  excluded_dir_names = %w[spec test tmp vendor log db node_modules]
+  Find.find(*roots) do |path|
+    if File.directory?(path)
+      # Prune excluded dirs by name
+      base = File.basename(path)
+      if excluded_dir_names.include?(base) || path.start_with?(File.join(ROOT, 'examples'), File.join(ROOT, 'vendor'))
+        Find.prune
+        next
+      end
+      next
+    else
+      next unless path.end_with?('.rb')
+
+      files << path
+    end
+  end
+  files
+end
+
+# Extract const name string from const sexp
+# Handles :const_ref and :const_path_ref recursively
+
+def const_name(sexp)
+  return nil unless sexp.is_a?(Array)
+
+  type = sexp[0]
+  case type
+  when :const_ref
+    tok = sexp[1]
+    tok && tok[1]
+  when :var_ref
+    tok = sexp[1]
+    tok && tok[0] == :@const ? tok[1] : nil
+  when :const_path_ref
+    left = const_name(sexp[1])
+    right_tok = sexp[2]
+    right = right_tok && right_tok[1]
+    [left, right].compact.join('::')
+  end
+end
+
+# Walk AST to collect public instance methods defined within SearchEngine::Relation
+# rubocop:disable Metrics/AbcSize
+
+def walk_relation_ast(node, stack, methods, visibility)
+  return visibility unless node.is_a?(Array)
+
+  case node[0]
+  when :program
+    node[1].each { |child| visibility = walk_relation_ast(child, stack, methods, visibility) }
+  when :module
+    mod_name = const_name(node[1])
+    stack.push(mod_name)
+    visibility = :public
+    visibility = walk_relation_ast(node[2], stack, methods, visibility)
+    stack.pop
+  when :class
+    class_name = const_name(node[1])
+    stack.push(class_name)
+    visibility = :public
+    visibility = walk_relation_ast(node[3], stack, methods, visibility)
+    stack.pop
+  when :bodystmt
+    stmts = node[1] || []
+    stmts.each { |child| visibility = walk_relation_ast(child, stack, methods, visibility) }
+  when :vcall
+    ident = node[1]
+    if ident && ident[0] == :@ident
+      case ident[1]
+      when 'private' then visibility = :private
+      when 'protected' then visibility = :protected
+      when 'public' then visibility = :public
+      end
+    end
+  when :command
+    ident = node[1]
+    if ident && ident[0] == :@ident
+      case ident[1]
+      when 'private' then visibility = :private
+      when 'protected' then visibility = :protected
+      when 'public' then visibility = :public
+      end
+    end
+  when :def
+    name_tok = node[1]
+    if name_tok && name_tok[0] == :@ident
+      full = stack.join('::')
+      methods << name_tok[1] if full == 'SearchEngine::Relation' && visibility == :public
+    end
+  when :defs
+    # ignore class methods
+  else
+    node[1..].each do |child|
+      visibility = walk_relation_ast(child, stack, methods, visibility) if child.is_a?(Array)
+    end
+  end
+
+  visibility
+end
+# rubocop:enable Metrics/AbcSize
+
+# Build sexp for Relation file
+
+def sexp_for_relation
+  relation_path = File.join(ROOT, 'lib', 'search_engine', 'relation.rb')
+  src = read_file(relation_path)
+  return nil if src.empty?
+
+  Ripper.sexp(src)
+end
+
+# Ensure essentials present; otherwise merge fallback
+
+def ensure_essentials(methods)
+  essentials = %w[where order select include_fields joins limit offset page per per_page group_by preset]
+  arr = methods.to_a
+  arr |= FALLBACK_SURFACE if (essentials & arr).empty?
+  arr.to_set
+end
+
+# Parse public instance methods under SearchEngine::Relation via Ripper
+# Returns Set of method names (Strings)
+
+def parse_relation_public_surface
+  sexp = sexp_for_relation
+  return FALLBACK_SURFACE.to_set unless sexp
+
+  methods = Set.new
+  walk_relation_ast(sexp, [], methods, :public)
+
+  ensure_essentials(methods)
+rescue StandardError
+  FALLBACK_SURFACE.to_set
+end
+
+# Extract left-most constant path receiver string for a :call chain
+
+def left_most_const_path(node)
+  return nil unless node.is_a?(Array)
+
+  case node[0]
+  when :call
+    left_most_const_path(node[1])
+  when :method_add_arg
+    left_most_const_path(node[1])
+  when :const_ref, :const_path_ref, :var_ref
+    const_name(node)
+  when :vcall
+    # no explicit receiver; likely local/method
+    nil
+  end
+end
+
+# Return array of method names in the chain ending at node (Strings)
+
+def chain_methods(node)
+  return [] unless node.is_a?(Array)
+
+  case node[0]
+  when :call
+    chain_methods(node[1]) + [node[3].to_s]
+  when :method_add_arg
+    chain_methods(node[1])
+  when :fcall
+    [node[1][1].to_s]
+  when :vcall
+    [node[1][1].to_s]
+  else
+    []
+  end
+end
+
+# Collect local variable names that are likely relations via simple regex heuristics
+
+def discover_relation_like_vars(content, relation_methods)
+  names = Set.new
+  # lhs = var; rhs mentions SearchEngine:: or any chained relation DSL method
+  content.scan(/\b([a-z][a-zA-Z0-9_]*)\s*=\s*([^\n]+)/) do |var, rhs|
+    if rhs.include?('SearchEngine::')
+      names << var
+    else
+      # looks like a chain with DSL methods
+      names_in_rhs = relation_methods.select { |m| rhs.match?(/\.(?:#{Regexp.escape(m)})\b/) }
+      names << var unless names_in_rhs.empty?
+    end
+  end
+  names
+end
+
+# Determine if a file is in SearchEngine proximity (namespaces/imports present)
+
+def file_in_se_proximity?(content)
+  content.include?('SearchEngine::') || content.include?('search_engine/') || content.include?('module SearchEngine')
+end
+
+# For a given file, count inbound Relation calls using Ripper first, then regex fallback
+# rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/BlockNesting
+
+def count_relation_calls_in_file(path, relation_methods)
+  content = read_file(path)
+  counts = Hash.new(0)
+  hits = 0
+
+  relation_vars = discover_relation_like_vars(content, relation_methods)
+  proximity = file_in_se_proximity?(content)
+
+  sexp = Ripper.sexp(content)
+  if sexp
+    # Traverse and collect :call and :method_add_arg nodes
+    stack = [sexp]
+    while (node = stack.pop)
+      next unless node.is_a?(Array)
+
+      type = node[0]
+      if %i[call method_add_arg].include?(type)
+        # Identify the callee node for method name extraction
+        callee = (type == :call ? node : node[1])
+        next unless callee.is_a?(Array)
+
+        if callee[0] == :call
+          method_name = callee[3].to_s
+          if relation_methods.include?(method_name)
+            methods_in_chain = chain_methods(callee)
+            left_const = left_most_const_path(callee)
+
+            chain_has_multiple_dsl = (methods_in_chain & relation_methods.to_a).length >= 2
+            left_is_se_const = left_const&.start_with?('SearchEngine')
+
+            receiver = callee[1]
+            receiver_is_rel_var = false
+            if receiver&.is_a?(Array) && receiver[0] == :var_ref
+              var_tok = receiver[1]
+              if var_tok&.first == :@ident
+                var_name = var_tok[1]
+                receiver_is_rel_var = relation_vars.include?(var_name)
+              end
+            end
+
+            if left_is_se_const || receiver_is_rel_var || chain_has_multiple_dsl ||
+               (proximity && chain_has_multiple_dsl)
+              counts[method_name] += 1
+              hits += 1
+            end
+          end
+        elsif callee[0] == :fcall
+          method_name = callee[1][1].to_s
+          # bare fcall is too ambiguous; skip unless in proximity and method is very unique
+          unique_fcalls = %w[preset group_by include_fields joins ranking prefix]
+          if relation_methods.include?(method_name) && proximity && unique_fcalls.include?(method_name)
+            counts[method_name] += 1
+            hits += 1
+          end
+        end
+      end
+
+      node.reverse_each { |child| stack << child if child.is_a?(Array) }
+    end
+  else
+    # Regex fallback: count .method_name( occurrences conservatively
+    relation_methods.each do |m|
+      re = /\.(?:#{Regexp.escape(m)})\s*(\(|\b)/
+      count = content.scan(re).length
+      next if count.zero?
+      next unless proximity
+
+      counts[m] += count
+      hits += count
+    end
+  end
+
+  [counts, hits]
+end
+# rubocop:enable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/BlockNesting
+
+# Discover tokens present in file for co-occurrence
+
+def detect_coocc_tokens(content)
+  present = Set.new
+  COOCC_TOKENS.each do |name, patterns|
+    patterns.each do |re|
+      if content.match?(re)
+        present << name
+        break
+      end
+    end
+  end
+  present
+end
+
+# ----------------- Main -----------------
+
+start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+relation_methods = parse_relation_public_surface
+relation_methods |= MATERIALIZER_METHODS
+
+files = ruby_files_to_scan
+
+per_method = Hash.new { |h, k| h[k] = { 'count' => 0, 'files' => Hash.new(0) } }
+per_file_total = Hash.new(0)
+file_tokens = {}
+
+files.each do |path|
+  content = read_file(path)
+  tokens = detect_coocc_tokens(content)
+  file_tokens[path] = tokens
+
+  counts, hits = count_relation_calls_in_file(path, relation_methods)
+  next if hits.zero?
+
+  per_file_total[path] += hits
+  counts.each do |meth, c|
+    pm = per_method[meth]
+    pm['count'] += c
+    pm['files'][path] += c
+  end
+end
+
+# Compute co-occurrence pairs
+pair_counts = Hash.new(0)
+token_files = Hash.new { |h, k| h[k] = Set.new }
+file_tokens.each do |path, toks|
+  toks.each { |t| token_files[t] << path }
+  toks = toks.to_a.sort
+  (0...toks.length).each do |i|
+    ((i + 1)...toks.length).each do |j|
+      a = toks[i]
+      b = toks[j]
+      pair_counts[[a, b]] += 1
+    end
+  end
+end
+
+coocc = pair_counts.map do |(a, b), count|
+  fa = token_files[a].length
+  fb = token_files[b].length
+  denom = (fa + fb - count)
+  j = denom.zero? ? 0.0 : (count.to_f / denom)
+  { 'a' => a, 'b' => b, 'count' => count, 'jaccard' => j }
+end
+
+# Sorting helpers
+mapped_methods = per_method.map do |name, data|
+  files_sorted = data['files'].sort_by { |fp, c| [-c, fp] }.map(&:first)
+  kind = MATERIALIZER_METHODS.include?(name) ? 'Materializer' : 'Chainer'
+  {
+    'name' => name,
+    'kind' => kind,
+    'count' => data['count'],
+    'unique_files' => data['files'].length,
+    'example_files' => files_sorted.first(3)
+  }
+end
+per_method_sorted = mapped_methods.sort_by { |h| [-h['count'], -h['unique_files'], h['name']] }
+
+per_file_sorted = per_file_total.sort_by { |fp, c| [-c, fp] }
+
+coocc_sorted = coocc.sort_by { |h| [-h['count'], -h['jaccard'], h['a'], h['b']] }
+
+# JSON output
+json_payload = {
+  'relation_surface' => relation_methods.to_a.sort,
+  'methods' => per_method_sorted,
+  'files_top' => per_file_sorted.first(50).map do |fp, c|
+    { 'file' => Pathname(fp).relative_path_from(Pathname(ROOT)).to_s, 'count' => c }
+  end,
+  'cooccurrence' => coocc_sorted.first(50)
+}
+
+json_dir = File.join(ROOT, 'tmp', 'refactor')
+FileUtils.mkdir_p(json_dir)
+json_path = File.join(json_dir, 'coupling_calls.json')
+File.write(json_path, JSON.pretty_generate(json_payload))
+
+# Human-friendly summary
+puts '=== SearchEngine::Relation inbound call summary (approx) ==='
+puts
+puts 'Top 20 Relation methods:'
+per_method_sorted.first(20).each_with_index do |m, idx|
+  examples = m['example_files'].map { |fp| Pathname(fp).relative_path_from(Pathname(ROOT)).to_s }.join(', ')
+  line = format('%<idx>2d. %<name>-20s %<kind>-12s total=%<total>5d files=%<files>3d e.g. %<examples>s',
+                idx: idx + 1,
+                name: m['name'],
+                kind: "(#{m['kind']})",
+                total: m['count'],
+                files: m['unique_files'],
+                examples: examples)
+  puts line
+end
+puts
+puts 'Top 15 call-site files:'
+per_file_sorted.first(15).each_with_index do |(fp, c), idx|
+  rel = Pathname(fp).relative_path_from(Pathname(ROOT)).to_s
+  puts format('%<idx>2d. %<rel>-70s total=%<total>5d', idx: idx + 1, rel: rel, total: c)
+end
+puts
+puts 'Top co-occurring module pairs:'
+coocc_sorted.first(15).each_with_index do |p, idx|
+  puts format('%<idx>2d. %<a>-12s + %<b>-12s files=%<files>4d jaccard=%<j>.3f',
+              idx: idx + 1, a: p['a'], b: p['b'], files: p['count'], j: p['jaccard'])
+end
+puts
+puts "JSON written to: #{Pathname(json_path).relative_path_from(Pathname(ROOT))}"
+
+duration = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time
+puts format('Completed in %.2fs', duration)
