@@ -142,6 +142,31 @@ module SearchEngine
            deleted_count searches_count fields_changed_count added_count removed_count in_sync].each do |k|
           assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
         end
+        # New event attributes (redacted/summarized)
+        %i[fields_count queries_count max_facet_values sort_flags conflicts].each do |k|
+          assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
+        end
+        %i[full_fields_count affix_tokens snippet_threshold tag_kind].each do |k|
+          assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
+        end
+        %i[use_synonyms use_stopwords source].each do |k|
+          assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
+        end
+        if p.key?(:shapes)
+          shapes = p[:shapes] || {}
+          assign_attr(span, 'se.shapes.point', shapes[:point]) if shapes.key?(:point)
+          assign_attr(span, 'se.shapes.rect', shapes[:rect]) if shapes.key?(:rect)
+          assign_attr(span, 'se.shapes.circle', shapes[:circle]) if shapes.key?(:circle)
+        end
+        %i[sort_mode radius_bucket].each do |k|
+          assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
+        end
+        %i[query_vector_present dims hybrid_weight ann_params_present].each do |k|
+          assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
+        end
+        %i[early_limit validate_max applied_strategy triggered total_hits].each do |k|
+          assign_attr(span, "se.#{k}", p[k]) if p.key?(k)
+        end
       end
 
       def apply_params_preview(span, payload)

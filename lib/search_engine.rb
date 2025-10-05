@@ -27,6 +27,7 @@ require 'search_engine/dispatcher'
 require 'search_engine/stale_filter'
 require 'search_engine/joins/guard'
 require 'search_engine/admin'
+require 'search_engine/ranking_plan'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
