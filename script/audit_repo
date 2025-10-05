@@ -1,0 +1,637 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Repo Audit & Findings (sizes, disables, duplication)
+# - stdlib only (plus RuboCop shell-out)
+# - Generates tmp/refactor/findings.json and tmp/refactor/refactor_audit.md
+#
+# @note Repository audit script that scans Ruby sources and emits machine-readable JSON
+#   and a Markdown report. Regenerate via `bundle exec ruby script/audit_repo`.
+
+require 'json'
+require 'open3'
+require 'ripper'
+require 'digest/sha1'
+require 'fileutils'
+
+# Utility and runners for the repository audit
+module RepoAudit
+  ROOT = File.expand_path('..', __dir__)
+  TMP_DIR = File.join(ROOT, 'tmp', 'refactor')
+  JSON_OUT = File.join(TMP_DIR, 'findings.json')
+  MD_OUT = File.join(TMP_DIR, 'refactor_audit.md')
+
+  TARGET_DIRS = [
+    File.join(ROOT, 'lib'),
+    File.join(ROOT, 'app'),
+    File.join(ROOT, 'config', 'initializers')
+  ].freeze
+
+  EXCLUDE_PATH_PARTS = %w[
+    /spec/
+    /test/
+    /tmp/
+    /vendor/
+    /examples/
+    /node_modules/
+    /db/
+    /storage/
+  ].freeze
+
+  OPENING_KW = %w[def class module do if unless case while until for begin].freeze
+
+  # @api private
+  # Utility helpers: filesystem ops, atomic writes, RuboCop invocation, and parsing helpers.
+  class Util
+    def self.repo_relative(path)
+      path.start_with?(ROOT) ? path.sub("#{ROOT}/", '') : path
+    end
+
+    def self.atomic_write(path, content)
+      dir = File.dirname(path)
+      FileUtils.mkdir_p(dir)
+      tmp = "#{path}.tmp"
+      File.open(tmp, 'wb') { |f| f.write(content) }
+      File.rename(tmp, path)
+    end
+
+    def self.detect_files
+      paths = []
+      TARGET_DIRS.each do |dir|
+        next unless Dir.exist?(dir)
+
+        Dir.glob(File.join(dir, '**', '*.rb')).each do |p|
+          next unless File.file?(p)
+          next if EXCLUDE_PATH_PARTS.any? { |part| p.include?(part) }
+
+          paths << p
+        end
+      end
+      paths.uniq.sort
+    end
+
+    def self.run_rubocop_json
+      stdout, stderr, status = Open3.capture3('bundle', 'exec', 'rubocop', '--format', 'json', chdir: ROOT)
+      rubocop_status = status.exitstatus
+      data = nil
+      begin
+        data = JSON.parse(stdout)
+      rescue JSON::ParserError
+        data = nil
+      end
+      [data, stderr, rubocop_status]
+    end
+
+    def self.non_blank_non_comment_loc(lines)
+      lines.count { |line| line !~ /\A\s*(#|$)/ }
+    end
+
+    def self.parse_disable_cops_from_line(line)
+      # Matches:
+      return [] unless /#\s*rubocop:disable\b/i.match?(line)
+
+      raw = line.sub(/.*#\s*rubocop:disable\b/i, '')
+      list = raw.split(/[#\n]/).first.to_s # until next comment or EOL
+      list.split(/[\s,]+/).map(&:strip).reject(&:empty?)
+    end
+
+    def self.truncate_middle(str, max_len = 80)
+      return str if str.length <= max_len
+
+      half = (max_len - 3) / 2
+      "#{str[0, half]}...#{str[-half, half]}"
+    end
+  end
+
+  MethodInfo = Struct.new(
+    :name, :file, :start_line, :end_line, :loc, :sha1,
+    keyword_init: true
+  )
+
+  FileMetrics = Struct.new(
+    :path, :loc, :class_count, :module_count, :method_count,
+    :disables_by_cop, :disable_total, :longest_methods, :duplication_hints,
+    keyword_init: true
+  )
+
+  # Analyzes a single Ruby file for LOC, counts, methods, disables and duplication hints.
+  class FileAnalyzer
+    def initialize(path)
+      @path = path
+      @content = File.read(path)
+      @lines = @content.lines
+      @tokens = Ripper.lex(@content)
+      @scope_stack = [] # array of strings for modules/classes
+      @eigen_depth = 0
+      @methods = []
+      @class_count = 0
+      @module_count = 0
+      @method_count = 0
+      @disable_counts = Hash.new(0)
+      @string_counts = Hash.new(0)
+      @method_body_hash_counts = Hash.new(0)
+    end
+
+    def analyze
+      scan_disable_comments
+      scan_strings
+      scan_tokens_for_scopes_and_methods
+
+      longest_methods = @methods.sort_by { |m| [-m.loc, m.file, m.start_line, m.name] }.first(5)
+      sorted_method_hashes = @method_body_hash_counts.sort_by { |(h, _)| h }
+
+      FileMetrics.new(
+        path: Util.repo_relative(@path),
+        loc: Util.non_blank_non_comment_loc(@lines),
+        class_count: @class_count,
+        module_count: @module_count,
+        method_count: @method_count,
+        disables_by_cop: @disable_counts.sort_by { |(cop, _)| cop }.to_h,
+        disable_total: @disable_counts.values.sum,
+        longest_methods: longest_methods.map do |m|
+          { name: m.name, loc: m.loc, start_line: m.start_line, end_line: m.end_line }
+        end,
+        duplication_hints: {
+          repeated_method_body_hashes: sorted_method_hashes.map { |h, c| { hash: h, count: c } },
+          repeated_strings: @string_counts
+            .select { |s, c| s.length >= 12 && c >= 2 }
+            .sort_by { |(s, c)| [-c, s] }
+            .map { |s, c| { value: s, count: c } }
+        }
+      )
+    end
+
+    attr_reader :methods
+
+    def string_counts
+      # All strings in this file (length >= 12) with count (can be 1)
+      @string_counts.select { |s, _| s.length >= 12 }
+    end
+
+    private
+
+    def scan_disable_comments
+      @lines.each do |line|
+        cops = Util.parse_disable_cops_from_line(line)
+        cops.each { |cop| @disable_counts[cop] += 1 }
+      end
+    end
+
+    def scan_strings
+      # Count string literals across file
+      @tokens.each do |(_pos, type, str, _state)|
+        next unless type == :on_tstring_content
+
+        content = str.to_s
+        next if content.strip.empty?
+
+        @string_counts[content] += 1
+      end
+    end
+
+    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockNesting
+    def scan_tokens_for_scopes_and_methods
+      i = 0
+      n = @tokens.length
+      # We need to track nested openers to find matching end for methods
+      block_stack = []
+
+      while i < n
+        pos, type, str, _st = @tokens[i]
+        if type == :on_kw && str == 'class'
+          if lookahead_eigenclass?(i)
+            # class << self — do not count as a real class, but track block for matching end
+            block_stack.push(:class)
+            @eigen_depth += 1
+            i += 1
+            next
+          end
+          name, consumed = parse_class_or_module_name(i + 1)
+          @scope_stack.push(name) unless name.empty?
+          block_stack.push(:class)
+          @class_count += 1
+          i += consumed
+        elsif type == :on_kw && str == 'module'
+          name, consumed = parse_class_or_module_name(i + 1)
+          @scope_stack.push(name) unless name.empty?
+          block_stack.push(:module)
+          @module_count += 1
+          i += consumed
+        elsif type == :on_kw && str == 'def'
+          method_ctx = parse_method_signature(i)
+          opener_depth = 1
+          j = i + 1
+          while j < n
+            tok_pos, t, s, _st2 = @tokens[j]
+            if t == :on_kw
+              if OPENING_KW.include?(s)
+                opener_depth += 1
+              elsif s == 'end'
+                opener_depth -= 1
+                if opener_depth.zero?
+                  start_line = pos[0].to_i
+                  end_line = tok_pos[0].to_i
+                  loc = count_loc_for_range(start_line, end_line)
+                  body_sha1 = sha1_for_range(start_line, end_line)
+
+                  owner = method_ctx[:owner]
+                  call_type = method_ctx[:call_type]
+                  method_name = method_ctx[:name]
+                  qualified_owner = if owner && !owner.empty?
+                                      owner
+                                    else
+                                      @scope_stack.empty? ? '' : @scope_stack.join('::')
+                                    end
+                  display_name = if !qualified_owner.empty?
+                                   if call_type == :class
+                                     "#{qualified_owner}.#{method_name}"
+                                   else
+                                     "#{qualified_owner}##{method_name}"
+                                   end
+                                 else
+                                   method_name
+                                 end
+
+                  @methods << MethodInfo.new(
+                    name: display_name,
+                    file: Util.repo_relative(@path),
+                    start_line: start_line,
+                    end_line: end_line,
+                    loc: loc,
+                    sha1: body_sha1
+                  )
+                  @method_count += 1
+                  @method_body_hash_counts[body_sha1] += 1 if body_sha1
+                  i = j # advance to matching end
+                  break
+                end
+              end
+            end
+            j += 1
+          end
+        elsif type == :on_kw && str == 'end'
+          unless block_stack.empty?
+            sym = block_stack.pop
+            if sym == :class && @eigen_depth.positive?
+              @eigen_depth -= 1
+            elsif %i[class module].include?(sym) && !@scope_stack.empty?
+              # Leaving class/module scope when appropriate
+              @scope_stack.pop
+            end
+          end
+        end
+        i += 1
+      end
+    end
+    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockNesting
+
+    def lookahead_eigenclass?(idx)
+      # After 'class', check for '<<' 'self'
+      j = idx + 1
+      saw_shift = false
+      while j < @tokens.length
+        _p, t, s, _st = @tokens[j]
+        j += 1
+        next if %i[on_sp on_ignored_nl on_nl on_comment].include?(t)
+
+        if t == :on_op && s == '<<'
+          saw_shift = true
+          next
+        end
+        return true if saw_shift && t == :on_kw && s == 'self'
+
+        break
+      end
+      false
+    end
+
+    def parse_class_or_module_name(idx)
+      # Collect sequences of constants and ::, e.g., Foo::Bar
+      name_parts = []
+      j = idx
+      while j < @tokens.length
+        _p, t, s, _st = @tokens[j]
+        break if %i[on_nl on_ignored_nl on_comment].include?(t)
+
+        if t == :on_const
+          name_parts << s
+        elsif t == :on_op && s == '::'
+          # keep separator
+        else
+          break
+        end
+        j += 1
+      end
+      [name_parts.join('::'), j - idx]
+    end
+
+    def parse_method_signature(idx_def)
+      # idx_def points at token index where current token is 'def'
+      owner_parts = []
+      owner_type = :instance # or :class
+      method_name = nil
+
+      j = idx_def + 1
+      while j < @tokens.length
+        _p, t, s, _st = @tokens[j]
+        break if %i[on_nl on_ignored_nl on_comment on_semicolon].include?(t)
+
+        if t == :on_kw && s == 'self'
+          owner_parts << 'self'
+        elsif t == :on_const
+          owner_parts << s
+        elsif t == :on_ident && method_name.nil?
+          method_name = s
+        elsif t == :on_op && ['.', '::'].include?(s)
+          owner_type = :class
+        elsif t == :on_op && method_name.nil?
+          # operator method names like []=, <<, ==, etc
+          # collect a contiguous operator sequence as the method name
+          method_name = s
+          # subsequent operator tokens could continue the name (rare)
+        end
+        j += 1
+      end
+      owner = owner_parts.empty? ? nil : owner_parts.join('::')
+      { owner: owner, call_type: owner_type, name: method_name || 'unknown' }
+    end
+
+    def count_loc_for_range(start_line, end_line)
+      slice = @lines[(start_line - 1)..(end_line - 1)] || []
+      Util.non_blank_non_comment_loc(slice)
+    end
+
+    def sha1_for_range(start_line, end_line)
+      slice = @lines[(start_line - 1)..(end_line - 1)] || []
+      # Exclude leading 'def' line and trailing 'end' line for body hash
+      body = slice[1..-2] || []
+      normalized = body.join.gsub(/\s+/, ' ').strip
+      return nil if normalized.empty?
+
+      Digest::SHA1.hexdigest(normalized)[0, 12]
+    end
+  end
+
+  # Orchestrates analysis and writes JSON and Markdown outputs.
+  class Runner
+    def initialize
+      @files = Util.detect_files
+      @file_metrics = {}
+      @global_methods = []
+      @global_string_counts = Hash.new(0)
+      @rubocop_data, @rubocop_stderr, @rubocop_status = Util.run_rubocop_json
+    end
+
+    def run
+      analyze_files
+      json_obj = build_json
+      Util.atomic_write(JSON_OUT, JSON.pretty_generate(json_obj))
+      Util.atomic_write(MD_OUT, build_markdown(json_obj))
+
+      # Exit codes: treat RuboCop status 2 as failure, but still generated outputs
+      exit(@rubocop_status == 2 ? 2 : 0)
+    end
+
+    private
+
+    def analyze_files
+      @files.each do |path|
+        analyzer = FileAnalyzer.new(path)
+        metrics = analyzer.analyze
+        @file_metrics[metrics.path] = metrics
+        analyzer.methods.each { |m| @global_methods << m }
+        analyzer.string_counts.each { |s, c| @global_string_counts[s] += c }
+      end
+    end
+
+    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
+    def build_json
+      files_hash = {}
+      total_loc = 0
+      @file_metrics.each_value do |fm|
+        files_hash[fm.path] = {
+          loc: fm.loc,
+          class_count: fm.class_count,
+          module_count: fm.module_count,
+          method_count: fm.method_count,
+          disables_by_cop: fm.disables_by_cop,
+          disable_total: fm.disable_total,
+          longest_methods: fm.longest_methods,
+          duplication_hints: fm.duplication_hints
+        }
+        total_loc += fm.loc
+      end
+
+      top_longest_files = @file_metrics.values
+                                       .sort_by { |fm| [-fm.loc, fm.path] }
+                                       .first(20)
+                                       .map(&:path)
+
+      top_longest_methods = @global_methods
+                            .sort_by { |m| [-m.loc, m.file, m.start_line, m.name] }
+                            .first(20)
+                            .map do |m|
+        {
+          name: m.name,
+          loc: m.loc,
+          file: m.file,
+          start_line: m.start_line,
+          end_line: m.end_line
+        }
+      end
+
+      disables_by_cop_global = Hash.new { |h, k| h[k] = { count: 0, files: {} } }
+      @file_metrics.each_value do |fm|
+        fm.disables_by_cop.each do |cop, count|
+          disables_by_cop_global[cop][:count] += count
+          disables_by_cop_global[cop][:files][fm.path] = true
+        end
+      end
+
+      repeated_strings_global = @global_string_counts
+                                .select { |s, c| s.length >= 12 && c >= 2 }
+                                .sort_by { |(s, c)| [-c, s] }
+                                .first(50)
+                                .map { |s, c| { value: s, count: c } }
+
+      # Method body clusters by hash
+      clusters = Hash.new { |h, k| h[k] = [] }
+      @global_methods.each do |m|
+        next unless m.sha1
+
+        clusters[m.sha1] << m
+      end
+      method_body_clusters = clusters.values
+                                     .select { |arr| arr.length >= 2 }
+                                     .sort_by { |arr| [-arr.length, -avg_loc(arr), arr.first.sha1] }
+                                     .first(20)
+                                     .map do |arr|
+        {
+          hash: arr.first.sha1,
+          count: arr.length,
+          avg_loc: avg_loc(arr),
+          methods: arr.sort_by { |mi| [mi.file, mi.start_line, mi.name] }.map do |mi|
+            { name: mi.name, file: mi.file, loc: mi.loc, start_line: mi.start_line, end_line: mi.end_line }
+          end
+        }
+      end
+
+      {
+        files: files_hash,
+        summary: {
+          total_files: @file_metrics.length,
+          total_loc: total_loc,
+          top_longest_files: top_longest_files,
+          top_longest_methods: top_longest_methods,
+          disables_by_cop_global: disables_by_cop_global.transform_values do |v|
+            { count: v[:count], files: v[:files].keys.sort }
+          end,
+          repeated_strings_global: repeated_strings_global,
+          method_body_clusters: method_body_clusters,
+          rubocop_status: @rubocop_status,
+          rubocop_metadata: (@rubocop_data && @rubocop_data['metadata']) || {}
+        }
+      }
+    end
+        # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
+
+    def avg_loc(arr)
+      return 0 if arr.empty?
+
+      (arr.map(&:loc).sum.to_f / arr.length).round(1)
+    end
+
+    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Layout/LineLength
+    def build_markdown(json_obj)
+      summary = json_obj[:summary] || json_obj['summary']
+
+      longest_files = @file_metrics.values.sort_by { |fm| [-fm.loc, fm.path] }.first(20)
+      longest_methods = @global_methods.sort_by { |m| [-m.loc, m.file, m.start_line, m.name] }.first(20)
+
+      relation_path = 'lib/search_engine/relation.rb'
+      relation_metrics = @file_metrics[relation_path]
+
+      md = +''
+      md << "## Overview\n\n"
+      md << "This report audits file sizes, longest methods, inline RuboCop disables, and duplication hints.\n"
+      md << "Regenerate with: \n\n"
+      md << "```bash\n"
+      md << "bundle exec ruby script/audit_repo\n"
+      md << "```\n\n"
+
+      # Top 20 longest files
+      md << "## Top 20 longest files\n\n"
+      md << "| Rank | File | LOC | Classes | Modules | Methods | Disables |\n"
+      md << "| ---: | :--- | ---: | ---: | ---: | ---: | ---: |\n"
+      longest_files.each_with_index do |fm, idx|
+        md << "| #{idx + 1} | `#{fm.path}` | #{fm.loc} | #{fm.class_count} | #{fm.module_count} | #{fm.method_count} | #{fm.disable_total} |\n"
+      end
+      md << "\n"
+
+      # Ensure relation.rb is explicitly flagged (always)
+      if relation_metrics
+        md << "### Hotspot: `#{relation_path}`\n\n"
+        md << "- **LOC**: #{relation_metrics.loc}\n"
+        md << "- **Classes/Modules/Methods**: #{relation_metrics.class_count}/#{relation_metrics.module_count}/#{relation_metrics.method_count}\n"
+        md << "- **Inline disables**: #{relation_metrics.disable_total}\n"
+        if relation_metrics.longest_methods.any?
+          md << "- **Longest methods**:\n"
+          relation_metrics.longest_methods.each do |m|
+            md << "  - `#{m[:name]}` (#{m[:loc]} LOC, lines #{m[:start_line]}-#{m[:end_line]})\n"
+          end
+        end
+        md << "\n"
+      end
+
+      # Top 20 longest methods
+      md << "## Top 20 longest methods\n\n"
+      md << "| Rank | Method | LOC | File:Start-End |\n"
+      md << "| ---: | :--- | ---: | :--- |\n"
+      longest_methods.each_with_index do |m, idx|
+        md << "| #{idx + 1} | `#{m.name}` | #{m.loc} | `#{m.file}:#{m.start_line}-#{m.end_line}` |\n"
+      end
+      md << "\n"
+
+      # Inline disables by cop
+      md << "## Inline rubocop:disable by cop\n\n"
+      md << "| Rank | Cop | Count | Files affected |\n"
+      md << "| ---: | :--- | ---: | ---: |\n"
+      disables_by_cop = summary[:disables_by_cop_global] || summary['disables_by_cop_global']
+      cop_rows = disables_by_cop.map { |cop, v| [cop, v[:count] || v['count'], (v[:files] || v['files']).length] }
+      cop_rows.sort_by { |(_cop, count, files)| [-count, -files] }.each_with_index do |(cop, count, files_count), idx|
+        md << "| #{idx + 1} | `#{cop}` | #{count} | #{files_count} |\n"
+      end
+      md << "\n"
+
+      # Inline disables by file
+      md << "## Inline rubocop:disable by file\n\n"
+      md << "| Rank | File | Disable count | Top cops |\n"
+      md << "| ---: | :--- | ---: | :--- |\n"
+      files_sorted_by_disable = @file_metrics.values.sort_by { |fm| [-fm.disable_total, fm.path] }.first(20)
+      files_sorted_by_disable.each_with_index do |fm, idx|
+        top_cops = fm.disables_by_cop.sort_by { |(_c, cnt)| -cnt }.first(3).map { |c, _| c }.join(', ')
+        md << "| #{idx + 1} | `#{fm.path}` | #{fm.disable_total} | #{top_cops} |\n"
+      end
+      md << "\n"
+
+      # Duplication hints
+      md << "## Duplication hints\n\n"
+      # a) Repeated method bodies
+      clusters = summary[:method_body_clusters] || summary['method_body_clusters']
+      if clusters.any?
+        md << "### Repeated method bodies (top clusters)\n\n"
+        clusters.each_with_index do |cluster, idx|
+          md << "- **##{idx + 1}** `#{cluster[:hash] || cluster['hash']}` — count: #{cluster[:count] || cluster['count']}, avg LOC: #{cluster[:avg_loc] || cluster['avg_loc']}\n"
+          ms = cluster[:methods] || cluster['methods']
+          ms.first(10).each do |mi|
+            name = mi[:name] || mi['name']
+            file = mi[:file] || mi['file']
+            loc = mi[:loc] || mi['loc']
+            sl = mi[:start_line] || mi['start_line']
+            el = mi[:end_line] || mi['end_line']
+            md << "  - `#{name}` (#{loc} LOC) — `#{file}:#{sl}-#{el}`\n"
+          end
+        end
+        md << "\n"
+      else
+        md << "No repeated method bodies found.\n\n"
+      end
+
+      # b) Repeated strings
+      repeated_strings = summary[:repeated_strings_global] || summary['repeated_strings_global']
+      if repeated_strings.any?
+        md << "### Repeated strings (top values)\n\n"
+        md << "| Rank | String (truncated) | Count |\n"
+        md << "| ---: | :--- | ---: |\n"
+        repeated_strings.each_with_index do |entry, idx|
+          val = entry[:value] || entry['value']
+          cnt = entry[:count] || entry['count']
+          md << "| #{idx + 1} | `#{Util.truncate_middle(val, 80)}` | #{cnt} |\n"
+        end
+        md << "\n"
+      else
+        md << "No repeated strings found.\n\n"
+      end
+
+      # Top offenders & next steps
+      md << "## Top offenders & next steps\n\n"
+      offenders = @file_metrics.values.sort_by { |fm| [-fm.loc, -fm.disable_total, fm.path] }.first(10)
+      offenders.each do |fm|
+        md << "- `#{fm.path}` (#{fm.loc} LOC, disables: #{fm.disable_total})\n"
+        md << "  - Split large classes/modules; extract concerns.\n"
+        md << "  - Break up methods > 50 LOC; introduce named helpers.\n"
+        md << "  - Replace inline disables with fixes or local refactors.\n"
+        md << "  - DRY repeated bodies/strings; extract shared utilities.\n"
+      end
+
+      md
+    end
+    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Layout/LineLength
+  end
+
+  def self.main
+    Runner.new.run
+  end
+end
+
+RepoAudit.main if __FILE__ == $PROGRAM_NAME
