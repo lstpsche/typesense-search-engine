@@ -264,7 +264,7 @@ Example:
 
 ```ruby
 res = SearchEngine.multi_search do |m|
-  m.add :products, SearchEngine::Product.curate(pin: %w[p1 p2])
+  m.add :products, SearchEngine::Product.curate(pin: %w[p_1 p_2])
   m.add :brands,   SearchEngine::Brand.curate(hide: %w[b9 b10], filter_curated_hits: true)
 end
 ```

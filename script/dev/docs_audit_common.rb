@@ -162,9 +162,9 @@ module DocsAudit
   def self.p_severity(kind)
     case kind
     when 'missing_file', 'missing_anchor', 'unclosed_fence', 'syntax_error', 'missing_const', 'missing_method'
-      'P1'
+      'p_1'
     when 'unknown_lang', 'missing_lang', 'heading_jump', 'duplicate_slug', 'maybe_redirect', 'yardoc_tag'
-      'P2'
+      'p_2'
     else
       'P3'
     end

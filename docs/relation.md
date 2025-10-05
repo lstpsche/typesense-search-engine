@@ -13,11 +13,11 @@ Relation is an immutable, chainable query object bound to a model class. It accu
 ```ruby
 class SearchEngine::Product < SearchEngine::Base; end
 
-r1 = SearchEngine::Product.all
-r2 = r1.where(category: 'milk').order(:name).select(:id, :name).page(2).per(10)
-# r1 is unchanged
-r1.object_id != r2.object_id #=> true
-r1.empty?                    #=> true
+r_1 = SearchEngine::Product.all
+r_2 = r_1.where(category: 'milk').order(:name).select(:id, :name).page(2).per(10)
+# r_1 is unchanged
+r_1.object_id != r_2.object_id #=> true
+r_1.empty?                    #=> true
 ```
 
 ## Immutability
@@ -25,12 +25,12 @@ r1.empty?                    #=> true
 Every chainer creates a new instance via copy-on-write. The original relation remains unchanged.
 
 ```ruby
-r1 = SearchEngine::Product.all
-r2 = r1.where(price: 10)
-r1.object_id #=> 701...
-r2.object_id #=> 702...
-r1.empty?     #=> true
-r2.empty?     #=> false
+r_1 = SearchEngine::Product.all
+r_2 = r_1.where(price: 10)
+r_1.object_id #=> 701...
+r_2.object_id #=> 702...
+r_1.empty?     #=> true
+r_2.empty?     #=> false
 ```
 
 ## API

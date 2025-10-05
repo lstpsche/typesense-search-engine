@@ -20,10 +20,10 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_merge_ordering_and_dedupe
-    r1 = Book.all.joins(:authors).include_fields(:id, authors: %i[first_name])
-    r2 = r1.include_fields(:title, authors: %i[last_name first_name])
+    r_1 = Book.all.joins(:authors).include_fields(:id, authors: %i[first_name])
+    r_2 = r_1.include_fields(:title, authors: %i[last_name first_name])
 
-    params = r2.to_typesense_params
+    params = r_2.to_typesense_params
     assert_equal '$authors(first_name,last_name),id,title', params[:include_fields]
   end
 
@@ -43,25 +43,25 @@ class RelationIncludeFieldsNestedTest < Minitest::Test
   end
 
   def test_reselect_replaces_both_base_and_nested
-    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:first_name])
-    r2 = r1.reselect(:title, authors: [:last_name])
+    r_1 = Book.all.joins(:authors).include_fields(:id, authors: [:first_name])
+    r_2 = r_1.reselect(:title, authors: [:last_name])
 
-    p1 = r1.to_typesense_params
-    p2 = r2.to_typesense_params
+    p_1 = r_1.to_typesense_params
+    p_2 = r_2.to_typesense_params
 
-    assert_equal '$authors(first_name),id', p1[:include_fields]
-    assert_equal '$authors(last_name),title', p2[:include_fields]
+    assert_equal '$authors(first_name),id', p_1[:include_fields]
+    assert_equal '$authors(last_name),title', p_2[:include_fields]
   end
 
   def test_unscope_select_clears_both
-    r1 = Book.all.joins(:authors).include_fields(:id, authors: [:first_name])
-    r2 = r1.unscope(:select)
+    r_1 = Book.all.joins(:authors).include_fields(:id, authors: [:first_name])
+    r_2 = r_1.unscope(:select)
 
-    p1 = r1.to_typesense_params
-    p2 = r2.to_typesense_params
+    p_1 = r_1.to_typesense_params
+    p_2 = r_2.to_typesense_params
 
-    assert p1.key?(:include_fields)
-    refute p2.key?(:include_fields)
+    assert p_1.key?(:include_fields)
+    refute p_2.key?(:include_fields)
   end
 
   def test_unknown_join_field_raises

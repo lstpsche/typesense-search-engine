@@ -169,14 +169,14 @@ all = {
 }
 
 # Determine per-file severities and buckets
-per_file = Hash.new { |h, k| h[k] = { p1: 0, p2: 0, p3: 0, kinds: Set.new, total: 0 } }
+per_file = Hash.new { |h, k| h[k] = { p_1: 0, p_2: 0, p3: 0, kinds: Set.new, total: 0 } }
 all.values.each do |arr|
   arr.each do |i|
     path = i[:path]
     sev = i[:severity] || DocsAudit.p_severity(i[:kind].to_s)
     case sev
-    when 'P1' then per_file[path][:p1] += 1
-    when 'P2' then per_file[path][:p2] += 1
+    when 'p_1' then per_file[path][:p_1] += 1
+    when 'p_2' then per_file[path][:p_2] += 1
     else per_file[path][:p3] += 1
     end
     per_file[path][:total] += 1
@@ -188,7 +188,7 @@ needs_rewrite = []
 quick_fix = []
 per_file.keys.sort.each do |path|
   meta = per_file[path]
-  if meta[:p1] >= 3 || (meta[:p1] >= 1 && meta[:kinds].size >= 3) || meta[:total] >= 10
+  if meta[:p_1] >= 3 || (meta[:p_1] >= 1 && meta[:kinds].size >= 3) || meta[:total] >= 10
     needs_rewrite << path
   else
     quick_fix << path
@@ -262,5 +262,5 @@ md_lines << "Ignore heuristics: external links ignored; pseudo-code markers ('..
 
 DocsAudit.atomic_write(File.join(DocsAudit::TMP_REFACTOR_DIR, 'docs_audit.md'), md_lines.join("\n"))
 
-# Exit non-zero on any P1 in this script's findings
-exit(1) if findings.any? { |f| f[:severity] == 'P1' }
+# Exit non-zero on any p_1 in this script's findings
+exit(1) if findings.any? { |f| f[:severity] == 'p_1' }

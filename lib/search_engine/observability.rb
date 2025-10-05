@@ -121,7 +121,7 @@ module SearchEngine
     # Compute a SHA1 hex digest for a value.
     # @param value [#to_s]
     # @return [String]
-    def self.sha1(value)
+    def self.sha_1(value)
       require 'digest'
       Digest::SHA1.hexdigest(value.to_s)
     end
@@ -151,7 +151,7 @@ module SearchEngine
       if partition.is_a?(Numeric)
         { partition: partition, partition_hash: nil }
       else
-        hex = sha1(partition)
+        hex = sha_1(partition)
         { partition: partition, partition_hash: short_hash(hex) }
       end
     end

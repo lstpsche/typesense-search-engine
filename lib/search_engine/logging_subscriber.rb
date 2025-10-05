@@ -358,12 +358,12 @@ module SearchEngine
 
       def short_correlation_id(cid)
         str = cid.to_s
-        return random_hex4 if str.empty?
+        return random_hex_4 if str.empty?
 
         str[0, 4]
       end
 
-      def random_hex4
+      def random_hex_4
         rng = (Thread.current[:__se_log_rng__] ||= Random.new)
         val = rng.rand(0x10000)
         val.to_s(16).rjust(4, '0')

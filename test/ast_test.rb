@@ -20,20 +20,20 @@ class ASTTest < Minitest::Test
   end
 
   def test_equality_and_hash
-    a1 = SearchEngine::AST.and_(
+    a_1 = SearchEngine::AST.and_(
       SearchEngine::AST.eq(:active, true),
       SearchEngine::AST.gt(:price, 100)
     )
-    a2 = SearchEngine::AST.and_(
+    a_2 = SearchEngine::AST.and_(
       SearchEngine::AST.eq('active', true),
       SearchEngine::AST.gt(:price, 100)
     )
 
-    assert_equal a1, a2
-    assert_equal a1.hash, a2.hash
+    assert_equal a_1, a_2
+    assert_equal a_1.hash, a_2.hash
 
-    set = [a1].to_set
-    assert_includes set, a2
+    set = [a_1].to_set
+    assert_includes set, a_2
   end
 
   def test_boolean_normalization_and_flattening

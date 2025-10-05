@@ -13,8 +13,8 @@ class PropertySelectionIdempotenceTest < Minitest::Test
   def test_select_idempotence
     skip
 
-    r1 = Product.all.select(:id).select(:id)
-    r2 = Product.all.select(:id)
-    assert_equal r2.to_typesense_params[:include_fields], r1.to_typesense_params[:include_fields]
+    r_1 = Product.all.select(:id).select(:id)
+    r_2 = Product.all.select(:id)
+    assert_equal r_2.to_typesense_params[:include_fields], r_1.to_typesense_params[:include_fields]
   end
 end
