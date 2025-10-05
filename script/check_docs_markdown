@@ -1,0 +1,235 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Docs markdown hygiene checker (stdlib-only)
+# - Scans docs/**/*.md for code fences, headings, whitespace
+# - Detects: unclosed fences, missing/unknown language, heading level jumps, duplicate slugs, trailing whitespace
+# - Writes JSON to tmp/docs_audit/markdown_hygiene.json
+# - Updates consolidated report tmp/refactor/docs_audit.md
+
+require_relative 'dev/docs_audit_common'
+require 'set'
+
+include DocsAudit
+
+DocsAudit.ensure_dirs!
+
+findings = []
+
+DocsAudit.markdown_files.each do |file|
+  lines = DocsAudit.read_lines(file)
+
+  # Code fences
+  stack = [] # [{lang, line}]
+  lines.each_with_index do |line, idx|
+    if line =~ /\A```\s*(\w*)\s*\z/
+      lang = Regexp.last_match(1).to_s.downcase
+      if stack.empty?
+        # opening
+        if lang.empty?
+          kind = 'missing_lang'
+          findings << {
+            path: DocsAudit.repo_relative(file),
+            line: idx + 1,
+            kind: kind,
+            detail: 'Code fence without language',
+            severity: DocsAudit.p_severity(kind)
+          }
+        elsif !DocsAudit::ALLOWED_LANGS.include?(lang)
+          kind = 'unknown_lang'
+          findings << {
+            path: DocsAudit.repo_relative(file),
+            line: idx + 1,
+            kind: kind,
+            detail: "Unknown language '#{lang}'",
+            severity: DocsAudit.p_severity(kind)
+          }
+        end
+        stack << { lang: lang, line: idx + 1 }
+      else
+        # closing
+        stack.pop
+      end
+      next
+    end
+
+    # Trailing whitespace (ignore inside fenced code blocks)
+    next unless stack.empty?
+    if line.match?(/[ \t]+\n\z/)
+      kind = 'trailing_ws'
+      findings << {
+        path: DocsAudit.repo_relative(file),
+        line: idx + 1,
+        kind: kind,
+        detail: 'Trailing whitespace',
+        severity: DocsAudit.p_severity(kind)
+      }
+    end
+  end
+
+  # Any unclosed fences
+  stack.each do |entry|
+    kind = 'unclosed_fence'
+    findings << {
+      path: DocsAudit.repo_relative(file),
+      line: entry[:line],
+      kind: kind,
+      detail: 'Opening code fence not closed',
+      severity: DocsAudit.p_severity(kind)
+    }
+  end
+
+  # Headings checks
+  heads = DocsAudit.extract_headings(lines)
+  last_level = nil
+  slug_counts = Hash.new(0)
+  heads.each do |h|
+    if last_level && h[:level] > last_level + 1
+      kind = 'heading_jump'
+      findings << {
+        path: DocsAudit.repo_relative(file),
+        line: h[:line],
+        kind: kind,
+        detail: "Heading jump from level #{last_level} to #{h[:level]}",
+        severity: DocsAudit.p_severity(kind)
+      }
+    end
+    last_level = h[:level]
+
+    slug = DocsAudit.slugify(h[:text])
+    slug_counts[slug] += 1
+    if slug_counts[slug] > 1
+      kind = 'duplicate_slug'
+      dup_index = slug_counts[slug] - 1
+      findings << {
+        path: DocsAudit.repo_relative(file),
+        line: h[:line],
+        kind: kind,
+        detail: "Duplicate heading slug '#{slug}' (##{dup_index})",
+        severity: DocsAudit.p_severity(kind)
+      }
+    end
+  end
+end
+
+findings = DocsAudit.sort_findings(findings)
+DocsAudit.write_json(File.join(DocsAudit::TMP_AUDIT_DIR, 'markdown_hygiene.json'), findings)
+
+# Update consolidated report if other JSON exists; reuse generator from links script by re-executing it here
+# Load existing JSONs
+
+def load_json_safe(path)
+  return [] unless File.file?(path)
+  JSON.parse(File.read(path), symbolize_names: true)
+rescue StandardError
+  []
+end
+
+links = load_json_safe(File.join(DocsAudit::TMP_AUDIT_DIR, 'links.json'))
+hyg = findings
+rbx = load_json_safe(File.join(DocsAudit::TMP_AUDIT_DIR, 'ruby_examples.json'))
+api = load_json_safe(File.join(DocsAudit::TMP_AUDIT_DIR, 'api_usage.json'))
+
+# Render consolidated report (same as in check_docs_links)
+md_lines = []
+md_lines << "# Docs Audit Report"
+md_lines << ""
+md_lines << "Generated: #{Time.now.utc.iso8601}"
+md_lines << "Repo root: #{DocsAudit::ROOT}"
+md_lines << "Scripts: check_docs_links, check_docs_markdown, check_docs_ruby_examples, check_docs_api_usage"
+md_lines << ""
+
+add_table = lambda do |title, rows, columns|
+  md_lines << "### #{title}"
+  md_lines << ""
+  md_lines << columns.join(' | ')
+  md_lines << columns.map { '---' }.join(' | ')
+  rows.each { |r| md_lines << r.join(' | ') }
+  md_lines << ""
+end
+
+one_liner_fix = lambda do |issue|
+  case issue[:kind] || issue[:ref_kind]
+  when 'missing_file' then 'Fix relative path or create the missing page'
+  when 'missing_anchor' then 'Adjust heading or anchor slug to match'
+  when 'maybe_redirect' then 'Update link to the canonical page (index.md)'
+  when 'unclosed_fence' then 'Close the code fence with ``` on a new line'
+  when 'missing_lang' then 'Add a language tag to the code fence'
+  when 'unknown_lang' then 'Use a known fence language (e.g., ruby, bash)'
+  when 'heading_jump' then 'Insert intermediate heading level or reduce depth'
+  when 'duplicate_slug' then 'Rename heading to make slug unique'
+  when 'trailing_ws' then 'Remove trailing whitespace on the line'
+  when 'syntax_error' then 'Fix Ruby syntax until ruby -c passes'
+  when 'yardoc_tag' then 'Remove YARD tags from prose or wrap in code block'
+  when 'const' then 'Update or remove reference to missing constant'
+  when 'method' then 'Update or remove reference to missing API method'
+  else 'Triage'
+  end
+end
+
+link_rows = links.map { |i| [i[:path], i[:line].to_s, i[:kind], i[:target].to_s, one_liner_fix.call(i), (i[:severity] || DocsAudit.p_severity(i[:kind])).to_s] }
+add_table.call('Links: broken/redirecting', link_rows, ['File', 'Line', 'Issue', 'Description', 'Proposed fix (one-liner)', 'Severity (P1–P3)'])
+
+hyg_rows = hyg.map { |i| [i[:path], i[:line].to_s, i[:kind], i[:detail].to_s, one_liner_fix.call(i), (i[:severity] || DocsAudit.p_severity(i[:kind])).to_s] }
+add_table.call('Markdown hygiene', hyg_rows, ['File', 'Line', 'Issue', 'Description', 'Proposed fix (one-liner)', 'Severity (P1–P3)'])
+
+rb_rows = rbx.select { |i| i[:status] == 'syntax_error' }.map do |i|
+  issue = 'syntax_error'
+  desc = (i[:message] || '').gsub('|', '\\|')
+  [i[:path], i[:line].to_s, issue, desc, one_liner_fix.call({ kind: issue }), DocsAudit.p_severity(issue)]
+end
+add_table.call('Ruby examples syntax', rb_rows, ['File', 'Line', 'Issue', 'Description', 'Proposed fix (one-liner)', 'Severity (P1–P3)'])
+
+api_rows = api.map do |i|
+  issue = i[:ref_kind]
+  desc = "#{i[:name]} (#{i[:status]})"
+  [i[:path], i[:line].to_s, issue, desc, one_liner_fix.call(i), (i[:severity] || DocsAudit.p_severity(issue)).to_s]
+end
+add_table.call('API usage & YARDoc leakage', api_rows, ['File', 'Line', 'Issue', 'Description', 'Proposed fix (one-liner)', 'Severity (P1–P3)'])
+
+# Scope of change
+all = { links: links, hygiene: hyg, ruby: rbx, api: api }
+per_file = Hash.new { |h, k| h[k] = { p1: 0, p2: 0, p3: 0, kinds: Set.new, total: 0 } }
+all.values.each do |arr|
+  arr.each do |i|
+    path = i[:path]
+    sev = i[:severity] || DocsAudit.p_severity(i[:kind].to_s)
+    case sev
+    when 'P1' then per_file[path][:p1] += 1
+    when 'P2' then per_file[path][:p2] += 1
+    else per_file[path][:p3] += 1
+    end
+    per_file[path][:total] += 1
+    per_file[path][:kinds] << (i[:kind] || i[:ref_kind])
+  end
+end
+needs_rewrite = []
+quick_fix = []
+per_file.keys.sort.each do |path|
+  meta = per_file[path]
+  if meta[:p1] >= 3 || (meta[:p1] >= 1 && meta[:kinds].size >= 3) || meta[:total] >= 10
+    needs_rewrite << path
+  else
+    quick_fix << path
+  end
+end
+
+md_lines << "### Scope of change"
+md_lines << ""
+md_lines << "- Quick mechanical fixes: #{quick_fix.sort.join(', ')}"
+md_lines << "- Needs author rewrite: #{needs_rewrite.sort.join(', ')}"
+md_lines << ""
+
+# Appendix
+counts_all = Hash.new(0)
+all.values.each { |arr| arr.each { |i| counts_all[(i[:kind] || i[:ref_kind] || i[:status]).to_s] += 1 } }
+md_lines << "### Appendix"
+md_lines << ""
+counts_all.keys.sort.each { |k| md_lines << "- #{k}: #{counts_all[k]}" }
+md_lines << ""
+md_lines << "Ignore heuristics: external links ignored; pseudo-code markers ('...', 'YOUR_', '# pseudo', '<TBD>') skipped in Ruby checks; fence languages limited to a known set."
+
+DocsAudit.atomic_write(File.join(DocsAudit::TMP_REFACTOR_DIR, 'docs_audit.md'), md_lines.join("\n"))
+
+# Exit non-zero if any P1 in this script's findings
+exit(1) if findings.any? { |f| f[:severity] == 'P1' }
