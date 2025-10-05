@@ -379,6 +379,34 @@ module SearchEngine
         per_page(n)
       end
 
+      # Configure an early hard cap on hits to fetch/consider.
+      # Uses normalize_hit_limits_input and updates @state[:hit_limits].
+      # @param n [Integer]
+      # @return [SearchEngine::Relation]
+      def limit_hits(n)
+        normalized = normalize_hit_limits_input({ early_limit: n })
+        return self if normalized.empty?
+
+        spawn do |s|
+          current = (s[:hit_limits] || {}).dup
+          s[:hit_limits] = current.merge(normalized)
+        end
+      end
+
+      # Configure a post-query validation that asserts total/applicable hits ≤ max.
+      # Uses normalize_hit_limits_input and updates @state[:hit_limits].
+      # @param max [Integer]
+      # @return [SearchEngine::Relation]
+      def validate_hits!(max:)
+        normalized = normalize_hit_limits_input({ max: max })
+        return self if normalized.empty?
+
+        spawn do |s|
+          current = (s[:hit_limits] || {}).dup
+          s[:hit_limits] = current.merge(normalized)
+        end
+      end
+
       # Shallow-merge options into the relation.
       # @param opts [Hash]
       # @return [SearchEngine::Relation]
