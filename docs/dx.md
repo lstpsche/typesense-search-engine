@@ -46,6 +46,20 @@ Events that would fire: search_engine.compile → search_engine.joins.compile �
 - `dry_run!` validates and returns a redacted body; no HTTP requests are made.
 - Redaction follows observability rules, masking secrets and literals.
 
+## Golden‑Master: Compiled Params Snapshots
+
+A small contract suite captures golden snapshots of compiled Typesense request params for canonical relations.
+
+- Location: `spec/fixtures/compiled_params/*.json`
+- Purpose: detect external behavior drift in compiler output (URL opts + body params) with readable diffs
+- Regenerate intentionally when a change is expected:
+
+```bash
+REGENERATE=1 bundle exec rspec spec/contracts/compiled_params_spec.rb
+```
+
+CI should fail on snapshot drift until regenerated in a PR with a rationale.
+
 ## Generators & Console helpers
 
 Install and scaffold minimal models using Rails generators:

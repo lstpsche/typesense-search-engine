@@ -1,0 +1,16 @@
+{
+  "url": "http://localhost:8108/collections/products_gm/documents/search",
+  "url_opts": {
+    "cache_ttl": 60,
+    "use_cache": true
+  },
+  "body": {
+    "filter_by": "active:=***",
+    "infix": "fallback",
+    "page": 1,
+    "per_page": 3,
+    "q": "*",
+    "query_by": "name,description",
+    "sort_by": "updated_at:desc"
+  }
+}
