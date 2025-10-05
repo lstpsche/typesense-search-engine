@@ -55,6 +55,7 @@ module SearchEngine
             iv = Integer(raw)
             out[:early_limit] = iv if iv.positive?
           rescue StandardError
+            nil
           end
         end
         if value.key?(:max) || value.key?('max')
@@ -63,6 +64,7 @@ module SearchEngine
             iv = Integer(raw)
             out[:max] = iv if iv.positive?
           rescue StandardError
+            nil
           end
         end
         out
