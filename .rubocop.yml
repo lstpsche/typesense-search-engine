@@ -8,6 +8,7 @@ plugins:
 AllCops:
   Exclude:
     - examples/**/*
+    - script/audit_repo
   NewCops: disable
   SuggestExtensions: false
   TargetRubyVersion: 3.1
