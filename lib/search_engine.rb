@@ -28,6 +28,8 @@ require 'search_engine/stale_filter'
 require 'search_engine/joins/guard'
 require 'search_engine/admin'
 require 'search_engine/ranking_plan'
+require 'search_engine/hydration/selection_context'
+require 'search_engine/hydration/materializers'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.

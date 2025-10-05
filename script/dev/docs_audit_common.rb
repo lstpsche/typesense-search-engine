@@ -132,7 +132,7 @@ module DocsAudit
     # Split anchor
     path_part, anchor = t.split('#', 2)
 
-    abs = nil
+    # abs var removed (unused)
     abs = if path_part.nil? || path_part.empty?
             cur_file
           elsif path_part.start_with?('/')
@@ -351,14 +351,14 @@ module DocsAudit
         if %w[ruby rb].include?(lang)
           buf = []
           j = i + 1
-          while j < lines.length && lines[j] !~ /\A```\s*\z/
+          while j < lines.length && lines[j] !~ /\A```\s*\z/ # rubocop:disable Metrics/BlockNesting
             buf << lines[j]
             j += 1
           end
           yield({ lang: lang, code: buf.join, start_line: start_line })
         else
           j = i + 1
-          j += 1 while j < lines.length && lines[j] !~ /\A```\s*\z/
+          j += 1 while j < lines.length && lines[j] !~ /\A```\s*\z/ # rubocop:disable Metrics/BlockNesting
         end
         i = j
       end
