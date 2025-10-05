@@ -6,6 +6,16 @@ require 'rails'
 require 'minitest/autorun'
 require 'set'
 require 'search_engine'
+require 'search_engine/test'
+
+# Provide a simple `pending` helper for Minitest tests
+module Minitest
+  class Test
+    def pending(message = 'pending')
+      skip(message)
+    end
+  end
+end
 
 # Reset registry to avoid cross-test contamination of collection mappings
 begin
