@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'search_engine/relation/dx/friendly_where'
+require 'search_engine/relation/dx/dry_run'
 
 module SearchEngine
   # Immutable, chainable query relation bound to a model class.
@@ -16,13 +18,8 @@ module SearchEngine
       # @see docs/dx.md
       def to_params_json(pretty: true)
         params = to_typesense_params
-        redacted = redact_body(params)
-        if pretty
-          ordered = redacted.is_a?(Hash) ? redacted.sort_by { |(k, _v)| k.to_s }.to_h : redacted
-          JSON.pretty_generate(ordered)
-        else
-          JSON.generate(redacted)
-        end
+        redacted = SearchEngine::Relation::Dx::DryRun.redact_params(params)
+        SearchEngine::Relation::Dx::DryRun.to_json(redacted, pretty: pretty)
       end
 
       # Return a single-line curl command with redacted API key and JSON body.
@@ -31,8 +28,7 @@ module SearchEngine
       # @see docs/dx.md
       def to_curl
         url = compiled_url
-        body_json = JSON.generate(redact_body(to_typesense_params))
-        %(curl -X POST #{url} -H 'Content-Type: application/json' -H 'X-TYPESENSE-API-KEY: ***' -d '#{body_json}')
+        SearchEngine::Relation::Dx::DryRun.curl(url, to_typesense_params)
       end
 
       # Compile and validate without performing network I/O.
@@ -43,9 +39,7 @@ module SearchEngine
       # @see docs/dx.md
       def dry_run!
         params = to_typesense_params
-        body = JSON.generate(redact_body(params))
-        # Include _hits preview if present (redaction already applied at param level)
-        { url: compiled_url, body: body, url_opts: compiled_url_opts.freeze }
+        SearchEngine::Relation::Dx::DryRun.payload(url: compiled_url, params: params, url_opts: compiled_url_opts)
       end
 
       # Enhanced explain output with overview, parts, conflicts, and predicted events.
@@ -122,9 +116,11 @@ module SearchEngine
         fb = params[:filter_by]
         return unless fb && !fb.to_s.strip.empty?
 
-        preview = SearchEngine::Observability.redact(params)
-        masked_filter = preview.is_a?(Hash) ? preview[:filter_by].to_s : ''
-        where_str = friendly_where(masked_filter)
+        # Render friendly operators first, then redact the final string to preserve
+        # IN/NOT IN tokens while masking literals.
+        friendly = SearchEngine::Relation::Dx::FriendlyWhere.render(fb.to_s)
+        masked = SearchEngine::Observability.redact(friendly)
+        where_str = masked.is_a?(String) ? masked : friendly
         lines << "  where: #{where_str}" unless where_str.to_s.strip.empty?
       end
 
