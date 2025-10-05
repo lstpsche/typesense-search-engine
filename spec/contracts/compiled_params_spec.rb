@@ -110,7 +110,7 @@ class CompiledParamsContractSpec
 
   Case = Struct.new(:idx, :name, :builder, keyword_init: true)
 
-  def cases
+  def cases # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     @cases ||= [
       -> { Case.new(idx: 1, name: 'base_query', builder: -> { p_rel.options(q: 'milk') }) }.call,
       lambda {
@@ -268,7 +268,7 @@ class CompiledParamsContractSpec
   def test_compiled_params_snapshots
     updated = []
     cases.each do |entry|
-      label = format('%02d_%s', entry.idx, entry.name)
+      label = format('%<idx>02d_%<name>s', idx: entry.idx, name: entry.name)
       path = File.join(FIXTURES_DIR, "#{label}.json")
 
       actual_json = build_snapshot_json(entry)
