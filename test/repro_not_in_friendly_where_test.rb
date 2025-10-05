@@ -10,8 +10,6 @@ class ReproNotInFriendlyWhereTest < Minitest::Test
   end
 
   def test_explain_maps_not_in_token
-    pending 'fix in M11'
-
     rel = Product.all.where('brand_id:!=[1,2]')
     exp = rel.explain
     assert_includes exp, 'NOT IN'

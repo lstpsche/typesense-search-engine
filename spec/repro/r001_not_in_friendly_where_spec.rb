@@ -13,7 +13,6 @@ class R001NotInFriendlyWhereSpec < Minitest::Test
   end
 
   def test_explain_displays_not_in
-    pending 'fix in M11'
     rel = Product.all.where('brand_id:!=[1,2]')
     assert_includes rel.explain, 'NOT IN'
   end

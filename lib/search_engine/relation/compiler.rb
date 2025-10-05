@@ -437,13 +437,7 @@ module SearchEngine
 
       # Helpers for inspect/DX
       def friendly_where(filter_by)
-        s = filter_by.to_s
-        return s if s.empty?
-
-        s = s.gsub(' && ', ' AND ')
-        s = s.gsub(' || ', ' OR ')
-        s = s.gsub(':=[', ' IN [')
-        s.gsub(':!=[', ' NOT IN [')
+        SearchEngine::Relation::Dx::FriendlyWhere.render(filter_by)
       end
 
       def add_pagination_line!(lines, params)
