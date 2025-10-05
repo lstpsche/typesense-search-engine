@@ -96,9 +96,11 @@ module SearchEngine
         unless collection.is_a?(String) && !collection.strip.empty?
           raise ArgumentError, 'collection must be a non-empty String'
         end
-        raise ArgumentError, 'params must be a Hash' unless params.is_a?(Hash)
 
-        entry = capture(:search, url: compiled_url(collection), params: params, url_opts: url_opts)
+        params_obj = SearchEngine::CompiledParams.from(params)
+        params_hash = params_obj.to_h
+
+        entry = capture(:search, url: compiled_url(collection), params: params_hash, url_opts: url_opts)
         payload = dequeue_or_default(:search, entry)
         wrap_single(payload)
       end

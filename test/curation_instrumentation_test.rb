@@ -93,7 +93,7 @@ class CurationInstrumentationTest < Minitest::Test
     end.new
 
     client = SearchEngine::Client.new(typesense_client: ts)
-    params = { q: '*', query_by: 'name', pinned_hits: 'p1,p2' }
+    params = SearchEngine::CompiledParams.new({ q: '*', query_by: 'name', pinned_hits: 'p1,p2' })
     client.search(collection: 'products_curation_instr', params: params, url_opts: {})
 
     logger.close

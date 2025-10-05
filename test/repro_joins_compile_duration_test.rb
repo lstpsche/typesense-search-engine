@@ -18,7 +18,7 @@ class ReproJoinsCompileDurationTest < Minitest::Test
     rel = Book.all.joins(:authors)
     # This compile path references compile_started_ms without defining it
     # Expect no NameError after fix
-    params = rel.to_typesense_params
+    params = SearchEngine::CompiledParams.from(rel.to_typesense_params)
     refute_nil params
   end
 end

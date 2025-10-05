@@ -23,7 +23,7 @@ module SearchEngine
           return memo if loaded && memo
 
           collection = relation.send(:collection_name_for_klass)
-          params = relation.to_typesense_params
+          params = SearchEngine::CompiledParams.from(relation.to_typesense_params)
           url_opts = relation.send(:build_url_opts)
 
           raw_result = relation.send(:client).search(collection: collection, params: params, url_opts: url_opts)
@@ -159,7 +159,7 @@ module SearchEngine
 
       def fetch_found_only(relation)
         collection = relation.send(:collection_name_for_klass)
-        base = relation.to_typesense_params
+        base = SearchEngine::CompiledParams.from(relation.to_typesense_params).to_h
 
         minimal = base.dup
         minimal[:per_page] = 1

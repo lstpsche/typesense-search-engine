@@ -6,7 +6,7 @@ module SearchEngine
     # This module is pure/deterministic and avoids any network I/O.
     module Compiler
       # Compile immutable relation state and options into Typesense body params.
-      # @return [Hash]
+      # @return [SearchEngine::CompiledParams]
       def to_typesense_params # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
         cfg = SearchEngine.config
         opts = @state[:options] || {}
@@ -259,7 +259,7 @@ module SearchEngine
           params[:_hits] = hits_info unless hits_info.empty?
         end
 
-        params
+        SearchEngine::CompiledParams.new(params)
       end
 
       # Compile filter_by string from AST nodes or legacy fragments.
