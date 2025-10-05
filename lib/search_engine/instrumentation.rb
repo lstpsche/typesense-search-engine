@@ -93,6 +93,30 @@ module SearchEngine
       'search_engine.relation.group_by_updated' => {
         required: %i[collection field],
         optional: %i[limit missing_values]
+      },
+      'search_engine.facet.compile' => {
+        required: %i[],
+        optional: %i[collection fields_count queries_count max_facet_values sort_flags conflicts duration_ms]
+      },
+      'search_engine.highlight.compile' => {
+        required: %i[],
+        optional: %i[collection fields_count full_fields_count affix_tokens snippet_threshold tag_kind duration_ms]
+      },
+      'search_engine.synonyms.apply' => {
+        required: %i[],
+        optional: %i[collection use_synonyms use_stopwords source duration_ms]
+      },
+      'search_engine.geo.compile' => {
+        required: %i[],
+        optional: %i[collection filters_count shapes sort_mode radius_bucket duration_ms]
+      },
+      'search_engine.vector.compile' => {
+        required: %i[],
+        optional: %i[collection query_vector_present dims hybrid_weight ann_params_present duration_ms]
+      },
+      'search_engine.hits.limit' => {
+        required: %i[],
+        optional: %i[collection early_limit validate_max applied_strategy triggered total_hits duration_ms]
       }
     }.freeze
 

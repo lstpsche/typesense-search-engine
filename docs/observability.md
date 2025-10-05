@@ -19,6 +19,12 @@ This engine emits lightweight ActiveSupport::Notifications events around client 
   - `search_engine.joins.compile` — compile-time summary of JOINs usage
   - `search_engine.grouping.compile` — compile-time summary of grouping (field/limit/missing_values)
   - `search_engine.selection.compile` — compile-time summary of selection counts (include/exclude/nested)
+  - `search_engine.facet.compile` — compile-time summary of facets (fields/queries/cap)
+  - `search_engine.highlight.compile` — compile-time summary of highlight options (fields/full/affix/tag)
+  - `search_engine.synonyms.apply` — compile-time resolution of relation-level synonyms/stopwords flags
+  - `search_engine.geo.compile` — compile-time summary of geo filters/sorts (counts and buckets)
+  - `search_engine.vector.compile` — compile-time summary of vector/hybrid plan (no raw vectors)
+  - `search_engine.hits.limit` — compile- or validate-stage hits limit summary
 
 Duration is available via the event (`ev.duration`).
 
@@ -222,3 +228,22 @@ Notes:
 - Span status is set to ERROR when payload `status=:error` or `http_status>=400`.
 
 Backlinks: [Index](./index.md), [Logging](./observability.md#logging), [Client](./client.md)
+
+### Event catalog (extended)
+
+| Event | When it fires | Key fields (subset) |
+|-------|----------------|---------------------|
+| `search_engine.facet.compile` | After facet plan normalization, before network I/O | `collection`, `fields_count`, `queries_count`, `max_facet_values`, `sort_flags`, `conflicts`, `duration_ms` |
+| `search_engine.highlight.compile` | After highlight options merge and params emission | `collection`, `fields_count`, `full_fields_count`, `affix_tokens`, `snippet_threshold`, `tag_kind`, `duration_ms` |
+| `search_engine.synonyms.apply` | When relation-level synonym/stopword flags resolve | `collection`, `use_synonyms`, `use_stopwords`, `source`, `duration_ms` |
+| `search_engine.geo.compile` | After geo filters/sorts normalize (if present) | `collection`, `filters_count`, `shapes` (`point`/`rect`/`circle`), `sort_mode`, `radius_bucket`, `duration_ms` |
+| `search_engine.vector.compile` | After vector/hybrid plan is built (if present) | `collection`, `query_vector_present`, `dims`, `hybrid_weight`, `ann_params_present`, `duration_ms` |
+| `search_engine.hits.limit` | During compile (early limit) and/or post-fetch validation | `collection`, `early_limit`, `validate_max`, `applied_strategy`, `triggered`, `total_hits`, `duration_ms` |
+
+Redaction notes:
+- Vectors: only `query_vector_present`, `dims` (or bucket), `hybrid_weight`, and `ann_params_present`. Never log the raw vector.
+- Geo: log counts and buckets; no raw coordinates. `radius_bucket` uses coarse buckets.
+- Highlight tags: `tag_kind` only (`em`, `mark`, or `custom`), never full tag content.
+- Facet queries: counts only; no raw expressions.
+
+Backlinks: see feature pages for behavior and options — [Faceting](./faceting.md), [Highlighting](./highlighting.md), [Synonyms & Stopwords](./synonyms_stopwords.md), [Hit Limits](./hit_limits.md), related: [Ranking](./ranking.md), [Joins/Grouping](./joins_selection_grouping.md).

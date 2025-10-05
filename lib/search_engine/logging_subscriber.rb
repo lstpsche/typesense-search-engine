@@ -144,6 +144,12 @@ module SearchEngine
         status = pick_status(p)
         collection = p[:collection] || p[:logical]
 
+        # Specialized single-line renderers (return String or nil)
+        specialized = format_compact_event(name: name, short: short, cid: cid, collection: collection,
+                                           duration: duration, status: status, payload: p
+        )
+        return specialized if specialized
+
         groups = value_or_dash(p[:groups_count])
         preset = p[:preset_name] || value_or_dash(nil)
         pinned = p[:curation_pinned_count] || p[:pinned_count] || 0
@@ -163,40 +169,181 @@ module SearchEngine
 
       def format_json(event)
         p = event.payload || {}
+        base = base_json_fields(event, p)
+        merge_event_extras!(base, event.name, p)
+        attach_params_preview_count!(base, p)
+        JSON.generate(safe_jsonable(base))
+      rescue StandardError
+        # As a last resort, log a minimal JSON line
         duration = safe_duration(event, p)
         cid = short_correlation_id(p[:correlation_id])
         status = pick_status(p)
+        JSON.generate({ 'event' => event.name, 'cid' => cid, 'status' => status, 'duration_ms' => duration })
+      end
 
+      def base_json_fields(event, p)
+        duration = safe_duration(event, p)
+        cid = short_correlation_id(p[:correlation_id])
+        status = pick_status(p)
         h = {}
         h['event'] = event.name
         h['cid'] = cid
         h['collection'] = (p[:collection] || p[:logical]) if p[:collection] || p[:logical]
         h['status'] = status
         h['duration_ms'] = duration
-
-        # domain extras (optional)
         h['group_count'] = p[:groups_count] if p.key?(:groups_count)
         h['preset_mode'] = p[:preset_mode] if p.key?(:preset_mode)
         if p.key?(:curation_pinned_count) || p.key?(:pinned_count)
-          h['curation_pinned_count'] =
-            (p[:curation_pinned_count] || p[:pinned_count])
+          h['curation_pinned_count'] = (p[:curation_pinned_count] || p[:pinned_count])
         end
         if p.key?(:curation_hidden_count) || p.key?(:hidden_count)
-          h['curation_hidden_count'] =
-            (p[:curation_hidden_count] || p[:hidden_count])
+          h['curation_hidden_count'] = (p[:curation_hidden_count] || p[:hidden_count])
+        end
+        h
+      end
+
+      def merge_event_extras!(h, name, p)
+        extras = build_event_json_extras(name, p)
+        extras.each { |k, v| h[k] = v } unless extras.empty?
+      end
+
+      def attach_params_preview_count!(h, p)
+        return unless p.key?(:params_preview)
+
+        preview = p[:params_preview]
+        preview = SearchEngine::Instrumentation.redact(preview)
+        h['params_preview_keys'] = (preview.is_a?(Hash) ? preview.keys.size : nil)
+      end
+
+      def format_compact_event(name:, short:, cid:, collection:, duration:, status:, payload:)
+        return compact_facet(short, cid, collection, duration, payload) if name == 'search_engine.facet.compile'
+        return compact_highlight(short, cid, collection, duration, payload) if name == 'search_engine.highlight.compile'
+        return compact_synonyms(short, cid, collection, duration, payload) if name == 'search_engine.synonyms.apply'
+        return compact_geo(short, cid, collection, duration, payload) if name == 'search_engine.geo.compile'
+        return compact_vector(short, cid, collection, duration, payload) if name == 'search_engine.vector.compile'
+
+        if name == 'search_engine.hits.limit'
+          return compact_hits_limit(short, cid, collection, duration, status, payload)
         end
 
-        # Do not include raw params. If a preview is present and already redacted, include a tiny count only.
-        if p.key?(:params_preview)
-          preview = p[:params_preview]
-          preview = SearchEngine::Instrumentation.redact(preview)
-          h['params_preview_keys'] = (preview.is_a?(Hash) ? preview.keys.size : nil)
-        end
+        nil
+      end
 
-        JSON.generate(safe_jsonable(h))
-      rescue StandardError
-        # As a last resort, log a minimal JSON line
-        JSON.generate({ 'event' => event.name, 'cid' => cid, 'status' => status, 'duration_ms' => duration })
+      def compact_facet(short, cid, collection, duration, p)
+        parts = []
+        parts << "[#{short}]"
+        parts << "id=#{cid}"
+        parts << "coll=#{collection}" if collection
+        parts << "fields=#{p[:fields_count] || '—'}"
+        parts << "queries=#{p[:queries_count] || '—'}"
+        parts << "max=#{p[:max_facet_values] || '—'}"
+        parts << "dur=#{duration}ms"
+        parts.join(' ')
+      end
+
+      def compact_highlight(short, cid, collection, duration, p)
+        parts = []
+        parts << "[#{short}]"
+        parts << "id=#{cid}"
+        parts << "coll=#{collection}" if collection
+        parts << "fields=#{p[:fields_count] || '—'}"
+        parts << "full=#{p[:full_fields_count] || '—'}"
+        parts << "affix=#{display_or_dash(p, :affix_tokens)}"
+        parts << "tag=#{p[:tag_kind] || '—'}"
+        parts << "dur=#{duration}ms"
+        parts.join(' ')
+      end
+
+      def compact_synonyms(short, cid, collection, duration, p)
+        parts = []
+        parts << "[#{short}]"
+        parts << "id=#{cid}"
+        parts << "coll=#{collection}" if collection
+        parts << "syn=#{display_or_dash(p, :use_synonyms)}"
+        parts << "stop=#{display_or_dash(p, :use_stopwords)}"
+        parts << "src=#{p[:source] || '—'}"
+        parts << "dur=#{duration}ms"
+        parts.join(' ')
+      end
+
+      def compact_geo(short, cid, collection, duration, p)
+        shapes = p[:shapes] || {}
+        point = shapes[:point] || 0
+        rect = shapes[:rect] || 0
+        circle = shapes[:circle] || 0
+        parts = []
+        parts << "[#{short}]"
+        parts << "id=#{cid}"
+        parts << "coll=#{collection}" if collection
+        parts << "shapes=#{point}/#{rect}/#{circle}"
+        parts << "sort=#{p[:sort_mode] || '—'}"
+        parts << "radius=#{p[:radius_bucket] || '—'}"
+        parts << "dur=#{duration}ms"
+        parts.join(' ')
+      end
+
+      def compact_vector(short, cid, collection, duration, p)
+        parts = []
+        parts << "[#{short}]"
+        parts << "id=#{cid}"
+        parts << "coll=#{collection}" if collection
+        parts << "qvec=#{display_or_dash(p, :query_vector_present)}"
+        parts << "dims=#{p[:dims] || '—'}"
+        parts << "hybrid=#{p[:hybrid_weight] || '—'}"
+        parts << "ann=#{display_or_dash(p, :ann_params_present)}"
+        parts << "dur=#{duration}ms"
+        parts.join(' ')
+      end
+
+      def compact_hits_limit(short, cid, collection, duration, status, p)
+        parts = []
+        parts << "[#{short}]"
+        parts << "id=#{cid}"
+        parts << "coll=#{collection}" if collection
+        parts << "early=#{display_or_dash(p, :early_limit)}"
+        parts << "max=#{display_or_dash(p, :validate_max)}"
+        parts << "strat=#{p[:applied_strategy] || '—'}"
+        parts << "trig=#{p[:triggered] || '—'}"
+        parts << "total=#{display_or_dash(p, :total_hits)}"
+        parts << "status=#{status}"
+        parts << "dur=#{duration}ms"
+        parts.join(' ')
+      end
+
+      def build_event_json_extras(name, p)
+        case name
+        when 'search_engine.facet.compile'
+          keys = %i[fields_count queries_count max_facet_values sort_flags conflicts]
+          keys.each_with_object({}) { |k, h| h[k.to_s] = p[k] if p.key?(k) }
+        when 'search_engine.highlight.compile'
+          keys = %i[fields_count full_fields_count affix_tokens snippet_threshold tag_kind]
+          keys.each_with_object({}) { |k, h| h[k.to_s] = p[k] if p.key?(k) }
+        when 'search_engine.synonyms.apply'
+          keys = %i[use_synonyms use_stopwords source]
+          keys.each_with_object({}) { |k, h| h[k.to_s] = p[k] if p.key?(k) }
+        when 'search_engine.geo.compile'
+          h = {}
+          h['filters_count'] = p[:filters_count] if p.key?(:filters_count)
+          h['shapes'] = p[:shapes] if p.key?(:shapes)
+          h['sort_mode'] = p[:sort_mode] if p.key?(:sort_mode)
+          h['radius_bucket'] = p[:radius_bucket] if p.key?(:radius_bucket)
+          h
+        when 'search_engine.vector.compile'
+          keys = %i[query_vector_present dims hybrid_weight ann_params_present]
+          keys.each_with_object({}) { |k, h| h[k.to_s] = p[k] if p.key?(k) }
+        when 'search_engine.hits.limit'
+          keys = %i[early_limit validate_max applied_strategy triggered total_hits]
+          keys.each_with_object({}) { |k, h| h[k.to_s] = p[k] if p.key?(k) }
+        else
+          {}
+        end
+      end
+
+      def display_or_dash(payload, key)
+        return '—' unless payload.key?(key)
+
+        val = payload[key]
+        val.nil? ? '—' : val
       end
 
       def safe_duration(event, payload)
