@@ -96,13 +96,25 @@ module SearchEngine
         raw_hits = Array(result.raw['hits'])
         objects = result.to_a
 
+        enforce_strict_for_pluck_row = lambda do |doc, requested|
+          present_keys = doc.keys.map(&:to_s)
+          if result.respond_to?(:send)
+            ctx = result.instance_variable_get(:@selection_ctx) || {}
+            if ctx[:strict_missing] == true
+              result.send(:enforce_strict_missing_if_needed!, present_keys, requested_override: requested)
+            end
+          end
+        end
+
         if names.length == 1
           field = names.first
           return objects.each_with_index.map do |obj, idx|
+            doc = (raw_hits[idx] && raw_hits[idx]['document']) || {}
+            # Enforce strict missing for the requested field against present keys
+            enforce_strict_for_pluck_row.call(doc, [field])
             if obj.respond_to?(field)
               obj.public_send(field)
             else
-              doc = (raw_hits[idx] && raw_hits[idx]['document']) || {}
               doc[field]
             end
           end
@@ -110,6 +122,8 @@ module SearchEngine
 
         objects.each_with_index.map do |obj, idx|
           doc = (raw_hits[idx] && raw_hits[idx]['document']) || {}
+          # Enforce strict missing for all requested fields against present keys
+          enforce_strict_for_pluck_row.call(doc, names)
           names.map do |field|
             if obj.respond_to?(field)
               obj.public_send(field)

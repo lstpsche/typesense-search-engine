@@ -33,9 +33,9 @@ class ReproStrictMissingSelectionTest < Minitest::Test
                            }
     )
 
-    rel = Product
-          .select(:name)
-          .options(selection: { strict_missing: true })
+    rel = Product.all
+                 .select(:name)
+                 .options(selection: { strict_missing: true })
 
     # Expect MissingField once strictness is propagated to Result
     assert_raises(SearchEngine::Errors::MissingField) { rel.to_a }

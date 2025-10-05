@@ -348,6 +348,8 @@ module SearchEngine
     # @param doc [Hash]
     # @return [Object]
     def hydrate(doc)
+      keys = doc.is_a?(Hash) ? doc.keys.map(&:to_s) : []
+      enforce_strict_missing_if_needed!(keys)
       if @klass
         @klass.new.tap do |obj|
           doc.each do |key, value|
