@@ -22,7 +22,7 @@ class MultiCurationTest < Minitest::Test
   end
 
   def test_mixed_curation_per_entry_payloads_shape
-    rel_products = build_relation(Product).curate(pin: %w[p1 p2])
+    rel_products = build_relation(Product).curate(pin: %w[p_1 p_2])
     rel_brands   = build_relation(Brand).curate(hide: %w[b9 b10], filter_curated_hits: true)
 
     m = SearchEngine::Multi.new
@@ -33,7 +33,7 @@ class MultiCurationTest < Minitest::Test
 
     p_products = payloads[0]
     assert_equal 'products_multi_curation', p_products[:collection]
-    assert_equal 'p1,p2', p_products[:pinned_hits]
+    assert_equal 'p_1,p_2', p_products[:pinned_hits]
     refute_includes p_products.keys, :hidden_hits
     refute_includes p_products.keys, :filter_curated_hits
 
@@ -45,7 +45,7 @@ class MultiCurationTest < Minitest::Test
   end
 
   def test_no_url_leakage_of_curation_keys
-    rel_products = build_relation(Product).curate(pin: %w[p1 p2])
+    rel_products = build_relation(Product).curate(pin: %w[p_1 p_2])
     rel_brands   = build_relation(Brand).curate(hide: %w[b9 b10], filter_curated_hits: true)
 
     client = Minitest::Mock.new
@@ -55,7 +55,7 @@ class MultiCurationTest < Minitest::Test
       # ensure curation keys live in per-entry body only
       searches.each do |s|
         if s[:collection] == 'products_multi_curation'
-          assert_equal 'p1,p2', s[:pinned_hits]
+          assert_equal 'p_1,p_2', s[:pinned_hits]
         elsif s[:collection] == 'brands_multi_curation'
           assert_equal 'b9,b10', s[:hidden_hits]
           assert_equal true, s[:filter_curated_hits]
@@ -79,28 +79,28 @@ class MultiCurationTest < Minitest::Test
   end
 
   def test_determinism_stable_pins_and_payloads
-    rel_products = build_relation(Product).curate(pin: %w[p1 p2 p1]) # duplicate p1 should be stable-deduped
+    rel_products = build_relation(Product).curate(pin: %w[p_1 p_2 p_1]) # duplicate p_1 should be stable-deduped
 
-    m1 = SearchEngine::Multi.new
-    m1.add :products, rel_products
-    p1 = m1.to_payloads(common: {})
+    m_1 = SearchEngine::Multi.new
+    m_1.add :products, rel_products
+    p_1 = m_1.to_payloads(common: {})
 
-    m2 = SearchEngine::Multi.new
-    m2.add :products, rel_products
-    p2 = m2.to_payloads(common: {})
+    m_2 = SearchEngine::Multi.new
+    m_2.add :products, rel_products
+    p_2 = m_2.to_payloads(common: {})
 
-    assert_equal p1, p2
-    assert_equal 'p1,p2', p1.first[:pinned_hits]
+    assert_equal p_1, p_2
+    assert_equal 'p_1,p_2', p_1.first[:pinned_hits]
   end
 
   def test_hydration_round_trip_with_curation_unchanged
-    rel_products = build_relation(Product).curate(pin: %w[p1 p2])
+    rel_products = build_relation(Product).curate(pin: %w[p_1 p_2])
 
     client = Minitest::Mock.new
     raw = { 'results' => [{ 'found' => 0, 'hits' => [] }] }
     client.expect(:multi_search, raw) do |searches:, url_opts:|
       assert_equal 1, searches.size
-      assert_equal 'p1,p2', searches.first[:pinned_hits]
+      assert_equal 'p_1,p_2', searches.first[:pinned_hits]
       assert url_opts.key?(:use_cache)
       true
     end

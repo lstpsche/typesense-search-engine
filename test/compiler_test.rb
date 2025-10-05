@@ -81,9 +81,9 @@ class CompilerTest < Minitest::Test
 
   def test_determinism_no_trailing_spaces
     node = SearchEngine::AST.and_(SearchEngine::AST.eq(:a, 1), SearchEngine::AST.eq(:b, 2))
-    s1 = compile(node)
-    s2 = compile(node)
-    assert_equal s1, s2
-    refute_match(/\s\z/, s1)
+    s_1 = compile(node)
+    s_2 = compile(node)
+    assert_equal s_1, s_2
+    refute_match(/\s\z/, s_1)
   end
 end

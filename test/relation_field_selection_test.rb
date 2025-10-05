@@ -41,12 +41,12 @@ class RelationFieldSelectionTest < Minitest::Test
   end
 
   def test_reselect_clears_excludes
-    r1 = Product.all.select(:id).exclude(:name)
-    r2 = r1.reselect(:name)
+    r_1 = Product.all.select(:id).exclude(:name)
+    r_2 = r_1.reselect(:name)
 
-    p2 = r2.to_typesense_params
-    assert_equal 'name', p2[:include_fields]
-    refute p2.key?(:exclude_fields)
+    p_2 = r_2.to_typesense_params
+    assert_equal 'name', p_2[:include_fields]
+    refute p_2.key?(:exclude_fields)
   end
 
   def test_nested_exclude_only_emits_nested_exclude_fields

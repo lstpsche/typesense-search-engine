@@ -80,6 +80,9 @@ Naming/MethodParameterName:
 Naming/RescuedExceptionsVariableName:
   PreferredName: error
 
+Naming/VariableNumber:
+  EnforcedStyle: snake_case
+
 Style/NumericLiterals:
   Enabled: false
 

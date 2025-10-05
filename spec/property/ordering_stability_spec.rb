@@ -10,8 +10,8 @@ class OrderingStabilitySpec < Minitest::Test
 
   def test_compiled_key_order_stable
     rel = Product.all.where(active: true).order(updated_at: :desc).page(2).per(10)
-    p1 = SearchEngine::CompiledParams.from(rel.to_typesense_params).to_h.keys
-    p2 = SearchEngine::CompiledParams.from(rel.to_typesense_params).to_h.keys
-    assert_equal p1, p2
+    p_1 = SearchEngine::CompiledParams.from(rel.to_typesense_params).to_h.keys
+    p_2 = SearchEngine::CompiledParams.from(rel.to_typesense_params).to_h.keys
+    assert_equal p_1, p_2
   end
 end

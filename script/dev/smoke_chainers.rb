@@ -15,25 +15,25 @@ class SmokeProduct < SearchEngine::Base
   attribute :updated_at, :time
 end
 
-r1 = SmokeProduct.all
-r2 = r1.order(updated_at: :DESC)
-r3 = r2.order('name:asc,updated_at:desc')
-r4 = r3.select(:id, 'name', :name)
-r5 = r4.limit(50).offset(200)
-r6 = r5.page(2).per(20)
+r_1 = SmokeProduct.all
+r_2 = r_1.order(updated_at: :DESC)
+r_3 = r_2.order('name:asc,updated_at:desc')
+r_4 = r_3.select(:id, 'name', :name)
+r_5 = r_4.limit(50).offset(200)
+r_6 = r_5.page(2).per(20)
 
 ok = true
 
-if [r2, r3, r4, r5, r6].any? { |r| r.equal?(r1) }
+if [r_2, r_3, r_4, r_5, r_6].any? { |r| r.equal?(r_1) }
   warn '[smoke:chainers] chaining did not create new instances'
   ok = false
 end
 
-puts "r1=#{r1.inspect}"
-puts "r2=#{r2.inspect}"
-puts "r3=#{r3.inspect}"
-puts "r4=#{r4.inspect}"
-puts "r5=#{r5.inspect}"
-puts "r6=#{r6.inspect}"
+puts "r_1=#{r_1.inspect}"
+puts "r_2=#{r_2.inspect}"
+puts "r_3=#{r_3.inspect}"
+puts "r_4=#{r_4.inspect}"
+puts "r_5=#{r_5.inspect}"
+puts "r_6=#{r_6.inspect}"
 
 exit(ok ? 0 : 1)

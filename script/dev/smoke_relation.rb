@@ -9,29 +9,29 @@ require 'search_engine'
 # Minimal model for smoke
 class SmokeProduct < SearchEngine::Base; end
 
-r1 = SmokeProduct.all
-r2 = r1.where(category: 'milk')
-r3 = r2.order(:name).limit(10)
+r_1 = SmokeProduct.all
+r_2 = r_1.where(category: 'milk')
+r_3 = r_2.order(:name).limit(10)
 
 ok = true
 
-if r1.equal?(r2) || r2.equal?(r3)
+if r_1.equal?(r_2) || r_2.equal?(r_3)
   warn '[smoke:relation] chaining did not create new instances'
   ok = false
 end
 
-unless r1.empty?
+unless r_1.empty?
   warn '[smoke:relation] initial relation should be empty'
   ok = false
 end
 
-if r2.empty?
+if r_2.empty?
   warn '[smoke:relation] relation with where should not be empty'
   ok = false
 end
 
-puts "r1=#{r1.inspect}"
-puts "r2=#{r2.inspect}"
-puts "r3=#{r3.inspect}"
+puts "r_1=#{r_1.inspect}"
+puts "r_2=#{r_2.inspect}"
+puts "r_3=#{r_3.inspect}"
 
 exit(ok ? 0 : 1)

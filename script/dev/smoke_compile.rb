@@ -21,8 +21,8 @@ r = SmokeProduct
 
 puts "params=#{r.to_typesense_params.inspect}"
 
-r2 = SmokeProduct
-     .all
-     .limit(50).offset(200)
+r_2 = SmokeProduct
+      .all
+      .limit(50).offset(200)
 
-puts "fallback_pagination=#{r2.to_typesense_params.inspect}"
+puts "fallback_pagination=#{r_2.to_typesense_params.inspect}"

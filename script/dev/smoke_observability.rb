@@ -24,13 +24,13 @@ begin
   SearchEngine::Notifications::CompactLogger.subscribe(include_params: true)
 
   puts '[smoke] observability: single search...'
-  r1 = client.search(
+  r_1 = client.search(
     collection: ENV['SMOKE_COLLECTION'] || 'products',
     params: { q: 'milk', query_by: SearchEngine.config.default_query_by,
 filter_by: "category_id:=123 && brand:='Acme'" },
     url_opts: { use_cache: true, cache_ttl: 60 }
   )
-  puts "[ok] single: #{r1.class}"
+  puts "[ok] single: #{r_1.class}"
 
   puts '[smoke] observability: multi search...'
   searches = [
@@ -42,8 +42,8 @@ filter_by: "category_id:=123 && brand:='Acme'" },
       filter_by: 'price:>10'
     }
   ]
-  r2 = client.multi_search(searches: searches, url_opts: { use_cache: true, cache_ttl: 30 })
-  puts "[ok] multi: #{r2.class}"
+  r_2 = client.multi_search(searches: searches, url_opts: { use_cache: true, cache_ttl: 30 })
+  puts "[ok] multi: #{r_2.class}"
 rescue StandardError => error
   warn "[smoke] failure: #{error.class}: #{error.message}"
   if error.respond_to?(:status)

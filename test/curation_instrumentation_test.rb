@@ -27,7 +27,7 @@ class CurationInstrumentationTest < Minitest::Test
     end
 
     begin
-      rel = Product.all.curate(pin: %w[p1 p2], hide: %w[h1], override_tags: %w[tag], filter_curated_hits: false)
+      rel = Product.all.curate(pin: %w[p_1 p_2], hide: %w[h1], override_tags: %w[tag], filter_curated_hits: false)
       compiled = rel.to_typesense_params
       refute_nil compiled
     ensure
@@ -93,7 +93,7 @@ class CurationInstrumentationTest < Minitest::Test
     end.new
 
     client = SearchEngine::Client.new(typesense_client: ts)
-    params = SearchEngine::CompiledParams.new({ q: '*', query_by: 'name', pinned_hits: 'p1,p2' })
+    params = SearchEngine::CompiledParams.new({ q: '*', query_by: 'name', pinned_hits: 'p_1,p_2' })
     client.search(collection: 'products_curation_instr', params: params, url_opts: {})
 
     logger.close

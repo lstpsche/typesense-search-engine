@@ -491,6 +491,18 @@ module SearchEngine
       @observability ||= ObservabilityConfig.new
     end
 
+    # Expose partitioning configuration.
+    # @return [SearchEngine::Config::PartitioningConfig]
+    def partitioning
+      @partitioning ||= PartitioningConfig.new
+    end
+
+    # Expose stale deletes configuration.
+    # @return [SearchEngine::Config::StaleDeletesConfig]
+    def stale_deletes
+      @stale_deletes ||= StaleDeletesConfig.new
+    end
+
     # Expose structured logging configuration.
     # @return [OpenStruct]
     def logging

@@ -56,7 +56,7 @@ Curation state maps to Typesense body params and never appears in URL/common par
 
 | State key             | Example value             | Param key             | Encoded value         |
 | --------------------- | ------------------------- | --------------------- | --------------------- |
-| `pinned`              | `["p1","p2"]`             | `pinned_hits`         | `"p1,p2"`             |
+| `pinned`              | `["p_1","p_2"]`             | `pinned_hits`         | `"p_1,p_2"`             |
 | `hidden`              | `"p9"`                    | `hidden_hits`         | `"p9"`                |
 | `override_tags`       | `["homepage","campaign"]` | `override_tags`       | `"homepage,campaign"` |
 | `filter_curated_hits` | `true`                    | `filter_curated_hits` | `true`                |
@@ -82,11 +82,11 @@ Insert:
 
 ```ruby
 rel = SearchEngine::Product
-        .curate(pin: %w[p1 p2], hide: %w[p9], override_tags: %w[homepage], filter_curated_hits: true)
+        .curate(pin: %w[p_1 p_2], hide: %w[p9], override_tags: %w[homepage], filter_curated_hits: true)
 rel.to_typesense_params
 # => {
 #   q: "*", query_by: "name, description",
-#   pinned_hits: "p1,p2", hidden_hits: "p9",
+#   pinned_hits: "p_1,p_2", hidden_hits: "p9",
 #   filter_curated_hits: true, override_tags: "homepage"
 # }
 ```
@@ -128,7 +128,7 @@ Insert:
 
 ```ruby
 res = SearchEngine.multi_search do |m|
-  m.add :products, SearchEngine::Product.curate(pin: %w[p1 p2])
+  m.add :products, SearchEngine::Product.curate(pin: %w[p_1 p_2])
   m.add :brands,   SearchEngine::Brand.curate(hide: %w[b9 b10], filter_curated_hits: true)
 end
 ```
@@ -148,7 +148,7 @@ Explain excerpt:
 
 ```
 Curation: pinned=2 hidden=1 filter_curated_hits=false override_tags=[homepage]
-Conflicts: [p1 (both pinned & hidden → hidden)]
+Conflicts: [p_1 (both pinned & hidden → hidden)]
 ```
 
 ```mermaid

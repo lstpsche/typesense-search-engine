@@ -43,10 +43,10 @@ end
 rel = SmokeProduct.all.where(active: true).per(2)
 
 begin
-  a1 = rel.to_a
-  a2 = rel.ids
-  c1 = rel.count
-  puts("[ok] to_a=#{a1.class} ids=#{a2.size} count=#{c1}")
+  a_1 = rel.to_a
+  a_2 = rel.ids
+  c_1 = rel.count
+  puts("[ok] to_a=#{a_1.class} ids=#{a_2.size} count=#{c_1}")
 rescue StandardError => error
   warn("[smoke:execute] failure: #{error.class}: #{error.message}")
   if error.respond_to?(:status)
