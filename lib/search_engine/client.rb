@@ -417,6 +417,10 @@ module SearchEngine
 
     attr_reader :config
 
+    def adapter
+      @adapter ||= SearchEngine::Client::HttpAdapter.new(typesense)
+    end
+
     # Remove internal-only keys from the HTTP payload
     def sanitize_body_params(params)
       payload = params.dup
