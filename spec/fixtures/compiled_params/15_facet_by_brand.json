@@ -1,0 +1,14 @@
+{
+  "url": "http://localhost:8108/collections/products_gm/documents/search",
+  "url_opts": {
+    "cache_ttl": 60,
+    "use_cache": true
+  },
+  "body": {
+    "facet_by": "brand_id",
+    "infix": "fallback",
+    "max_facet_values": 5,
+    "q": "*",
+    "query_by": "name,description"
+  }
+}

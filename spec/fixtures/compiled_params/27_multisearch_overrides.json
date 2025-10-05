@@ -1,0 +1,25 @@
+{
+  "url": "http://localhost:8108/multi_search",
+  "url_opts": {
+    "cache_ttl": 60,
+    "use_cache": true
+  },
+  "body": [
+    {
+      "collection": "products_gm",
+      "filter_by": "active:=true",
+      "infix": "fallback",
+      "page": 1,
+      "per_page": 10,
+      "q": "*",
+      "query_by": "name,description"
+    },
+    {
+      "collection": "brands_gm",
+      "infix": "fallback",
+      "per_page": 50,
+      "q": "*",
+      "query_by": "name,description"
+    }
+  ]
+}
