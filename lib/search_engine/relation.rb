@@ -24,8 +24,11 @@ module SearchEngine
     include Compiler
     include Materializers
 
-    # Convenience alias to compiled body params.
-    alias to_h to_typesense_params
+    # Convenience conversion to compiled body params as a plain Hash.
+    def to_h
+      v = to_typesense_params
+      v.respond_to?(:to_h) ? v.to_h : v
+    end
 
     # Read-only access to accumulated predicate AST nodes.
     # @return [Array<SearchEngine::AST::Node>] a frozen Array of AST nodes
@@ -91,7 +94,7 @@ module SearchEngine
       parts << "ast=#{ast_nodes.length}" unless ast_nodes.empty?
 
       compiled = begin
-        to_typesense_params
+        SearchEngine::CompiledParams.from(to_typesense_params)
       rescue StandardError
         {}
       end

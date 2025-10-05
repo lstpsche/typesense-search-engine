@@ -292,7 +292,8 @@ module SearchEngine
         return nil unless sd_cfg.estimation_enabled && cfg.default_query_by && !cfg.default_query_by.to_s.strip.empty?
 
         client = SearchEngine::Client.new
-        params = { q: '*', query_by: cfg.default_query_by, per_page: 0, filter_by: filter }
+        payload = { q: '*', query_by: cfg.default_query_by, per_page: 0, filter_by: filter }
+        params = SearchEngine::CompiledParams.new(payload)
         res = client.search(collection: into, params: params, url_opts: {})
         res&.found
       rescue StandardError

@@ -17,8 +17,8 @@ module SearchEngine
       # @since M8
       # @see docs/dx.md
       def to_params_json(pretty: true)
-        params = to_typesense_params
-        redacted = SearchEngine::Relation::Dx::DryRun.redact_params(params)
+        params = SearchEngine::CompiledParams.from(to_typesense_params)
+        redacted = SearchEngine::Relation::Dx::DryRun.redact_params(params.to_h)
         SearchEngine::Relation::Dx::DryRun.to_json(redacted, pretty: pretty)
       end
 
@@ -28,7 +28,8 @@ module SearchEngine
       # @see docs/dx.md
       def to_curl
         url = compiled_url
-        SearchEngine::Relation::Dx::DryRun.curl(url, to_typesense_params)
+        params = SearchEngine::CompiledParams.from(to_typesense_params).to_h
+        SearchEngine::Relation::Dx::DryRun.curl(url, params)
       end
 
       # Compile and validate without performing network I/O.
@@ -38,7 +39,7 @@ module SearchEngine
       # @since M8
       # @see docs/dx.md
       def dry_run!
-        params = to_typesense_params
+        params = SearchEngine::CompiledParams.from(to_typesense_params).to_h
         SearchEngine::Relation::Dx::DryRun.payload(url: compiled_url, params: params, url_opts: compiled_url_opts)
       end
 
@@ -49,7 +50,7 @@ module SearchEngine
       # @since M8
       # @see docs/dx.md#helpers-\u0026-examples
       def explain(to: nil)
-        params = to_typesense_params
+        params = SearchEngine::CompiledParams.from(to_typesense_params)
         lines = []
 
         lines << header_line

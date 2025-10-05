@@ -333,7 +333,7 @@ class CompiledParamsContractSpec
   # Build relation URL, url_opts, and sanitized body (what the client would send)
   def compile_relation_snapshot(rel)
     preview = rel.dry_run!
-    body = sanitize_body(rel.to_typesense_params)
+    body = sanitize_body(SearchEngine::CompiledParams.from(rel.to_typesense_params).to_h)
     [preview[:url], preview[:url_opts] || {}, body]
   end
 
@@ -384,7 +384,7 @@ class CompiledParamsContractSpec
   def sanitize_body(params)
     # Use the same logic as Client#sanitize_body_params without performing HTTP
     c = SearchEngine::Client.new
-    c.send(:sanitize_body_params, params.dup)
+    c.send(:sanitize_body_params, SearchEngine::CompiledParams.from(params).to_h.dup)
   end
 
   def deep_sort_object(obj)

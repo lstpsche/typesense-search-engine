@@ -26,22 +26,27 @@ module SearchEngine
     # @return [SearchEngine::Result] Wrapped response with hydrated hits
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
     def search(collection:, params:, url_opts: {})
-      validate_single!(collection, params)
+      params_obj = SearchEngine::CompiledParams.from(params)
+      validate_single!(collection, params_obj.to_h)
 
       cache_params = derive_cache_opts(url_opts)
       ts = typesense
 
       start = current_monotonic_ms
-      payload = sanitize_body_params(params)
+      payload = sanitize_body_params(params_obj.to_h)
       path = "/collections/#{collection}/documents/search"
 
       # Observability event payload (pre-built; redacted)
       if defined?(ActiveSupport::Notifications)
-        se_payload = build_search_event_payload(collection: collection, params: params, cache_params: cache_params)
+        se_payload = build_search_event_payload(
+          collection: collection,
+          params: params_obj.to_h,
+          cache_params: cache_params
+        )
 
         result = nil
         SearchEngine::Instrumentation.instrument('search_engine.search', se_payload) do |ctx|
-          ctx[:params_preview] = SearchEngine::Instrumentation.redact(params)
+          ctx[:params_preview] = SearchEngine::Instrumentation.redact(params_obj.to_h)
           result = with_exception_mapping(:post, path, cache_params, start) do
             ts.collections[collection].documents.search(payload, common_params: cache_params)
           end

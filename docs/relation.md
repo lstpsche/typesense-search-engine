@@ -141,8 +141,8 @@ Dedupe behavior: **order last-wins by field**, **select first-wins**.
 
 ## Compiler and debug helpers
 
-- **Relation#to_typesense_params**: compile immutable state to a Typesense body params Hash. Pure and deterministic. Omits URL-level options (cache knobs are handled by the client).
-- **Relation#to_h**: alias of `#to_typesense_params`.
+- **Relation#to_typesense_params**: compile immutable state to a Typesense body params object. Pure and deterministic. Omits URL-level options (cache knobs are handled by the client).
+- **Relation#to_h**: returns the compiled params as a Hash (deterministic order).
 - **Relation#inspect**: concise, stable, and redacted summary `#<SearchEngine::Relation Model=Product filters=2 ast=2 sort="updated_at:desc" select=2 page=2 per=20>`.
 
 ### Defaults merged
@@ -185,7 +185,7 @@ rel = SearchEngine::Product
         .select(:id, :name)
         .page(2).per(20)
 
-rel.to_typesense_params
+rel.to_typesense_params.to_h
 # => { q: "*", query_by: "name,description", filter_by: "brand_id:=[1,2] && active:=true", sort_by: "updated_at:desc", include_fields: "id,name", page: 2, per_page: 20 }
 ```
 

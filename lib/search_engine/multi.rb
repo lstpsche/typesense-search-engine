@@ -121,7 +121,7 @@ module SearchEngine
                 "invalid relation for label #{e.label.inspect}: expected a Relation with a bound collection"
         end
 
-        per_search = e.relation.to_typesense_params
+        per_search = SearchEngine::CompiledParams.from(e.relation.to_typesense_params).to_h
         per_search = filter_url_only_keys(per_search)
 
         collection = collection_name_for_relation(e.relation)
