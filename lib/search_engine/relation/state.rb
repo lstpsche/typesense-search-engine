@@ -175,6 +175,70 @@ module SearchEngine
         normalized[:hit_limits] = normalize_hit_limits_input(value || {})
       end
 
+      # Newly added handlers for remaining state keys
+      def handle_state_orders!(normalized, value)
+        additions = normalize_order(value)
+        normalized[:orders] = dedupe_orders_last_wins(additions)
+      end
+
+      def handle_state_select!(normalized, value)
+        normalized[:select] = normalize_select(value)
+      end
+
+      def handle_state_select_nested!(normalized, value)
+        nested_in = value || {}
+        nested = {}
+        nested_in.each do |k, v|
+          key = k.to_sym
+          fields = Array(v).flatten.compact
+          nested[key] = fields
+        end
+        normalized[:select_nested] = nested
+      end
+
+      def handle_state_select_nested_order!(normalized, value)
+        normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+      end
+
+      def handle_state_exclude!(normalized, value)
+        normalized[:exclude] = normalize_select(value)
+      end
+
+      def handle_state_exclude_nested!(normalized, value)
+        nested_in = value || {}
+        nested = {}
+        nested_in.each do |k, v|
+          key = k.to_sym
+          fields = Array(v).flatten.compact
+          nested[key] = fields
+        end
+        normalized[:exclude_nested] = nested
+      end
+
+      def handle_state_exclude_nested_order!(normalized, value)
+        normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+      end
+
+      def handle_state_joins!(normalized, value)
+        normalized[:joins] = Array(value).flatten.compact.map(&:to_sym)
+      end
+
+      def handle_state_limit!(normalized, value)
+        normalized[:limit] = coerce_integer_min(value, :limit, 1)
+      end
+
+      def handle_state_offset!(normalized, value)
+        normalized[:offset] = coerce_integer_min(value, :offset, 0)
+      end
+
+      def handle_state_page!(normalized, value)
+        normalized[:page] = coerce_integer_min(value, :page, 1)
+      end
+
+      def handle_state_per_page!(normalized, value)
+        normalized[:per_page] = coerce_integer_min(value, :per, 1)
+      end
+
       # Deep duplicate Hash/Array trees; leaves are returned as-is.
       # @param obj [Object]
       # @return [Object]

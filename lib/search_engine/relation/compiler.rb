@@ -19,7 +19,7 @@ module SearchEngine
 
         # Filters and sorting
         ast_nodes = Array(@state[:ast]).flatten.compact
-        SearchEngine::Instrumentation.monotonic_ms
+        SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
         filter_str = assign_filter_by!(params, ast_nodes)
 
         orders = Array(@state[:orders])
@@ -342,8 +342,6 @@ module SearchEngine
         nil
       end
 
-      # ---- helpers extracted to reduce complexity ---------------------------
-
       private
 
       def apply_query_basics!(params, opts, cfg)
@@ -604,7 +602,42 @@ module SearchEngine
         params[:_hits] = hits_info unless hits_info.empty?
       end
 
-      # existing helpers: apply_faceting!, apply_text_processing_flags!
+      # Faceting block extracted for clarity
+      def apply_faceting!(params)
+        facet_fields = Array(@state[:facet_fields]).map(&:to_s).reject(&:empty?)
+        params[:facet_by] = facet_fields.join(',') unless facet_fields.empty?
+
+        caps = Array(@state[:facet_max_values]).compact
+        if caps.any?
+          valid_caps = []
+          caps.each do |v|
+            valid_caps << Integer(v)
+          rescue ArgumentError, TypeError
+            # skip invalid cap
+          end
+          max_cap = valid_caps.max
+          params[:max_facet_values] = max_cap if max_cap&.positive?
+        end
+
+        queries = Array(@state[:facet_queries])
+        return unless queries.any?
+
+        tokens = queries.map { |q| "#{q[:field]}:#{q[:expr]}" }
+        params[:facet_query] = tokens.join(',') unless tokens.empty?
+      end
+
+      # Synonyms/stopwords toggles extracted for clarity
+      def apply_text_processing_flags!(params, runtime_flags)
+        unless @state[:use_synonyms].nil?
+          params[:enable_synonyms] = @state[:use_synonyms]
+          runtime_flags[:use_synonyms] = @state[:use_synonyms]
+        end
+        return if @state[:use_stopwords].nil?
+
+        remove = !@state[:use_stopwords]
+        params[:remove_stop_words] = remove
+        runtime_flags[:use_stopwords] = @state[:use_stopwords]
+      end
     end
   end
 end

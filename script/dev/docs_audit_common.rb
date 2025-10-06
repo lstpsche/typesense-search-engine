@@ -227,8 +227,6 @@ module DocsAudit
     end
   end
 
-  # --- helpers extracted to reduce complexity --------------------------------
-
   def self.handle_module_node(node, stack, _vis, walker)
     mod = const_from(node[1])
     stack.push(mod)
