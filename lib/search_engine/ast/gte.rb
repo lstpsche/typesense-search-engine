@@ -4,8 +4,6 @@ module SearchEngine
   module AST
     # Binary comparison: field >= value
     class Gte < BinaryOp
-      attr_reader :field
-
       def type = :gte
 
       def value = @right

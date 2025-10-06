@@ -4,8 +4,6 @@ module SearchEngine
   module AST
     # Membership: field NOT IN values
     class NotIn < BinaryOp
-      attr_reader :field
-
       def type = :not_in
 
       # Preserve public API name
