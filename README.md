@@ -2,7 +2,6 @@
 
 Mountless Rails::Engine for Typesense. Expressive Relation/DSL with JOINs, grouping, presets/curation — with strong DX and observability.
 
-<!-- Badges: replace ORG/REPO and endpoints when available -->
 [![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
 
 ## Quickstart

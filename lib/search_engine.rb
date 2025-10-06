@@ -87,11 +87,7 @@ module SearchEngine
       # Enforce maximum number of searches before compiling/dispatch
       count = builder.labels.size
       limit = SearchEngine.config.multi_search_limit
-      if count > limit
-        raise ArgumentError,
-              "multi_search: #{count} searches exceed limit (#{limit}). " \
-              'Increase `SearchEngine.config.multi_search_limit` if necessary.'
-      end
+      enforce_multi_limit!(count, limit)
 
       labels = builder.labels
       payloads = builder.to_payloads(common: common)
@@ -99,13 +95,7 @@ module SearchEngine
       url_opts = SearchEngine::ClientOptions.url_options_from_config(SearchEngine.config)
       raw = nil
       if defined?(ActiveSupport::Notifications)
-        se_payload = {
-          searches_count: count,
-          labels: labels.map(&:to_s),
-          http_status: nil,
-          source: :multi,
-          url_opts: Observability.filtered_url_opts(url_opts)
-        }
+        se_payload = build_multi_event_payload(count, labels, url_opts)
         begin
           SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
             raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
@@ -127,13 +117,7 @@ module SearchEngine
 
       # Typesense returns a Hash with key 'results' => [ { ... }, ... ]
       list = Array(raw && raw['results'])
-      pairs = []
-      list.each_with_index do |item, idx|
-        label = labels[idx]
-        klass = builder.klasses[idx]
-        result = SearchEngine::Result.new(item, klass: klass)
-        pairs << [label, result]
-      end
+      pairs = build_label_result_pairs(list, labels, builder)
 
       SearchEngine::Multi::ResultSet.new(pairs)
     end
@@ -272,6 +256,35 @@ module SearchEngine
 
     def config_mutex
       @config_mutex ||= Mutex.new
+    end
+
+    def enforce_multi_limit!(count, limit)
+      return unless count > limit
+
+      raise ArgumentError,
+            "multi_search: #{count} searches exceed limit (#{limit}). " \
+            'Increase `SearchEngine.config.multi_search_limit` if necessary.'
+    end
+
+    def build_multi_event_payload(count, labels, url_opts)
+      {
+        searches_count: count,
+        labels: labels.map(&:to_s),
+        http_status: nil,
+        source: :multi,
+        url_opts: Observability.filtered_url_opts(url_opts)
+      }
+    end
+
+    def build_label_result_pairs(list, labels, builder)
+      pairs = []
+      list.each_with_index do |item, idx|
+        label = labels[idx]
+        klass = builder.klasses[idx]
+        result = SearchEngine::Result.new(item, klass: klass)
+        pairs << [label, result]
+      end
+      pairs
     end
 
     # Build an API error with additional label context when possible.

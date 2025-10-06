@@ -119,7 +119,7 @@ module SearchEngine
 
     # Explain the current relation without performing any network calls.
     # @return [String]
-    def explain(to: nil) # rubocop:disable Metrics/AbcSize
+    def explain(to: nil)
       params = to_typesense_params
 
       lines = []
@@ -130,24 +130,11 @@ module SearchEngine
 
       append_curation_explain_lines(lines)
 
-      lines << "  use_synonyms: #{@state[:use_synonyms]}" if @state.key?(:use_synonyms) && !@state[:use_synonyms].nil?
-      if @state.key?(:use_stopwords) && !@state[:use_stopwords].nil?
-        lines << "  use_stopwords: #{@state[:use_stopwords]} (maps to remove_stop_words=#{!@state[:use_stopwords]})"
-      end
+      append_boolean_knobs_explain_lines(lines)
 
-      if params[:filter_by] && !params[:filter_by].to_s.strip.empty?
-        where_str = friendly_where(params[:filter_by].to_s)
-        lines << "  where: #{where_str}"
-      end
+      append_where_and_order_lines(lines, params)
 
-      lines << "  order: #{params[:sort_by]}" if params[:sort_by] && !params[:sort_by].to_s.strip.empty?
-
-      if (g = @state[:grouping])
-        gparts = ["group_by=#{g[:field]}"]
-        gparts << "limit=#{g[:limit]}" if g[:limit]
-        gparts << 'missing_values=true' if g[:missing_values]
-        lines << "  group: #{gparts.join(' ')}"
-      end
+      append_grouping_explain_lines(lines)
 
       append_selection_explain_lines(lines, params)
 
@@ -269,7 +256,10 @@ module SearchEngine
     end
 
     def client
-      @__client ||= (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new # rubocop:disable Naming/MemoizedInstanceVariableName
+      # Prefer legacy ivar when explicitly set (tests or injected stubs), otherwise memoize with conventional name
+      return @__client if instance_variable_defined?(:@__client) && @__client
+
+      @client ||= (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
     end
 
     def build_url_opts
@@ -319,6 +309,30 @@ module SearchEngine
         doc: 'docs/hit_limits.md#validation',
         details: { total_hits: th, max: max, collection: coll, relation_summary: inspect }
       )
+    end
+
+    def append_boolean_knobs_explain_lines(lines)
+      lines << "  use_synonyms: #{@state[:use_synonyms]}" if @state.key?(:use_synonyms) && !@state[:use_synonyms].nil?
+      return unless @state.key?(:use_stopwords) && !@state[:use_stopwords].nil?
+
+      lines << "  use_stopwords: #{@state[:use_stopwords]} (maps to remove_stop_words=#{!@state[:use_stopwords]})"
+    end
+
+    def append_where_and_order_lines(lines, params)
+      if params[:filter_by] && !params[:filter_by].to_s.strip.empty?
+        where_str = friendly_where(params[:filter_by].to_s)
+        lines << "  where: #{where_str}"
+      end
+      lines << "  order: #{params[:sort_by]}" if params[:sort_by] && !params[:sort_by].to_s.strip.empty?
+    end
+
+    def append_grouping_explain_lines(lines)
+      if (g = @state[:grouping])
+        gparts = ["group_by=#{g[:field]}"]
+        gparts << "limit=#{g[:limit]}" if g[:limit]
+        gparts << 'missing_values=true' if g[:missing_values]
+        lines << "  group: #{gparts.join(' ')}"
+      end
     end
   end
 end

@@ -50,7 +50,7 @@ module SearchEngine
         def result_for_check(name:, ok:, severity:, duration_ms:, details:, hint:, doc:, error_class:, error_message:)
           {
             name: name.to_s,
-            ok: !!ok, # rubocop:disable Style/DoubleNegation
+            ok: ok ? true : false,
             severity: severity&.to_sym,
             duration_ms: duration_ms.to_f.round(1),
             details: details,

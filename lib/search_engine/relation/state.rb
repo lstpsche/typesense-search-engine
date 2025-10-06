@@ -55,7 +55,6 @@ module SearchEngine
 
       # Apply a single initial state key with normalization.
       # Delegates to the same normalizers used by DSL chainers.
-      # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
       def apply_initial_state_key!(normalized, key, value)
         k = key.to_sym
         case k
@@ -124,7 +123,6 @@ module SearchEngine
           normalized[:hit_limits] = normalize_hit_limits_input(value || {})
         end
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
 
       # One-time migration: when AST is empty and legacy string filters exist, map legacy to AST::Raw.
       # Idempotent and safe for repeated calls.
