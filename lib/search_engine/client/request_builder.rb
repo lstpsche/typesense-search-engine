@@ -17,6 +17,19 @@ module SearchEngine
       COLLECTIONS_PREFIX = '/collections/'
       DOCUMENTS_SEARCH_SUFFIX = '/documents/search'
       CONTENT_TYPE_JSON = 'application/json'
+      DEFAULT_HEADERS_JSON = { 'Content-Type' => CONTENT_TYPE_JSON }.freeze
+
+      INTERNAL_ONLY_KEYS = %i[
+        _join
+        _selection
+        _preset_mode
+        _preset_pruned_keys
+        _preset_conflicts
+        _curation_conflict_type
+        _curation_conflict_count
+        _runtime_flags
+        _hits
+      ].freeze
 
       # Build a single-search request for a collection.
       # @param collection [String]
@@ -33,7 +46,7 @@ module SearchEngine
           http_method: :post,
           path: COLLECTIONS_PREFIX + name + DOCUMENTS_SEARCH_SUFFIX,
           params: url_opts || {},
-          headers: { 'Content-Type' => CONTENT_TYPE_JSON },
+          headers: DEFAULT_HEADERS_JSON,
           body: body_hash,
           body_json: body_json
         )
@@ -44,15 +57,7 @@ module SearchEngine
       # @return [Hash]
       def self.sanitize_body_params(params)
         payload = params.dup
-        payload.delete(:_join)
-        payload.delete(:_selection)
-        payload.delete(:_preset_mode)
-        payload.delete(:_preset_pruned_keys)
-        payload.delete(:_preset_conflicts)
-        payload.delete(:_curation_conflict_type)
-        payload.delete(:_curation_conflict_count)
-        payload.delete(:_runtime_flags)
-        payload.delete(:_hits)
+        INTERNAL_ONLY_KEYS.each { |k| payload.delete(k) }
         payload
       end
       private_class_method :sanitize_body_params
