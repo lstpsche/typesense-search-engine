@@ -1,11 +1,9 @@
-# SearchEngine
+# Typesense Search Engine [![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
 
 > [!WARNING]
 > **⚠️ This project is under maintenance – work in progress. APIs and docs may change. ⚠️**
 
 Mountless Rails::Engine for Typesense. Expressive Relation/DSL with JOINs, grouping, presets/curation — with strong DX and observability.
-
-[![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
 
 ## Quickstart
 
@@ -18,14 +16,16 @@ gem "typesense-search-engine"
 # config/initializers/typesense_search_engine.rb
 SearchEngine.configure do |c|
   c.host = ENV.fetch("TYPESENSE_HOST", "localhost")
-  c.port = 8108; c.protocol = "http"; c.api_key = ENV.fetch("TYPESENSE_API_KEY")
+  c.port = 8108
+  c.protocol = "http"
+  c.api_key = ENV.fetch("TYPESENSE_API_KEY")
   c.default_query_by = "name, description"
 end
 ```
 
 ```ruby
 class SearchEngine::Product < SearchEngine::Base
-  collection "products"
+  collection :products
   attribute :id, :integer
   attribute :name, :string
 end
@@ -90,17 +90,9 @@ See the wiki → [Home](https://github.com/lstpsche/typesense-search-engine/wiki
 
 See `examples/demo_shop` — demonstrates single/multi search, JOINs, grouping, presets/curation, and DX/observability. Supports offline mode via the stub client (see [Testing](https://github.com/lstpsche/typesense-search-engine/wiki/Testing)).
 
-
-
 ## Contributing
 
 See [Docs style guide](https://github.com/lstpsche/typesense-search-engine/wiki/contributing/docs_style). Follow YARDoc for public APIs, add backlinks on docs landing pages, and redact secrets in examples.
-
-## License
-
-MIT — see [LICENSE](./LICENSE).
-
-
 
 <!-- Badge references (placeholders) -->
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/lstpsche/typesense-search-engine/ci.yml?branch=main
