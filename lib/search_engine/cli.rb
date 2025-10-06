@@ -95,10 +95,7 @@ module SearchEngine
       # @param name [String]
       # @return [Boolean]
       def boolean_env?(name)
-        v = ENV[name]
-        return false if v.nil?
-
-        %w[1 true yes on].include?(v.to_s.strip.downcase)
+        SearchEngine::CLI::Support.boolean_env?(name)
       end
 
       # Whether JSON output is requested via FORMAT=json.

@@ -51,6 +51,16 @@ class CliSupportTest < Minitest::Test
     with_env('FORMAT' => nil) { assert_equal false, Support.json_output? }
   end
 
+  def test_boolean_env
+    with_env('X' => '1') { assert_equal true, Support.boolean_env?('X') }
+    with_env('X' => 'true') { assert_equal true, Support.boolean_env?('X') }
+    with_env('X' => 'yes') { assert_equal true, Support.boolean_env?('X') }
+    with_env('X' => 'on') { assert_equal true, Support.boolean_env?('X') }
+    with_env('X' => '0') { assert_equal false, Support.boolean_env?('X') }
+    with_env('X' => 'false') { assert_equal false, Support.boolean_env?('X') }
+    with_env('X' => nil) { assert_equal false, Support.boolean_env?('X') }
+  end
+
   def test_console_formatting_plain_without_color_emoji
     with_env('NO_COLOR' => '1', 'NO_EMOJI' => '1') do
       assert_equal 'Title', Support.fmt_heading('Title')

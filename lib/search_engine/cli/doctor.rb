@@ -309,7 +309,7 @@ module SearchEngine
           details = {
             url: preview[:url],
             url_opts: SearchEngine::Observability.filtered_url_opts(preview[:url_opts] || {}),
-            body_preview: safe_parse_json(preview[:body])
+            body_preview: SearchEngine::CLI::Support.parse_json_or_string(preview[:body])
           }
           Builder.result_for_check(
             name: 'dry_run_single',
@@ -498,13 +498,6 @@ module SearchEngine
           else
             value
           end
-        end
-
-        def safe_parse_json(str)
-          val = SearchEngine::CLI::Support.parse_json_safe(str)
-          return str.to_s if val.nil?
-
-          val
         end
 
         def failure(name, started_ms, error, hint:, doc: nil)

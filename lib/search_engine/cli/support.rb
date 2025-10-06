@@ -62,6 +62,13 @@ module SearchEngine
         (ENV['FORMAT'] || '').to_s.strip.downcase == 'json'
       end
 
+      # Returns true when ENV[name] is a truthy flag (1/true/yes/on).
+      # @param name [String]
+      # @return [Boolean]
+      def boolean_env?(name)
+        truthy_env?(ENV[name])
+      end
+
       # --- Console formatting ------------------------------------------------
       # Respect NO_COLOR and TTY.
       # @return [Boolean]
