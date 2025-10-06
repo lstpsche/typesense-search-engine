@@ -1,21 +1,15 @@
 # frozen_string_literal: true
 
+require 'search_engine/relation/dsl/filters'
+require 'search_engine/relation/dsl/selection'
+
 module SearchEngine
   class Relation
     # User-facing chainers and input normalizers.
     # Chainers MUST be copy-on-write and return new Relation instances.
     module DSL
-      # Add filters to the relation.
-      # @param args [Array<Object>] filter arguments
-      # @return [SearchEngine::Relation]
-      def where(*args)
-        ast_nodes = SearchEngine::DSL::Parser.parse_list(args, klass: @klass, joins: joins_list)
-        fragments = normalize_where(args)
-        spawn do |s|
-          s[:ast] = Array(s[:ast]) + Array(ast_nodes)
-          s[:filters] = Array(s[:filters]) + fragments
-        end
-      end
+      include SearchEngine::Relation::DSL::Filters
+      include SearchEngine::Relation::DSL::Selection
 
       # Append ordering expressions. Accepts Hash or String forms.
       # @param value [Hash, String]
@@ -26,45 +20,6 @@ module SearchEngine
           existing = Array(s[:orders])
           s[:orders] = dedupe_orders_last_wins(existing + additions)
         end
-      end
-
-      # Select a subset of fields for Typesense `include_fields`.
-      # @param fields [Array<Symbol,String,Hash,Array>]
-      # @return [SearchEngine::Relation]
-      def select(*fields)
-        normalized = normalize_select_input(fields)
-        spawn do |s|
-          existing_base = Array(s[:select])
-          merged_base = (existing_base + normalized[:base]).each_with_object([]) do |f, acc|
-            acc << f unless acc.include?(f)
-          end
-          s[:select] = merged_base
-
-          existing_nested = s[:select_nested] || {}
-          existing_order = Array(s[:select_nested_order])
-
-          normalized[:nested_order].each do |assoc|
-            new_fields = Array(normalized[:nested][assoc])
-            next if new_fields.empty?
-
-            old_fields = Array(existing_nested[assoc])
-            merged_fields = (old_fields + new_fields).each_with_object([]) do |name, acc|
-              acc << name unless acc.include?(name)
-            end
-            existing_nested = existing_nested.merge(assoc => merged_fields)
-            existing_order << assoc unless existing_order.include?(assoc)
-          end
-
-          s[:select_nested] = existing_nested
-          s[:select_nested_order] = existing_order
-        end
-      end
-
-      # Convenience alias for `select` supporting nested include_fields input.
-      # @param fields [Array]
-      # @return [SearchEngine::Relation]
-      def include_fields(*fields)
-        select(*fields)
       end
 
       # Apply a server-side preset with a specified merge strategy.
@@ -142,38 +97,6 @@ module SearchEngine
           opts = (s[:options] || {}).dup
           opts[:infix] = token
           s[:options] = opts
-        end
-      end
-
-      # Exclude a subset of fields from the final selection.
-      # @param fields [Array<Symbol,String,Hash,Array>]
-      # @return [SearchEngine::Relation]
-      def exclude(*fields)
-        normalized = normalize_select_input(fields, context: 'excluding fields')
-        spawn do |s|
-          existing_base = Array(s[:exclude])
-          merged_base = (existing_base + normalized[:base]).each_with_object([]) do |f, acc|
-            acc << f unless acc.include?(f)
-          end
-          s[:exclude] = merged_base
-
-          existing_nested = s[:exclude_nested] || {}
-          existing_order = Array(s[:exclude_nested_order])
-
-          normalized[:nested_order].each do |assoc|
-            new_fields = Array(normalized[:nested][assoc])
-            next if new_fields.empty?
-
-            old_fields = Array(existing_nested[assoc])
-            merged_fields = (old_fields + new_fields).each_with_object([]) do |name, acc|
-              acc << name unless acc.include?(name)
-            end
-            existing_nested = existing_nested.merge(assoc => merged_fields)
-            existing_order << assoc unless existing_order.include?(assoc)
-          end
-
-          s[:exclude_nested] = existing_nested
-          s[:exclude_nested_order] = existing_order
         end
       end
 
@@ -263,45 +186,6 @@ module SearchEngine
         end
 
         rel
-      end
-
-      # Replace the selected fields list (Typesense `include_fields`).
-      # @param fields [Array<#to_sym,#to_s>]
-      # @return [SearchEngine::Relation]
-      def reselect(*fields)
-        normalized = normalize_select_input(fields)
-
-        base_empty = Array(normalized[:base]).empty?
-        nested_empty = normalized[:nested_order].all? { |a| Array(normalized[:nested][a]).empty? }
-        raise ArgumentError, 'reselect: provide at least one non-blank field' if base_empty && nested_empty
-
-        spawn do |s|
-          s[:select] = normalized[:base]
-          s[:select_nested] = normalized[:nested]
-          s[:select_nested_order] = normalized[:nested_order]
-          s[:exclude] = []
-          s[:exclude_nested] = {}
-          s[:exclude_nested_order] = []
-        end
-      end
-
-      # Replace all predicates with a new where input.
-      # @param input [Hash, String, Array, Symbol]
-      # @param args [Array<Object>]
-      # @return [SearchEngine::Relation]
-      def rewhere(input, *args)
-        if input.nil? || (input.respond_to?(:empty?) && input.empty?) || (input.is_a?(String) && input.strip.empty?)
-          raise ArgumentError, 'rewhere: provide a new predicate input'
-        end
-
-        nodes = SearchEngine::DSL::Parser.parse(input, klass: @klass, args: args, joins: joins_list)
-        list = Array(nodes).flatten.compact
-        raise ArgumentError, 'rewhere: produced no predicates' if list.empty?
-
-        spawn do |s|
-          s[:ast] = list
-          s[:filters] = []
-        end
       end
 
       # Remove specific pieces of relation state (AR-style unscope).
@@ -496,56 +380,6 @@ module SearchEngine
       # --- Normalizers (private) ---
       private
 
-      # Normalize where arguments into an array of string fragments safe for Typesense.
-      def normalize_where(args)
-        list = Array(args).flatten.compact
-        return [] if list.empty?
-
-        fragments = []
-        i = 0
-        known_attrs = safe_attributes_map
-
-        while i < list.length
-          entry = list[i]
-          case entry
-          when Hash
-            validate_hash_keys!(entry, known_attrs)
-            fragments.concat(SearchEngine::Filters::Sanitizer.build_from_hash(entry, known_attrs))
-            i += 1
-          when String
-            i = normalize_where_process_string!(fragments, entry, list, i)
-          when Symbol
-            fragments << entry.to_s
-            i += 1
-          when Array
-            nested = normalize_where(entry)
-            fragments.concat(nested)
-            i += 1
-          else
-            raise ArgumentError, "unsupported where argument of type #{entry.class}"
-          end
-        end
-
-        fragments
-      end
-
-      def normalize_where_process_string!(fragments, entry, list, i)
-        if entry.match?(/(?<!\\)\?/) # has unescaped placeholders
-          tail = list[(i + 1)..] || []
-          needed = SearchEngine::Filters::Sanitizer.count_placeholders(entry)
-          args_for_template = tail.first(needed)
-          if args_for_template.length != needed
-            raise ArgumentError, "expected #{needed} args for #{needed} placeholders, got #{args_for_template.length}"
-          end
-
-          fragments << SearchEngine::Filters::Sanitizer.apply_placeholders(entry, args_for_template)
-          i + 1 + needed
-        else
-          fragments << entry.to_s
-          i + 1
-        end
-      end
-
       # Parse and normalize order input into an array of "field:dir" strings.
       def normalize_order(value)
         return [] if value.nil?
@@ -641,103 +475,6 @@ module SearchEngine
           last_by_field[field] = { idx: idx, str: "#{field}:#{dir}" }
         end
         last_by_field.values.sort_by { |h| h[:idx] }.map { |h| h[:str] }
-      end
-
-      # Base-only normalization used internally and for legacy callers.
-      def normalize_select(fields)
-        list = Array(fields).flatten.compact
-        return [] if list.empty?
-
-        known_attrs = safe_attributes_map
-        known = known_attrs.keys.map(&:to_s)
-
-        ordered = []
-        list.each do |f|
-          name = f.to_s.strip
-          raise ArgumentError, 'select: field names must be non-empty' if name.empty?
-
-          if !known.empty? && !known.include?(name)
-            suggestions = suggest_fields(name.to_sym, known_attrs.keys.map(&:to_sym))
-            suggest = if suggestions.empty?
-                        ''
-                      elsif suggestions.length == 1
-                        " (did you mean :#{suggestions.first}?)"
-                      else
-                        last = suggestions.last
-                        others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
-                        " (did you mean #{others}, or :#{last}?)"
-                      end
-            raise SearchEngine::Errors::UnknownField,
-                  "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
-          end
-
-          ordered << name unless ordered.include?(name)
-        end
-        ordered
-      end
-
-      # Extended normalization supporting nested association selections.
-      # Returns a Hash with keys: :base, :nested, :nested_order.
-      def normalize_select_input(fields, context: 'selecting fields')
-        list = Array(fields).flatten.compact
-        return { base: [], nested: {}, nested_order: [] } if list.empty?
-
-        base = []
-        nested = {}
-        nested_order = []
-
-        add_base = ->(val) { base.concat(normalize_select([val])) }
-        add_nested = build_add_nested_proc(context, nested, nested_order)
-
-        process_selection_list!(list, add_base, add_nested)
-
-        { base: base.uniq, nested: nested, nested_order: nested_order }
-      end
-
-      def build_add_nested_proc(context, nested, nested_order)
-        lambda do |assoc, values|
-          key = assoc.to_sym
-          @klass.join_for(key)
-          SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, key, context: context)
-
-          items = case values
-                  when Array then values
-                  when nil then []
-                  else [values]
-                  end
-          names = items.flatten.compact.map(&:to_s).map(&:strip).reject(&:empty?)
-          return if names.empty?
-
-          cfg = @klass.join_for(key)
-          names.each { |fname| SearchEngine::Joins::Guard.validate_joined_field!(cfg, fname, source_klass: @klass) }
-
-          existing = Array(nested[key])
-          merged = (existing + names).each_with_object([]) { |n, acc| acc << n unless acc.include?(n) }
-          nested[key] = merged
-          nested_order << key unless nested_order.include?(key)
-        end
-      end
-
-      def process_selection_list!(list, add_base, add_nested)
-        i = 0
-        while i < list.length
-          entry = list[i]
-          case entry
-          when Hash
-            entry.each { |k, v| add_nested.call(k, v) }
-            i += 1
-          when Symbol, String
-            add_base.call(entry)
-            i += 1
-          when Array
-            inner = Array(entry).flatten.compact
-            inner.each { |el| list << el }
-            i += 1
-          else
-            raise SearchEngine::Errors::ConflictingSelection,
-                  "ConflictingSelection: unsupported input #{entry.class} in selection"
-          end
-        end
       end
 
       def normalize_grouping(value)
