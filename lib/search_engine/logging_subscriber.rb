@@ -149,6 +149,12 @@ module SearchEngine
         )
         return specialized if specialized
 
+        parts = compact_base_parts(short, cid, collection, status, duration, p)
+        parts.join(' ')
+      end
+
+      # Build base compact parts for generic events (single-line, allocation-light)
+      def compact_base_parts(short, cid, collection, status, duration, p)
         groups = SearchEngine::Logging::FormatHelpers.value_or_dash(p[:groups_count])
         preset = p[:preset_name] || SearchEngine::Logging::FormatHelpers.value_or_dash(nil)
         pinned = p[:curation_pinned_count] || p[:pinned_count] || 0
@@ -163,8 +169,9 @@ module SearchEngine
         parts << "groups=#{groups}"
         parts << "preset=#{preset}"
         parts << "cur=#{pinned}/#{hidden}"
-        parts.join(' ')
+        parts
       end
+      private :compact_base_parts
 
       def format_json(event)
         p = event.payload || {}
