@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    search_engine (0.1.0)
+    search_engine (0.9.0)
       rails (>= 6.1)
       typesense (>= 4.1.0)
 
