@@ -10,7 +10,7 @@ module SearchEngine
       private
 
       def monotonic_ms
-        Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+        SearchEngine::Instrumentation.monotonic_ms
       end
 
       def instrument_batch_fetched(source:, batch_index:, rows_count:, duration_ms:, partition: nil, cursor: nil,

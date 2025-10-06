@@ -175,7 +175,7 @@ module SearchEngine
           nil
         end
         entry = Call.new(
-          timestamp: Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond),
+          timestamp: SearchEngine::Instrumentation.monotonic_ms,
           correlation_id: corr,
           verb: method,
           url: url,
