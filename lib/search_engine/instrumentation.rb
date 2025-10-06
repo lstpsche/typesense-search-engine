@@ -45,6 +45,10 @@ module SearchEngine
         required: %i[collection],
         optional: %i[join_count assocs used_in include_len filter_len sort_len duration_ms has_joins]
       },
+      'search_engine.selection.compile' => {
+        required: %i[],
+        optional: %i[include_count exclude_count nested_assoc_count]
+      },
       'search_engine.preset.apply' => {
         required: %i[preset_name],
         optional: %i[preset_mode preset_pruned_keys preset_pruned_keys_count preset_locked_domains_count]
