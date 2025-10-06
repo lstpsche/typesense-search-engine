@@ -85,7 +85,7 @@ module SearchEngine
         @__groups_memo = groups_built.freeze
         first_hits = groups_built.map { |g| g.hits.first }.compact
         @hits = first_hits.freeze
-        instrument_group_parse(groups_built) if defined?(SearchEngine::Instrumentation)
+        instrument_group_parse(groups_built)
       else
         entries = Array(@raw['hits']).map { |h| symbolize_hit(h) }
         hydrated = []

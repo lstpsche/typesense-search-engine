@@ -186,43 +186,17 @@ module DocsAudit
       when :program
         node[1].each { |c| vis = walker.call(c, stack, vis) }
       when :module
-        mod = const_from(node[1])
-        stack.push(mod)
-        vis = :public
-        vis = walker.call(node[2], stack, vis)
-        stack.pop
+        vis = handle_module_node(node, stack, vis, walker)
       when :class
-        cls = const_from(node[1])
-        stack.push(cls)
-        vis = :public
-        vis = walker.call(node[3], stack, vis)
-        stack.pop
+        vis = handle_class_node(node, stack, vis, walker)
       when :bodystmt
         (node[1] || []).each { |c| vis = walker.call(c, stack, vis) }
       when :vcall
-        id = node[1]
-        if id && id[0] == :@ident
-          case id[1]
-          when 'private' then vis = :private
-          when 'protected' then vis = :protected
-          when 'public' then vis = :public
-          end
-        end
+        vis = handle_visibility_vcall(node, vis)
       when :command
-        id = node[1]
-        if id && id[0] == :@ident
-          case id[1]
-          when 'private' then vis = :private
-          when 'protected' then vis = :protected
-          when 'public' then vis = :public
-          end
-        end
+        vis = handle_visibility_command(node, vis)
       when :def
-        name_tok = node[1]
-        if name_tok && name_tok[0] == :@ident
-          full = stack.compact.join('::')
-          methods << name_tok[1] if full == 'SearchEngine::Relation' && vis == :public
-        end
+        record_public_method(node, stack, vis, methods)
       else
         node[1..].each { |c| vis = walker.call(c, stack, vis) if c.is_a?(Array) }
       end
@@ -251,6 +225,58 @@ module DocsAudit
       right = right_tok && right_tok[1]
       [left, right].compact.join('::')
     end
+  end
+
+  # --- helpers extracted to reduce complexity --------------------------------
+
+  def self.handle_module_node(node, stack, _vis, walker)
+    mod = const_from(node[1])
+    stack.push(mod)
+    vis = :public
+    vis = walker.call(node[2], stack, vis)
+    stack.pop
+    vis
+  end
+
+  def self.handle_class_node(node, stack, _vis, walker)
+    cls = const_from(node[1])
+    stack.push(cls)
+    vis = :public
+    vis = walker.call(node[3], stack, vis)
+    stack.pop
+    vis
+  end
+
+  def self.handle_visibility_vcall(node, vis)
+    id = node[1]
+    return vis unless id && id[0] == :@ident
+
+    case id[1]
+    when 'private' then :private
+    when 'protected' then :protected
+    when 'public' then :public
+    else vis
+    end
+  end
+
+  def self.handle_visibility_command(node, vis)
+    id = node[1]
+    return vis unless id && id[0] == :@ident
+
+    case id[1]
+    when 'private' then :private
+    when 'protected' then :protected
+    when 'public' then :public
+    else vis
+    end
+  end
+
+  def self.record_public_method(node, stack, vis, methods)
+    name_tok = node[1]
+    return unless name_tok && name_tok[0] == :@ident
+
+    full = stack.compact.join('::')
+    methods << name_tok[1] if full == 'SearchEngine::Relation' && vis == :public
   end
 
   # Enumerate defined constants (module/class) under lib/ as strings like "SearchEngine::Client"

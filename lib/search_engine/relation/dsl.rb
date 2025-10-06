@@ -250,18 +250,16 @@ module SearchEngine
           s[:grouping] = normalized
         end
 
-        if defined?(SearchEngine::Instrumentation)
-          begin
-            payload = {
-              collection: klass_name_for_inspect,
-              field: normalized[:field].to_s,
-              limit: normalized[:limit],
-              missing_values: normalized[:missing_values]
-            }
-            SearchEngine::Instrumentation.instrument('search_engine.relation.group_by_updated', payload) {}
-          rescue StandardError
-            nil
-          end
+        begin
+          payload = {
+            collection: klass_name_for_inspect,
+            field: normalized[:field].to_s,
+            limit: normalized[:limit],
+            missing_values: normalized[:missing_values]
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.relation.group_by_updated', payload) {}
+        rescue StandardError
+          nil
         end
 
         rel

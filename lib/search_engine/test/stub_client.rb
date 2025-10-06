@@ -170,7 +170,7 @@ module SearchEngine
           params
         end
         corr = begin
-          SearchEngine::Instrumentation.current_correlation_id if defined?(SearchEngine::Instrumentation)
+          SearchEngine::Instrumentation.current_correlation_id
         rescue StandardError
           nil
         end
