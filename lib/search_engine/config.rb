@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require 'set'
+require 'search_engine/config/typesense'
+require 'search_engine/config/selection'
+require 'search_engine/config/observability'
+require 'search_engine/config/presets'
+require 'search_engine/config/validators'
 
 module SearchEngine
   # Central configuration container for the engine.
@@ -45,14 +50,7 @@ module SearchEngine
     #   @return [Integer] maximum number of searches allowed in a single multi-search call (default: 50)
     # @!attribute [rw] default_console_model
     #   @return [Class, String, nil] default model used by console helpers (SE.q/SE.rel)
-    attr_accessor :api_key,
-                  :host,
-                  :port,
-                  :protocol,
-                  :timeout_ms,
-                  :open_timeout_ms,
-                  :retries,
-                  :logger,
+    attr_accessor :logger,
                   :default_query_by,
                   :default_infix,
                   :use_cache,
@@ -228,7 +226,8 @@ module SearchEngine
     end
 
     # Lightweight nested configuration for observability/logging.
-    class ObservabilityConfig
+    # Kept for backward compatibility during refactor; delegates to external class.
+    class ObservabilityConfig < Observability
       # @return [Boolean] enable the compact logging subscriber automatically
       attr_accessor :enabled
       # @return [Symbol] :kv or :json
@@ -261,7 +260,7 @@ module SearchEngine
 
     # Lightweight nested configuration for selection/hydration.
     # Controls strictness of missing attributes during hydration.
-    class SelectionConfig
+    class SelectionConfig < Selection
       # @return [Boolean] when true, missing requested fields raise MissingField
       attr_accessor :strict_missing
 
@@ -272,7 +271,7 @@ module SearchEngine
 
     # Lightweight nested configuration for default presets resolution.
     # Controls namespacing and enablement.
-    class PresetsConfig
+    class PresetsConfig < Presets
       # @return [Boolean] when false, namespace is ignored but declared tokens remain usable
       # @see docs/presets.md
       attr_accessor :enabled
@@ -392,13 +391,14 @@ module SearchEngine
     # Populate sane defaults for development.
     # @return [void]
     def set_defaults!
-      @api_key = nil
-      @host = 'localhost'
-      @port = 8108
-      @protocol = 'http'
-      @timeout_ms = 5_000
-      @open_timeout_ms = 1_000
-      @retries = { attempts: 2, backoff: 0.2 }
+      # typesense transport defaults
+      typesense.api_key = nil
+      typesense.host = 'localhost'
+      typesense.port = 8108
+      typesense.protocol = 'http'
+      typesense.timeout_ms = 5_000
+      typesense.open_timeout_ms = 1_000
+      typesense.retries = { attempts: 2, backoff: 0.2 }
       @default_query_by = nil
       @default_infix = 'fallback'
       @use_cache = true
@@ -538,7 +538,7 @@ module SearchEngine
                end
 
       otel = opentelemetry
-      otel.enabled = !!source[:enabled] if source.key?(:enabled) # rubocop:disable Style/DoubleNegation
+      otel.enabled = (source[:enabled] ? true : false) if source.key?(:enabled)
       return unless source.key?(:service_name)
 
       otel.service_name = (source[:service_name].to_s.empty? ? 'search_engine' : source[:service_name])
@@ -617,9 +617,9 @@ module SearchEngine
     # @return [true]
     def validate!
       errors = []
-      errors.concat(validate_protocol)
-      errors.concat(validate_host)
-      errors.concat(validate_port)
+      errors.concat(SearchEngine::Config::Validators.validate_protocol(protocol))
+      errors.concat(SearchEngine::Config::Validators.validate_host(host))
+      errors.concat(SearchEngine::Config::Validators.validate_port(port))
       raise ArgumentError, errors.join(', ') unless errors.empty?
 
       true
@@ -810,82 +810,101 @@ module SearchEngine
     end
 
     def validate_protocol
-      return [] if %w[http https].include?(protocol.to_s)
-
-      ['protocol must be "http" or "https"']
+      SearchEngine::Config::Validators.validate_protocol(protocol)
     end
 
     def validate_host
-      return [] unless host.nil? || host.to_s.strip.empty?
-
-      ['host must be present']
+      SearchEngine::Config::Validators.validate_host(host)
     end
 
     def validate_port
-      return [] if port.is_a?(Integer) && port.positive?
-
-      ['port must be a positive Integer']
+      SearchEngine::Config::Validators.validate_port(port)
     end
 
     def validate_timeouts
-      errors = []
-      errors << 'timeout_ms must be a non-negative Integer' unless timeout_ms.is_a?(Integer) && !timeout_ms.negative?
-
-      unless open_timeout_ms.is_a?(Integer) && !open_timeout_ms.negative?
-        errors << 'open_timeout_ms must be a non-negative Integer'
-      end
-
-      errors
+      SearchEngine::Config::Validators.validate_timeouts(timeout_ms, open_timeout_ms)
     end
 
     def validate_retries
-      return ['retries must be a Hash with keys :attempts and :backoff'] unless retries_valid_shape?
-
-      errors = []
-      attempts = retries[:attempts]
-      backoff = retries[:backoff]
-
-      unless attempts.is_a?(Integer) && !attempts.negative?
-        errors << 'retries[:attempts] must be a non-negative Integer'
-      end
-      errors << 'retries[:backoff] must be a non-negative Float' unless backoff.is_a?(Numeric) && !backoff.negative?
-
-      errors
+      SearchEngine::Config::Validators.validate_retries(retries)
     end
 
     def retries_valid_shape?
-      retries.is_a?(Hash) && retries.key?(:attempts) && retries.key?(:backoff)
+      SearchEngine::Config::Validators.retries_valid_shape?(retries)
     end
 
     def validate_cache
-      return [] if cache_ttl_s.is_a?(Integer) && !cache_ttl_s.negative?
-
-      ['cache_ttl_s must be a non-negative Integer']
+      SearchEngine::Config::Validators.validate_cache(cache_ttl_s)
     end
 
     def validate_multi_search_limit
-      return [] if multi_search_limit.is_a?(Integer) && !multi_search_limit.negative?
-
-      ['multi_search_limit must be a non-negative Integer']
+      SearchEngine::Config::Validators.validate_multi_search_limit(multi_search_limit)
     end
 
     def validate_presets
-      errors = []
-      en = presets.enabled
-      ns = presets.namespace
-      ld = Array(presets.locked_domains)
+      SearchEngine::Config::Validators.validate_presets(presets)
+    end
 
-      errors << 'presets.enabled must be a Boolean' unless [true, false].include?(en)
+    # Typesense transport sub-config and forwarders (public API preserved)
+    # @return [SearchEngine::Config::Typesense]
+    def typesense
+      @typesense ||= SearchEngine::Config::Typesense.new
+    end
 
-      unless ns.nil? || (ns.is_a?(String) && !ns.strip.empty?)
-        errors << 'presets.namespace must be a non-empty String or nil'
-      end
+    def api_key
+      typesense.api_key
+    end
 
-      unless ld.is_a?(Array) && ld.all? { |k| k.is_a?(Symbol) }
-        errors << 'presets.locked_domains must be an Array of Symbols'
-      end
+    def api_key=(value)
+      typesense.api_key = value
+    end
 
-      errors
+    def host
+      typesense.host
+    end
+
+    def host=(value)
+      typesense.host = value
+    end
+
+    def port
+      typesense.port
+    end
+
+    def port=(value)
+      typesense.port = value
+    end
+
+    def protocol
+      typesense.protocol
+    end
+
+    def protocol=(value)
+      typesense.protocol = value
+    end
+
+    def timeout_ms
+      typesense.timeout_ms
+    end
+
+    def timeout_ms=(value)
+      typesense.timeout_ms = value
+    end
+
+    def open_timeout_ms
+      typesense.open_timeout_ms
+    end
+
+    def open_timeout_ms=(value)
+      typesense.open_timeout_ms = value
+    end
+
+    def retries
+      typesense.retries
+    end
+
+    def retries=(value)
+      typesense.retries = value
     end
   end
 end
