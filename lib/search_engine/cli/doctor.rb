@@ -98,14 +98,11 @@ module SearchEngine
         # --- Flags -----------------------------------------------------------
 
         def json?
-          (ENV['FORMAT'] || '').to_s.strip.downcase == 'json'
+          SearchEngine::CLI::Support.json_output?
         end
 
         def verbose?
-          v = ENV['VERBOSE']
-          return false if v.nil?
-
-          %w[1 true yes on].include?(v.to_s.strip.downcase)
+          SearchEngine::CLI.boolean_env?('VERBOSE')
         end
 
         # --- Checks ----------------------------------------------------------
@@ -504,9 +501,10 @@ module SearchEngine
         end
 
         def safe_parse_json(str)
-          JSON.parse(str.to_s)
-        rescue StandardError
-          str.to_s
+          val = SearchEngine::CLI::Support.parse_json_safe(str)
+          return str.to_s if val.nil?
+
+          val
         end
 
         def failure(name, started_ms, error, hint:, doc: nil)

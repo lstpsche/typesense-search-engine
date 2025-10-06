@@ -104,7 +104,7 @@ module SearchEngine
       # Whether JSON output is requested via FORMAT=json.
       # @return [Boolean]
       def json_output?
-        (ENV['FORMAT'] || '').to_s.strip.downcase == 'json'
+        SearchEngine::CLI::Support.json_output?
       end
 
       # Build an Enumerator that yields a single mapped documents batch for dry-run preview.
