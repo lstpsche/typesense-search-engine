@@ -13,12 +13,25 @@ class ReproJoinsCompileDurationTest < Minitest::Test
   end
 
   def test_joins_compile_duration_reference
-    skip
+    skip 'ActiveSupport::Notifications not available' unless defined?(ActiveSupport::Notifications)
 
-    rel = Book.all.joins(:authors)
-    # This compile path references compile_started_ms without defining it
-    # Expect no NameError after fix
-    params = SearchEngine::CompiledParams.from(rel.to_typesense_params)
-    refute_nil params
+    received = []
+    sub = ActiveSupport::Notifications.subscribe('search_engine.joins.compile') do |*args|
+      ev = ActiveSupport::Notifications::Event.new(*args)
+      received << ev
+    end
+
+    begin
+      rel = Book.all.joins(:authors)
+      params = SearchEngine::CompiledParams.from(rel.to_typesense_params)
+      refute_nil params
+    ensure
+      ActiveSupport::Notifications.unsubscribe(sub)
+    end
+
+    assert_equal 1, received.length
+    payload = received.first.payload
+    assert payload.key?(:duration_ms), 'expected duration_ms in joins.compile payload'
+    assert_kind_of Numeric, payload[:duration_ms]
   end
 end

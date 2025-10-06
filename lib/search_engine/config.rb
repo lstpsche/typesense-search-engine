@@ -240,6 +240,8 @@ module SearchEngine
       attr_accessor :emit_legacy_event_aliases
 
       def initialize
+        super()
+
         @enabled = true
         @log_format = :kv
         @max_message_length = 200
@@ -265,6 +267,8 @@ module SearchEngine
       attr_accessor :strict_missing
 
       def initialize
+        super()
+
         @strict_missing = false
       end
     end
@@ -285,6 +289,8 @@ module SearchEngine
       # @see docs/presets.md#strategies-merge-only-lock
 
       def initialize
+        super()
+
         @enabled = true
         @namespace = nil
         @locked_domains = %i[filter_by sort_by include_fields exclude_fields]

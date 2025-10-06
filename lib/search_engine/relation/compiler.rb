@@ -11,8 +11,6 @@ module SearchEngine
         cfg = SearchEngine.config
         opts = @state[:options] || {}
 
-        compile_started_ms = defined?(SearchEngine::Instrumentation) ? SearchEngine::Instrumentation.monotonic_ms : nil
-
         params = {}
         runtime_flags = {}
 
@@ -39,6 +37,52 @@ module SearchEngine
         # Exclude fields when provided and not fully derivable via include
         exclude_str = compile_exclude_fields_string
         params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
+
+        # Emit selection compile event with counts
+        begin
+          included_count = 0
+          excluded_count = 0
+          nested_assocs = []
+
+          unless include_str.to_s.strip.empty?
+            include_str.split(',').each do |segment|
+              seg = segment.strip
+              if (m = seg.match(/^\$(\w+)\(([^)]*)\)$/))
+                assoc = m[1]
+                inner = m[2]
+                nested_assocs << assoc
+                inner_fields = inner.to_s.split(',').map(&:strip).reject(&:empty?)
+                included_count += inner_fields.length
+              else
+                included_count += 1
+              end
+            end
+          end
+
+          unless exclude_str.to_s.strip.empty?
+            exclude_str.split(',').each do |segment|
+              seg = segment.strip
+              if (m = seg.match(/^\$(\w+)\(([^)]*)\)$/))
+                assoc = m[1]
+                inner = m[2]
+                nested_assocs << assoc
+                inner_fields = inner.to_s.split(',').map(&:strip).reject(&:empty?)
+                excluded_count += inner_fields.length
+              else
+                excluded_count += 1
+              end
+            end
+          end
+
+          s_payload = {
+            include_count: included_count,
+            exclude_count: excluded_count,
+            nested_assoc_count: nested_assocs.uniq.length
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.selection.compile', s_payload) {}
+        rescue StandardError
+          # swallow observability errors
+        end
 
         # Highlighting
         if (h = @state[:highlight])
@@ -90,26 +134,24 @@ module SearchEngine
           params[:filter_curated_hits] = fch unless fch.nil?
 
           # Emit curation compile event (counts/flags only)
-          if defined?(SearchEngine::Instrumentation)
-            begin
-              c_payload = {
-                pinned_count: pinned.size.positive? ? pinned.size : nil,
-                hidden_count: hidden.size.positive? ? hidden.size : nil,
-                has_override_tags: tags.any? || nil,
-                filter_curated_hits: (cur.key?(:filter_curated_hits) ? fch : nil)
-              }.compact
-              SearchEngine::Instrumentation.instrument('search_engine.curation.compile', c_payload) {}
+          begin
+            c_payload = {
+              pinned_count: pinned.size.positive? ? pinned.size : nil,
+              hidden_count: hidden.size.positive? ? hidden.size : nil,
+              has_override_tags: tags.any? || nil,
+              filter_curated_hits: (cur.key?(:filter_curated_hits) ? fch : nil)
+            }.compact
+            SearchEngine::Instrumentation.instrument('search_engine.curation.compile', c_payload) {}
 
-              overlap = (pinned & hidden)
-              if overlap.any?
-                SearchEngine::Instrumentation.instrument(
-                  'search_engine.curation.conflict',
-                  { type: :overlap, count: overlap.size }
-                ) {}
-              end
-            rescue StandardError
-              # swallow observability errors
+            overlap = (pinned & hidden)
+            if overlap.any?
+              SearchEngine::Instrumentation.instrument(
+                'search_engine.curation.conflict',
+                { type: :overlap, count: overlap.size }
+              ) {}
             end
+          rescue StandardError
+            # swallow observability errors
           end
         end
 
@@ -142,18 +184,16 @@ module SearchEngine
             params[:group_missing_values] = true if missing_values
           end
 
-          if defined?(SearchEngine::Instrumentation)
-            begin
-              payload = {
-                collection: klass_name_for_inspect,
-                field: field&.to_s,
-                limit: limit,
-                missing_values: missing_values
-              }.compact
-              SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', payload) {}
-            rescue StandardError
-              # swallow observability errors
-            end
+          begin
+            payload = {
+              collection: klass_name_for_inspect,
+              field: field&.to_s,
+              limit: limit,
+              missing_values: missing_values
+            }.compact
+            SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', payload) {}
+          rescue StandardError
+            # swallow observability errors
           end
         end
 
@@ -178,6 +218,7 @@ module SearchEngine
         end
 
         # Internal join context (for downstream components; may be stripped before HTTP)
+        compile_started_ms = SearchEngine::Instrumentation.monotonic_ms
         join_ctx = build_join_context(ast_nodes: ast_nodes, orders: orders)
         params[:_join] = join_ctx unless join_ctx.nil? || join_ctx.empty?
 
@@ -212,31 +253,29 @@ module SearchEngine
         end
 
         # Emit compile-time JOINs event summarizing usage (no raw strings)
-        if defined?(SearchEngine::Instrumentation)
-          begin
-            assocs = Array(join_ctx[:assocs]).map(&:to_s)
-            used = join_ctx[:referenced_in] || {}
-            used_in = {}
-            %i[include filter sort].each do |k|
-              arr = Array(used[k]).map(&:to_s)
-              used_in[k] = arr unless arr.empty?
-            end
-
-            payload = {
-              collection: klass_name_for_inspect,
-              join_count: assocs.size,
-              assocs: (assocs unless assocs.empty?),
-              used_in: (used_in unless used_in.empty?),
-              include_len: (include_str.to_s.length unless include_str.to_s.strip.empty?),
-              filter_len: (filter_str.to_s.length unless filter_str.to_s.strip.empty?),
-              sort_len:   (sort_str.to_s.length unless sort_str.to_s.strip.empty?),
-              duration_ms: (SearchEngine::Instrumentation.monotonic_ms - compile_started_ms if compile_started_ms),
-              has_joins: !assocs.empty?
-            }
-            SearchEngine::Instrumentation.instrument('search_engine.joins.compile', payload)
-          rescue StandardError
-            # swallow observability errors
+        begin
+          assocs = Array(join_ctx[:assocs]).map(&:to_s)
+          used = join_ctx[:referenced_in] || {}
+          used_in = {}
+          %i[include filter sort].each do |k|
+            arr = Array(used[k]).map(&:to_s)
+            used_in[k] = arr unless arr.empty?
           end
+
+          payload = {
+            collection: klass_name_for_inspect,
+            join_count: assocs.size,
+            assocs: (assocs unless assocs.empty?),
+            used_in: (used_in unless used_in.empty?),
+            include_len: (include_str.to_s.length unless include_str.to_s.strip.empty?),
+            filter_len: (filter_str.to_s.length unless filter_str.to_s.strip.empty?),
+            sort_len:   (sort_str.to_s.length unless sort_str.to_s.strip.empty?),
+            duration_ms: (SearchEngine::Instrumentation.monotonic_ms - compile_started_ms if compile_started_ms),
+            has_joins: !assocs.empty?
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.joins.compile', payload)
+        rescue StandardError
+          # swallow observability errors
         end
 
         # Synonyms/Stopwords toggles
