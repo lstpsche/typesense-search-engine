@@ -34,7 +34,7 @@ module SearchEngine
 
       start = current_monotonic_ms
       payload = sanitize_body_params(params_obj.to_h)
-      path = "/collections/#{collection}/documents/search"
+      path = [Client::RequestBuilder::COLLECTIONS_PREFIX, collection.to_s, Client::RequestBuilder::DOCUMENTS_SEARCH_SUFFIX].join
 
       # Observability event payload (pre-built; redacted)
       if defined?(ActiveSupport::Notifications)
@@ -87,7 +87,7 @@ module SearchEngine
       name = logical_name.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/aliases/#{name}"
+      path = [Client::RequestBuilder::ALIASES_PREFIX, name].join
 
       result = with_exception_mapping(:get, path, {}, start) do
         ts.aliases[name].retrieve
@@ -111,7 +111,7 @@ module SearchEngine
       name = collection_name.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{name}"
+      path = [Client::RequestBuilder::COLLECTIONS_PREFIX, name].join
 
       result = with_exception_mapping(:get, path, {}, start) do
         ts.collections[name].retrieve
@@ -135,7 +135,7 @@ module SearchEngine
       p = physical_name.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/aliases/#{a}"
+      path = [Client::RequestBuilder::ALIASES_PREFIX, a].join
 
       result = with_exception_mapping(:put, path, {}, start) do
         ts.aliases[a].upsert(collection_name: p)
@@ -153,7 +153,7 @@ module SearchEngine
       ts = typesense
       start = current_monotonic_ms
       body = schema.dup
-      path = '/collections'
+      path = Client::RequestBuilder::COLLECTIONS_ROOT
 
       result = with_exception_mapping(:post, path, {}, start) do
         ts.collections.create(body)
@@ -171,7 +171,7 @@ module SearchEngine
       n = name.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{n}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + n
 
       result = with_exception_mapping(:delete, path, {}, start) do
         ts.collections[n].delete
@@ -192,7 +192,7 @@ module SearchEngine
     def list_collections
       ts = typesense
       start = current_monotonic_ms
-      path = '/collections'
+      path = Client::RequestBuilder::COLLECTIONS_ROOT
 
       result = with_exception_mapping(:get, path, {}, start) do
         ts.collections.retrieve
@@ -208,7 +208,7 @@ module SearchEngine
     def health
       ts = typesense
       start = current_monotonic_ms
-      path = '/health'
+      path = Client::RequestBuilder::HEALTH_PATH
 
       result = with_exception_mapping(:get, path, {}, start) do
         ts.health.retrieve
@@ -232,7 +232,7 @@ module SearchEngine
       list = Array(terms)
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/synonyms/#{s}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::SYNONYMS_PREFIX + s
 
       result = with_exception_mapping(:put, path, {}, start) do
         ts.collections[c].synonyms[s].upsert({ synonyms: list })
@@ -247,7 +247,7 @@ module SearchEngine
       c = collection.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/synonyms"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::SYNONYMS_SUFFIX
       result = with_exception_mapping(:get, path, {}, start) do
         ts.collections[c].synonyms.retrieve
       end
@@ -262,7 +262,7 @@ module SearchEngine
       s = id.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/synonyms/#{s}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::SYNONYMS_PREFIX + s
       result = with_exception_mapping(:get, path, {}, start) do
         ts.collections[c].synonyms[s].retrieve
       end
@@ -281,7 +281,7 @@ module SearchEngine
       s = id.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/synonyms/#{s}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::SYNONYMS_PREFIX + s
       result = with_exception_mapping(:delete, path, {}, start) do
         ts.collections[c].synonyms[s].delete
       end
@@ -302,7 +302,7 @@ module SearchEngine
       list = Array(terms)
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/stopwords/#{s}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::STOPWORDS_PREFIX + s
 
       result = with_exception_mapping(:put, path, {}, start) do
         ts.collections[c].stopwords[s].upsert({ stopwords: list })
@@ -317,7 +317,7 @@ module SearchEngine
       c = collection.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/stopwords"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::STOPWORDS_SUFFIX
       result = with_exception_mapping(:get, path, {}, start) do
         ts.collections[c].stopwords.retrieve
       end
@@ -332,7 +332,7 @@ module SearchEngine
       s = id.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/stopwords/#{s}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::STOPWORDS_PREFIX + s
       result = with_exception_mapping(:get, path, {}, start) do
         ts.collections[c].stopwords[s].retrieve
       end
@@ -351,7 +351,7 @@ module SearchEngine
       s = id.to_s
       ts = typesense
       start = current_monotonic_ms
-      path = "/collections/#{c}/stopwords/#{s}"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + c + Client::RequestBuilder::STOPWORDS_PREFIX + s
       result = with_exception_mapping(:delete, path, {}, start) do
         ts.collections[c].stopwords[s].delete
       end
@@ -377,7 +377,7 @@ module SearchEngine
 
       ts = typesense_for_import
       start = current_monotonic_ms
-      path = "/collections/#{collection}/documents/import"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + collection.to_s + Client::RequestBuilder::DOCUMENTS_IMPORT_SUFFIX
 
       result = with_exception_mapping(:post, path, {}, start) do
         # The official client accepts (documents, action: "upsert") and appends query params.
@@ -403,7 +403,7 @@ module SearchEngine
 
       ts = timeout_ms&.to_i&.positive? ? build_typesense_client_with_read_timeout(timeout_ms.to_i / 1000.0) : typesense
       start = current_monotonic_ms
-      path = "/collections/#{collection}/documents"
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + collection.to_s + Client::RequestBuilder::DOCUMENTS_SUFFIX
 
       result = with_exception_mapping(:delete, path, {}, start) do
         ts.collections[collection].documents.delete(filter_by: filter_by)
@@ -600,7 +600,7 @@ module SearchEngine
           "typesense api error: #{status}",
           status: status || 500,
           body: body,
-          doc: 'docs/client.md#errors',
+          doc: Client::RequestBuilder::DOC_CLIENT_ERRORS,
           details: { http_status: status, body: body.is_a?(String) ? body[0, 120] : body }
         )
         instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: err.class.name)
@@ -609,12 +609,20 @@ module SearchEngine
 
       if timeout_error?(error)
         instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: Errors::Timeout.name)
-        raise Errors::Timeout.new(error.message, doc: 'docs/client.md#errors', details: { op: method, path: path })
+        raise Errors::Timeout.new(
+          error.message,
+          doc: Client::RequestBuilder::DOC_CLIENT_ERRORS,
+          details: { op: method, path: path }
+        )
       end
 
       if connection_error?(error)
         instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: Errors::Connection.name)
-        raise Errors::Connection.new(error.message, doc: 'docs/client.md#errors', details: { op: method, path: path })
+        raise Errors::Connection.new(
+          error.message,
+          doc: Client::RequestBuilder::DOC_CLIENT_ERRORS,
+          details: { op: method, path: path }
+        )
       end
 
       instrument(method, path, current_monotonic_ms - start_ms, cache_params, error_class: error.class.name)

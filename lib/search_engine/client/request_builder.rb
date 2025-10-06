@@ -16,8 +16,22 @@ module SearchEngine
 
       COLLECTIONS_PREFIX = '/collections/'
       DOCUMENTS_SEARCH_SUFFIX = '/documents/search'
+      # Additional endpoint fragments for internal reuse
+      COLLECTIONS_ROOT = '/collections'
+      DOCUMENTS_SUFFIX = '/documents'
+      DOCUMENTS_IMPORT_SUFFIX = '/documents/import'
+      ALIASES_PREFIX = '/aliases/'
+      SYNONYMS_SUFFIX = '/synonyms'
+      SYNONYMS_PREFIX = '/synonyms/'
+      STOPWORDS_SUFFIX = '/stopwords'
+      STOPWORDS_PREFIX = '/stopwords/'
+      HEALTH_PATH = '/health'
+
       CONTENT_TYPE_JSON = 'application/json'
       DEFAULT_HEADERS_JSON = { 'Content-Type' => CONTENT_TYPE_JSON }.freeze
+
+      # Centralized doc links used by client error mapping
+      DOC_CLIENT_ERRORS = 'docs/client.md#errors'
 
       INTERNAL_ONLY_KEYS = %i[
         _join
