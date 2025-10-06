@@ -246,7 +246,7 @@ class CompiledParamsContractSpec
 
   def build_snapshot_json(entry)
     # Multi‑search pseudo-cases
-    built = entry.builder.is_a?(Proc) ? entry.builder.call(self) : entry.builder
+    built = entry.builder.is_a?(Proc) ? entry.builder.call : entry.builder
 
     if built.is_a?(Array) && built.first == :multi_basic
       url, url_opts, body = compile_multi_basic
