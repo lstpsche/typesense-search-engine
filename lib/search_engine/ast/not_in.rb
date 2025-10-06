@@ -3,38 +3,23 @@
 module SearchEngine
   module AST
     # Membership: field NOT IN values
-    class NotIn < Node
-      attr_reader :field, :values
-
-      def initialize(field, values)
-        super()
-        @field = validate_field!(field)
-        ensure_non_empty_array!(values)
-        @values = deep_freeze_array(values)
-        freeze
-      end
+    class NotIn < BinaryOp
+      attr_reader :field
 
       def type = :not_in
 
-      def left = @field
-      def right = @values
-
-      def children
-        [@field, @values].freeze
-      end
-
-      def to_s
-        "not_in(#{format_field(@field)}, #{format_debug_value(@values)})"
-      end
+      # Preserve public API name
+      def values = @right
 
       protected
 
-      def equality_key
-        [:not_in, @field, @values]
+      def normalize_right(values)
+        ensure_non_empty_array!(values)
+        deep_freeze_array(values)
       end
 
-      def inspect_payload
-        "field=#{format_field(@field)} values=#{truncate_for_inspect(format_debug_value(@values))}"
+      def inspect_right_kv_key
+        'values'
       end
     end
   end

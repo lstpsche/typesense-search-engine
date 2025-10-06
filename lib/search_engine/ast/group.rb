@@ -3,35 +3,15 @@
 module SearchEngine
   module AST
     # Grouping wrapper to preserve explicit precedence.
-    class Group < Node
-      attr_reader :child
-
-      def initialize(child)
-        super()
-        raise ArgumentError, 'group requires a Node child' unless child.is_a?(Node)
-
-        @child = child
-        freeze
-      end
-
+    class Group < UnaryOp
       def type = :group
 
-      def children
-        [@child].freeze
-      end
+      # Preserve original error message semantics by revalidating child kind
+      def initialize(child)
+        # Original message: 'group requires a Node child'
+        raise ArgumentError, 'group requires a Node child' unless child.is_a?(Node)
 
-      def to_s
-        "group(#{@child})"
-      end
-
-      protected
-
-      def equality_key
-        [:group, @child]
-      end
-
-      def inspect_payload
-        @child.to_s
+        super
       end
     end
   end
