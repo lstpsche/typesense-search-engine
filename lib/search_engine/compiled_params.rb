@@ -14,6 +14,9 @@ module SearchEngine
   # Public surface mirrors a minimal read-only Hash API used in the codebase.
   # New instances should be constructed from plain Hashes only.
   class CompiledParams
+    EMPTY_HASH = {}.freeze
+    EMPTY_ARRAY = [].freeze
+
     # @param value [Hash, #to_h]
     def initialize(value)
       input = if value.is_a?(Hash)
@@ -21,7 +24,7 @@ module SearchEngine
               elsif value.respond_to?(:to_h)
                 value.to_h
               else
-                {}
+                EMPTY_HASH
               end
       @canonical = canonicalize_hash(input)
       deep_freeze!(@canonical)
@@ -110,6 +113,8 @@ module SearchEngine
     end
 
     def canonicalize_array(array)
+      return EMPTY_ARRAY if array.empty?
+
       array.map { |v| canonicalize_value(v) }
     end
 

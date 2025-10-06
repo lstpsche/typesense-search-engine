@@ -402,7 +402,7 @@ module SearchEngine
       gb = params['group_by'] || params[:group_by]
       return [] unless gb.is_a?(String) && !gb.strip.empty?
 
-      gb.split(',').map { |s| s.to_s.strip }.reject(&:empty?)
+      gb.split(',').map!(&:strip).tap { |a| a.reject!(&:empty?) }
     end
 
     # Build a Hash mapping field names to coerced group key values.
@@ -637,7 +637,15 @@ module SearchEngine
       end
 
       def tokenize(text)
-        text.to_s.split(/\s+/).reject(&:empty?)
+        s = text.to_s
+        return [] if s.empty?
+
+        tokens = s.split(/\s+/)
+        # Fast-path: if there are no empty tokens, return as-is
+        return tokens unless tokens.any?(&:empty?)
+
+        tokens.reject!(&:empty?)
+        tokens
       end
 
       def wrap_safe_if_rails(html)
