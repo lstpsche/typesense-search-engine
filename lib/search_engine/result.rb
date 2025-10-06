@@ -402,7 +402,7 @@ module SearchEngine
       gb = params['group_by'] || params[:group_by]
       return [] unless gb.is_a?(String) && !gb.strip.empty?
 
-      gb.split(',').map!(&:strip).reject!(&:empty?) || gb.split(',').map(&:strip).reject(&:empty?)
+      gb.split(',').map!(&:strip).tap { |a| a.reject!(&:empty?) }
     end
 
     # Build a Hash mapping field names to coerced group key values.
