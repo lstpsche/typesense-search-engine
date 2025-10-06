@@ -7,38 +7,23 @@ module SearchEngine
     #   @return [String]
     # @!attribute [r] values
     #   @return [Array]
-    class In < Node
-      attr_reader :field, :values
-
-      def initialize(field, values)
-        super()
-        @field = validate_field!(field)
-        ensure_non_empty_array!(values)
-        @values = deep_freeze_array(values)
-        freeze
-      end
+    class In < BinaryOp
+      attr_reader :field
 
       def type = :in
 
-      def left = @field
-      def right = @values
-
-      def children
-        [@field, @values].freeze
-      end
-
-      def to_s
-        "in(#{format_field(@field)}, #{format_debug_value(@values)})"
-      end
+      # Preserve public API name
+      def values = @right
 
       protected
 
-      def equality_key
-        [:in, @field, @values]
+      def normalize_right(values)
+        ensure_non_empty_array!(values)
+        deep_freeze_array(values)
       end
 
-      def inspect_payload
-        "field=#{format_field(@field)} values=#{truncate_for_inspect(format_debug_value(@values))}"
+      def inspect_right_kv_key
+        'values'
       end
     end
   end

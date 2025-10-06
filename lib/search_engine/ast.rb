@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'search_engine/ast/node'
+require 'search_engine/ast/binary_op'
+require 'search_engine/ast/unary_op'
 require 'search_engine/ast/eq'
 require 'search_engine/ast/not_eq'
 require 'search_engine/ast/gt'
