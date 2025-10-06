@@ -313,7 +313,7 @@ module SearchEngine
       end
 
       def monotonic_ms
-        Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+        SearchEngine::Instrumentation.monotonic_ms
       end
 
       def typesense_type_for(type_descriptor)
