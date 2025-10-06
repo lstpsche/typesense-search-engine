@@ -108,159 +108,103 @@ end
 class CompiledParamsContractSpec
   # --- Canonical cases registry -------------------------------------------
 
-  Case = Struct.new(:idx, :name, :builder, keyword_init: true)
+  CASES = [
+    { idx: 1,  name: 'base_query', builder: ->(t) { t.p_rel.options(q: 'milk') } },
+    { idx: 2,  name: 'filters_bool', builder: lambda { |t|
+      t.p_rel.where('price:>10 && (category:="milk" || category:="bread")')
+    } },
+    { idx: 3, name: 'filters_range', builder: lambda { |t|
+      t.p_rel.where(['price >= ?', 10], ['price < ?', 20])
+    } },
+    { idx: 4,  name: 'order_basic', builder: ->(t) { t.p_rel.order(updated_at: :desc) } },
+    { idx: 5,  name: 'pagination_basic', builder: ->(t) { t.p_rel.page(2).per(20) } },
+    # Selection & Joins
+    { idx: 6,  name: 'select_basic', builder: ->(t) { t.p_rel.select(:id, :name) } },
+    { idx: 7,  name: 'include_fields_nested', builder: lambda { |t|
+      t.p_rel.joins(:brands).select(:id, brands: %i[name])
+    } },
+    { idx: 8, name: 'joins_authors', builder: lambda { |t|
+      t.b_rel.joins(:authors)
+       .where('$authors.last_name:="Rowling"')
+       .select(:id, authors: %i[first_name last_name])
+    } },
+    { idx: 9, name: 'joins_nested', builder: lambda { |t|
+      t.b_rel.joins(:authors)
+       .where('$authors.last_name:=["Rowling","Tolkien"]')
+    } },
+    # Grouping
+    { idx: 10, name: 'group_by_brand', builder: ->(t) { t.p_rel.group_by(:brand_id) } },
+    { idx: 11, name: 'group_by_brand_limit', builder: lambda { |t|
+      t.p_rel.group_by(:brand_id, limit: 2)
+    } },
+    # Presets & Curation
+    { idx: 12, name: 'preset_merge', builder: ->(t) { t.p_rel.preset(:popular) } },
+    { idx: 13, name: 'preset_lock', builder: lambda { |t|
+      t.p_rel.preset(:brand_curated, mode: :lock).order(price: :asc)
+    } },
+    { idx: 14, name: 'curation_pin_hide', builder: lambda { |t|
+      t.p_rel.pin('p_12', 'p_34').hide('p_34')
+    } },
+    # Faceting
+    { idx: 15, name: 'facet_by_brand', builder: lambda { |t|
+      t.p_rel.facet_by(:brand_id, max_values: 5)
+    } },
+    { idx: 16, name: 'facet_query_price', builder: lambda { |t|
+      t.p_rel.facet_query(:price, '[0..9]', label: 'under_10')
+    } },
+    # Highlighting
+    { idx: 17, name: 'highlight_basic', builder: lambda { |t|
+      t.p_rel.options(
+        highlight: {
+          fields: %i[name description],
+          full_fields: %i[description],
+          start_tag: '<em>',
+          end_tag: '</em>',
+          affix_tokens: 8,
+          snippet_threshold: 30
+        }
+      )
+    } },
+    # Ranking & Typo
+    { idx: 18, name: 'ranking_weights', builder: lambda { |t|
+      t.p_rel.options(query_by: 'name,description,brand_name')
+       .ranking(query_by_weights: { name: 3, description: 1 })
+    } },
+    { idx: 19, name: 'prefix_fallback', builder: ->(t) { t.p_rel.prefix(:fallback) } },
+    # Synonyms/Stopwords
+    { idx: 20, name: 'synonyms_on', builder: ->(t) { t.p_rel.options(use_synonyms: true) } },
+    { idx: 21, name: 'stopwords_off', builder: ->(t) { t.p_rel.options(use_stopwords: false) } },
+    # Compiler/selection extras (replace unsupported hit-limit chainers)
+    { idx: 22, name: 'exclude_fields_basic', builder: lambda { |t|
+      t.p_rel.select(:id, :name, :brand_name).exclude(:description)
+    } },
+    { idx: 23, name: 'pagination_from_limit_offset', builder: lambda { |t|
+      t.p_rel.limit(10).offset(20)
+    } },
+    # DX helpers consistency
+    { idx: 24, name: 'to_params_json_pretty', builder: lambda { |t|
+      t.p_rel.where(active: true)
+       .select(:id, :name)
+       .order(updated_at: :desc)
+       .page(1)
+       .per(5)
+    } },
+    { idx: 25, name: 'to_curl_masked', builder: lambda { |t|
+      t.p_rel.where(active: true).order(updated_at: :desc).per(3)
+    } },
+    # Multi‑search
+    { idx: 26, name: 'multisearch_basic', builder: ->(_t) { [:multi_basic, nil] } },
+    { idx: 27, name: 'multisearch_overrides', builder: ->(_t) { [:multi_overrides, nil] } },
+    # Edge semantics
+    { idx: 28, name: 'empty_filter_nil', builder: ->(t) { t.p_rel.where(category: nil) } },
+    { idx: 29, name: 'boolean_filter', builder: ->(t) { t.p_rel.where(active: false) } },
+    { idx: 30, name: 'unicode_terms', builder: ->(t) { t.p_rel.options(q: 'café') } }
+  ].freeze
 
-  def cases # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-    @cases ||= [
-      -> { Case.new(idx: 1, name: 'base_query', builder: -> { p_rel.options(q: 'milk') }) }.call,
-      lambda {
-        Case.new(
-          idx: 2,
-          name: 'filters_bool',
-          builder: -> { p_rel.where('price:>10 && (category:="milk" || category:="bread")') }
-        )
-      }.call,
-      lambda {
-        Case.new(
-          idx: 3,
-          name: 'filters_range',
-          builder: -> { p_rel.where(['price >= ?', 10], ['price < ?', 20]) }
-        )
-      }.call,
-      -> { Case.new(idx: 4, name: 'order_basic', builder: -> { p_rel.order(updated_at: :desc) }) }.call,
-      -> { Case.new(idx: 5, name: 'pagination_basic', builder: -> { p_rel.page(2).per(20) }) }.call,
-      # Selection & Joins
-      -> { Case.new(idx: 6, name: 'select_basic', builder: -> { p_rel.select(:id, :name) }) }.call,
-      lambda {
-        Case.new(
-          idx: 7,
-          name: 'include_fields_nested',
-          builder: -> { p_rel.joins(:brands).select(:id, brands: %i[name]) }
-        )
-      }.call,
-      lambda {
-        Case.new(
-          idx: 8,
-          name: 'joins_authors',
-          builder: lambda {
-            b_rel.joins(:authors)
-                 .where('$authors.last_name:="Rowling"')
-                 .select(:id, authors: %i[first_name last_name])
-          }
-        )
-      }.call,
-      lambda {
-        Case.new(
-          idx: 9,
-          name: 'joins_nested',
-          builder: -> { b_rel.joins(:authors).where('$authors.last_name:=["Rowling","Tolkien"]') }
-        )
-      }.call, # single-hop only
-      # Grouping
-      -> { Case.new(idx: 10, name: 'group_by_brand', builder: -> { p_rel.group_by(:brand_id) }) }.call,
-      lambda {
-        Case.new(idx: 11, name: 'group_by_brand_limit', builder: lambda {
-          p_rel.group_by(:brand_id, limit: 2)
-        }
-        )
-      }.call,
-      # Presets & Curation
-      -> { Case.new(idx: 12, name: 'preset_merge', builder: -> { p_rel.preset(:popular) }) }.call,
-      lambda {
-        Case.new(
-          idx: 13,
-          name: 'preset_lock',
-          builder: -> { p_rel.preset(:brand_curated, mode: :lock).order(price: :asc) }
-        )
-      }.call,
-      lambda {
-        Case.new(idx: 14, name: 'curation_pin_hide', builder: lambda {
-          p_rel.pin('p_12', 'p_34').hide('p_34')
-        }
-        )
-      }.call,
-      # Faceting
-      lambda {
-        Case.new(idx: 15, name: 'facet_by_brand', builder: lambda {
-          p_rel.facet_by(:brand_id, max_values: 5)
-        }
-        )
-      }.call,
-      lambda {
-        Case.new(
-          idx: 16,
-          name: 'facet_query_price',
-          builder: -> { p_rel.facet_query(:price, '[0..9]', label: 'under_10') }
-        )
-      }.call,
-      # Highlighting
-      lambda {
-        Case.new(
-          idx: 17,
-          name: 'highlight_basic',
-          builder: lambda {
-            p_rel.options(
-              highlight: {
-                fields: %i[name description], full_fields: %i[description],
-                start_tag: '<em>', end_tag: '</em>', affix_tokens: 8, snippet_threshold: 30
-              }
-            )
-          }
-        )
-      }.call,
-      # Ranking & Typo
-      lambda {
-        Case.new(
-          idx: 18,
-          name: 'ranking_weights',
-          builder: lambda {
-            p_rel.options(query_by: 'name,description,brand_name')
-                 .ranking(query_by_weights: { name: 3, description: 1 })
-          }
-        )
-      }.call,
-      -> { Case.new(idx: 19, name: 'prefix_fallback', builder: -> { p_rel.prefix(:fallback) }) }.call,
-      # Synonyms/Stopwords
-      -> { Case.new(idx: 20, name: 'synonyms_on', builder: -> { p_rel.options(use_synonyms: true) }) }.call,
-      -> { Case.new(idx: 21, name: 'stopwords_off', builder: -> { p_rel.options(use_stopwords: false) }) }.call,
-      # Compiler/selection extras (replace unsupported hit-limit chainers)
-      lambda {
-        Case.new(
-          idx: 22,
-          name: 'exclude_fields_basic',
-          builder: -> { p_rel.select(:id, :name, :brand_name).exclude(:description) }
-        )
-      }.call,
-      lambda {
-        Case.new(
-          idx: 23,
-          name: 'pagination_from_limit_offset',
-          builder: -> { p_rel.limit(10).offset(20) }
-        )
-      }.call,
-      # DX helpers consistency
-      lambda {
-        Case.new(
-          idx: 24,
-          name: 'to_params_json_pretty',
-          builder: -> { p_rel.where(active: true).select(:id, :name).order(updated_at: :desc).page(1).per(5) }
-        )
-      }.call,
-      lambda {
-        Case.new(
-          idx: 25,
-          name: 'to_curl_masked',
-          builder: -> { p_rel.where(active: true).order(updated_at: :desc).per(3) }
-        )
-      }.call,
-      # Multi‑search
-      -> { Case.new(idx: 26, name: 'multisearch_basic', builder: -> { [:multi_basic, nil] }) }.call,
-      -> { Case.new(idx: 27, name: 'multisearch_overrides', builder: -> { [:multi_overrides, nil] }) }.call,
-      # Edge semantics
-      -> { Case.new(idx: 28, name: 'empty_filter_nil', builder: -> { p_rel.where(category: nil) }) }.call,
-      -> { Case.new(idx: 29, name: 'boolean_filter', builder: -> { p_rel.where(active: false) }) }.call,
-      -> { Case.new(idx: 30, name: 'unicode_terms', builder: -> { p_rel.options(q: 'café') }) }.call
-    ]
+  def cases
+    @cases ||= CASES.map do |entry|
+      Case.new(idx: entry[:idx], name: entry[:name], builder: -> { entry[:builder].call(self) })
+    end
   end
 
   # --- Tests ---------------------------------------------------------------

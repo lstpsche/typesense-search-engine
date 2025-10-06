@@ -191,12 +191,10 @@ module SearchEngine
         @joins_config = new_map.freeze
 
         # lightweight instrumentation (no-op if AS::N is unavailable)
-        if defined?(SearchEngine::Instrumentation)
-          SearchEngine::Instrumentation.instrument(
-            'search_engine.joins.declared',
-            model: self.name, name: assoc_name, collection: coll
-          )
-        end
+        SearchEngine::Instrumentation.instrument(
+          'search_engine.joins.declared',
+          model: self.name, name: assoc_name, collection: coll
+        )
 
         nil
       end

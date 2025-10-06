@@ -156,7 +156,7 @@ module SearchEngine
         end
         parts << (preset_name ? "preset=#{preset_name}(mode=#{preset_mode})" : 'preset=—')
         parts << "joins=#{Array(joins_list).size}"
-        cid = defined?(SearchEngine::Instrumentation) ? SearchEngine::Instrumentation.current_correlation_id : nil
+        cid = SearchEngine::Instrumentation.current_correlation_id
         parts << "cid=#{cid && !cid.to_s.empty? ? cid : '—'}"
         "Overview: #{parts.join(' ')}"
       end

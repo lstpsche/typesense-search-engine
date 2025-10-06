@@ -112,8 +112,6 @@ module SearchEngine
         end
 
         def instrument(action, payload)
-          return unless defined?(SearchEngine::Instrumentation)
-
           SearchEngine::Instrumentation.instrument("search_engine.admin.synonyms.#{action}", payload) {}
         end
       end

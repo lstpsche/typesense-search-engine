@@ -250,18 +250,16 @@ module SearchEngine
           s[:grouping] = normalized
         end
 
-        if defined?(SearchEngine::Instrumentation)
-          begin
-            payload = {
-              collection: klass_name_for_inspect,
-              field: normalized[:field].to_s,
-              limit: normalized[:limit],
-              missing_values: normalized[:missing_values]
-            }
-            SearchEngine::Instrumentation.instrument('search_engine.relation.group_by_updated', payload) {}
-          rescue StandardError
-            nil
-          end
+        begin
+          payload = {
+            collection: klass_name_for_inspect,
+            field: normalized[:field].to_s,
+            limit: normalized[:limit],
+            missing_values: normalized[:missing_values]
+          }
+          SearchEngine::Instrumentation.instrument('search_engine.relation.group_by_updated', payload) {}
+        rescue StandardError
+          nil
         end
 
         rel
@@ -453,60 +451,15 @@ module SearchEngine
 
       # Faceting DSL
       # ---------------
-      def facet_by(field, max_values: nil, sort: nil, stats: nil) # rubocop:disable Metrics/AbcSize
+      def facet_by(field, max_values: nil, sort: nil, stats: nil)
         name = field.to_s.strip
         raise SearchEngine::Errors::InvalidParams, 'facet_by: field name must be non-empty' if name.empty?
 
-        if name.start_with?('$') || name.include?('.')
-          raise SearchEngine::Errors::InvalidParams.new(
-            %(facet_by: supports base fields only (got #{name.inspect})),
-            doc: 'docs/faceting.md#supported-options',
-            details: { field: name }
-          )
-        end
+        validate_facet_field!(name)
+        validate_facet_sort!(sort)
+        validate_facet_stats!(stats)
 
-        attrs = safe_attributes_map
-        unless attrs.nil? || attrs.empty? || attrs.key?(name.to_sym)
-          suggestions = suggest_fields(name.to_sym, attrs.keys.map(&:to_sym))
-          suggest = if suggestions.empty?
-                      ''
-                    elsif suggestions.length == 1
-                      " (did you mean :#{suggestions.first}?)"
-                    else
-                      last = suggestions.last
-                      others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
-                      " (did you mean #{others}, or :#{last}?)"
-                    end
-          raise SearchEngine::Errors::UnknownField,
-                "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
-        end
-
-        unless sort.nil?
-          raise SearchEngine::Errors::InvalidParams.new(
-            "facet_by: option :sort is not supported by Typesense facets (got #{sort.inspect})",
-            hint: 'Supported: default count-desc only at present.',
-            doc: 'docs/faceting.md#supported-options',
-            details: { sort: sort }
-          )
-        end
-
-        unless stats.nil?
-          raise SearchEngine::Errors::InvalidParams.new(
-            'facet_by: option :stats is not supported at present',
-            doc: 'docs/faceting.md#supported-options',
-            details: { stats: stats }
-          )
-        end
-
-        cap = nil
-        unless max_values.nil?
-          begin
-            cap = Integer(max_values)
-          rescue ArgumentError, TypeError
-            raise SearchEngine::Errors::InvalidParams, 'facet_by: max_values must be an Integer or nil'
-          end
-          raise SearchEngine::Errors::InvalidParams, 'facet_by: max_values must be >= 1' if cap < 1
-        end
+        cap = parse_facet_cap!(max_values)
 
         spawn do |s|
           fields = Array(s[:facet_fields])
@@ -517,45 +470,17 @@ module SearchEngine
         end
       end
 
-      def facet_query(field, expression, label: nil) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+      def facet_query(field, expression, label: nil)
         name = field.to_s.strip
         raise SearchEngine::Errors::InvalidParams, 'facet_query: field name must be non-empty' if name.empty?
 
-        if name.start_with?('$') || name.include?('.')
-          raise SearchEngine::Errors::InvalidParams.new(
-            %(facet_query: supports base fields only (got #{name.inspect})),
-            doc: 'docs/faceting.md#supported-options',
-            details: { field: name }
-          )
-        end
-
-        attrs = safe_attributes_map
-        unless attrs.nil? || attrs.empty? || attrs.key?(name.to_sym)
-          suggestions = suggest_fields(name.to_sym, attrs.keys.map(&:to_sym))
-          suggest = if suggestions.empty?
-                      ''
-                    elsif suggestions.length == 1
-                      " (did you mean :#{suggestions.first}?)"
-                    else
-                      last = suggestions.last
-                      others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
-                      " (did you mean #{others}, or :#{last}?)"
-                    end
-          raise SearchEngine::Errors::UnknownField,
-                "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
-        end
+        validate_facet_field!(name, context: 'facet_query')
+        ensure_known_field!(name)
 
         expr = expression.to_s.strip
         raise SearchEngine::Errors::InvalidParams, 'facet_query: expression must be a non-empty String' if expr.empty?
 
-        if expr.include?('[') ^ expr.include?(']')
-          raise SearchEngine::Errors::InvalidParams.new(
-            %(facet_query: invalid range syntax #{expr.inspect} (unbalanced brackets)),
-            hint: 'Use shapes like "[0..9]", "[10..19]"',
-            doc: 'docs/faceting.md#facet-query-expressions',
-            details: { expr: expr }
-          )
-        end
+        validate_range_brackets!(expr)
 
         label_str = label&.to_s&.strip
 
@@ -622,74 +547,88 @@ module SearchEngine
       end
 
       # Parse and normalize order input into an array of "field:dir" strings.
-      def normalize_order(value) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+      def normalize_order(value)
         return [] if value.nil?
 
-        case value
-        when Hash
-          value.flat_map do |k, dir|
-            if dir.is_a?(Hash)
-              assoc = k.to_sym
-              @klass.join_for(assoc)
-              SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, assoc, context: 'sorting')
+        dispatch = {
+          Hash => :normalize_order_hash,
+          String => :normalize_order_string,
+          Array => :normalize_order_array,
+          Symbol => :normalize_order_symbol
+        }
+        meth = dispatch[value.class]
+        return send(meth, value) if meth
 
-              dir.flat_map do |field_name, d|
-                field = field_name.to_s.strip
-                raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+        raise ArgumentError, "order: unsupported input #{value.class}"
+      end
 
-                begin
-                  cfg = @klass.join_for(assoc)
-                  SearchEngine::Joins::Guard.validate_joined_field!(cfg, field)
-                rescue StandardError
-                  nil
-                end
+      def normalize_order_hash(value)
+        value.flat_map do |k, dir|
+          if dir.is_a?(Hash)
+            assoc = k.to_sym
+            @klass.join_for(assoc)
+            SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, assoc, context: 'sorting')
 
-                direction = d.to_s.strip.downcase
-                unless %w[asc desc].include?(direction)
-                  raise ArgumentError,
-                        "order: direction must be :asc or :desc (got #{d.inspect} for field #{field_name.inspect})"
-                end
-
-                "$#{assoc}.#{field}:#{direction}"
-              end
-            else
-              field = k.to_s.strip
+            dir.flat_map do |field_name, d|
+              field = field_name.to_s.strip
               raise ArgumentError, 'order: field name must be non-empty' if field.empty?
 
-              direction = dir.to_s.strip.downcase
-              unless %w[asc desc].include?(direction)
-                raise ArgumentError,
-                      "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
+              begin
+                cfg = @klass.join_for(assoc)
+                SearchEngine::Joins::Guard.validate_joined_field!(cfg, field)
+              rescue StandardError
+                nil
               end
 
-              "#{field}:#{direction}"
-            end
-          end
-        when String
-          value.split(',').map(&:strip).reject(&:empty?).map do |chunk|
-            name, direction = chunk.split(':', 2).map { |p| p.to_s.strip }
-            if name.empty? || direction.empty?
-              raise ArgumentError, "order: expected 'field:direction' (got #{chunk.inspect})"
-            end
+              direction = d.to_s.strip.downcase
+              unless %w[asc desc].include?(direction)
+                raise ArgumentError,
+                      "order: direction must be :asc or :desc (got #{d.inspect} for field #{field_name.inspect})"
+              end
 
-            downcased = direction.downcase
-            unless %w[asc desc].include?(downcased)
+              "$#{assoc}.#{field}:#{direction}"
+            end
+          else
+            field = k.to_s.strip
+            raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+            direction = dir.to_s.strip.downcase
+            unless %w[asc desc].include?(direction)
               raise ArgumentError,
-                    "order: direction must be :asc or :desc (got #{direction.inspect} for field #{name.inspect})"
+                    "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
             end
 
-            "#{name}:#{downcased}"
+            "#{field}:#{direction}"
           end
-        when Array
-          value.flat_map { |v| normalize_order(v) }
-        when Symbol
-          field = value.to_s.strip
-          raise ArgumentError, 'order: field name must be non-empty' if field.empty?
-
-          ["#{field}:asc"]
-        else
-          raise ArgumentError, "order: unsupported input #{value.class}"
         end
+      end
+
+      def normalize_order_string(value)
+        value.split(',').map(&:strip).reject(&:empty?).map do |chunk|
+          name, direction = chunk.split(':', 2).map { |p| p.to_s.strip }
+          if name.empty? || direction.empty?
+            raise ArgumentError, "order: expected 'field:direction' (got #{chunk.inspect})"
+          end
+
+          downcased = direction.downcase
+          unless %w[asc desc].include?(downcased)
+            raise ArgumentError,
+                  "order: direction must be :asc or :desc (got #{direction.inspect} for field #{name.inspect})"
+          end
+
+          "#{name}:#{downcased}"
+        end
+      end
+
+      def normalize_order_array(value)
+        value.flat_map { |v| normalize_order(v) }
+      end
+
+      def normalize_order_symbol(value)
+        field = value.to_s.strip
+        raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+        ["#{field}:asc"]
       end
 
       # Dedupe by field with last-wins semantics while preserving last positions.
@@ -739,7 +678,7 @@ module SearchEngine
 
       # Extended normalization supporting nested association selections.
       # Returns a Hash with keys: :base, :nested, :nested_order.
-      def normalize_select_input(fields, context: 'selecting fields') # rubocop:disable Metrics/AbcSize
+      def normalize_select_input(fields, context: 'selecting fields')
         list = Array(fields).flatten.compact
         return { base: [], nested: {}, nested_order: [] } if list.empty?
 
@@ -748,8 +687,15 @@ module SearchEngine
         nested_order = []
 
         add_base = ->(val) { base.concat(normalize_select([val])) }
+        add_nested = build_add_nested_proc(context, nested, nested_order)
 
-        add_nested = lambda do |assoc, values|
+        process_selection_list!(list, add_base, add_nested)
+
+        { base: base.uniq, nested: nested, nested_order: nested_order }
+      end
+
+      def build_add_nested_proc(context, nested, nested_order)
+        lambda do |assoc, values|
           key = assoc.to_sym
           @klass.join_for(key)
           SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, key, context: context)
@@ -763,16 +709,16 @@ module SearchEngine
           return if names.empty?
 
           cfg = @klass.join_for(key)
-          names.each do |fname|
-            SearchEngine::Joins::Guard.validate_joined_field!(cfg, fname, source_klass: @klass)
-          end
+          names.each { |fname| SearchEngine::Joins::Guard.validate_joined_field!(cfg, fname, source_klass: @klass) }
 
           existing = Array(nested[key])
           merged = (existing + names).each_with_object([]) { |n, acc| acc << n unless acc.include?(n) }
           nested[key] = merged
           nested_order << key unless nested_order.include?(key)
         end
+      end
 
+      def process_selection_list!(list, add_base, add_nested)
         i = 0
         while i < list.length
           entry = list[i]
@@ -792,8 +738,6 @@ module SearchEngine
                   "ConflictingSelection: unsupported input #{entry.class} in selection"
           end
         end
-
-        { base: base.uniq, nested: nested, nested_order: nested_order }
       end
 
       def normalize_grouping(value)
@@ -937,7 +881,7 @@ module SearchEngine
         }
       end
 
-      def normalize_ranking_input(value) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
+      def normalize_ranking_input(value)
         h = value || {}
         unless h.is_a?(Hash)
           raise SearchEngine::Errors::InvalidOption.new(
@@ -949,91 +893,106 @@ module SearchEngine
         end
 
         out = {}
-
-        if h.key?(:num_typos) || h.key?('num_typos')
-          raw = h[:num_typos] || h['num_typos']
-          unless raw.nil?
-            begin
-              iv = Integer(raw)
-              unless [0, 1, 2].include?(iv)
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: num_typos must be 0, 1, or 2 (got #{raw.inspect})",
-                  doc: 'docs/ranking.md#options'
-                )
-              end
-              out[:num_typos] = iv
-            rescue ArgumentError, TypeError
-              raise SearchEngine::Errors::InvalidOption.new(
-                "InvalidOption: num_typos must be an Integer in {0,1,2} (got #{raw.inspect})",
-                doc: 'docs/ranking.md#options'
-              )
-            end
-          end
-        end
-
-        if h.key?(:drop_tokens_threshold) || h.key?('drop_tokens_threshold')
-          raw = h[:drop_tokens_threshold] || h['drop_tokens_threshold']
-          unless raw.nil?
-            begin
-              fv = Float(raw)
-              unless fv >= 0.0 && fv <= 1.0 && fv.finite?
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
-                  doc: 'docs/ranking.md#options'
-                )
-              end
-              out[:drop_tokens_threshold] = fv
-            rescue ArgumentError, TypeError
-              raise SearchEngine::Errors::InvalidOption.new(
-                "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
-                doc: 'docs/ranking.md#options'
-              )
-            end
-          end
-        end
-
-        if h.key?(:prioritize_exact_match) || h.key?('prioritize_exact_match')
-          raw = h[:prioritize_exact_match] || h['prioritize_exact_match']
-          out[:prioritize_exact_match] = raw.nil? ? nil : coerce_boolean_strict(raw, :prioritize_exact_match)
-        end
-
-        if h.key?(:query_by_weights) || h.key?('query_by_weights')
-          raw = h[:query_by_weights] || h['query_by_weights']
-          unless raw.nil?
-            unless raw.is_a?(Hash)
-              raise SearchEngine::Errors::InvalidOption.new(
-                'InvalidOption: query_by_weights must be a Hash of { field => Integer }',
-                doc: 'docs/ranking.md#weights'
-              )
-            end
-            normalized = {}
-            raw.each do |k, v|
-              key = k.to_s.strip
-              next if key.empty?
-
-              begin
-                w = Integer(v)
-              rescue ArgumentError, TypeError
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: weight for #{k.inspect} must be an Integer >= 0",
-                  doc: 'docs/ranking.md#weights',
-                  details: { field: k, weight: v }
-                )
-              end
-              if w.negative?
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: weight for #{k.inspect} must be >= 0",
-                  doc: 'docs/ranking.md#weights',
-                  details: { field: k, weight: v }
-                )
-              end
-              normalized[key] = w
-            end
-            out[:query_by_weights] = normalized
-          end
-        end
-
+        apply_ranking_handlers!(h, out)
         out
+      end
+
+      def apply_ranking_handlers!(h, out)
+        handle_num_typos_option!(h, out)
+        handle_drop_tokens_threshold_option!(h, out)
+        handle_prioritize_exact_match_option!(h, out)
+        handle_query_by_weights_option!(h, out)
+      end
+
+      def handle_num_typos_option!(h, out)
+        return unless h.key?(:num_typos) || h.key?('num_typos')
+
+        raw = h[:num_typos] || h['num_typos']
+        return if raw.nil?
+
+        begin
+          iv = Integer(raw)
+          unless [0, 1, 2].include?(iv)
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: num_typos must be 0, 1, or 2 (got #{raw.inspect})",
+              doc: 'docs/ranking.md#options'
+            )
+          end
+          out[:num_typos] = iv
+        rescue ArgumentError, TypeError
+          raise SearchEngine::Errors::InvalidOption.new(
+            "InvalidOption: num_typos must be an Integer in {0,1,2} (got #{raw.inspect})",
+            doc: 'docs/ranking.md#options'
+          )
+        end
+      end
+
+      def handle_drop_tokens_threshold_option!(h, out)
+        return unless h.key?(:drop_tokens_threshold) || h.key?('drop_tokens_threshold')
+
+        raw = h[:drop_tokens_threshold] || h['drop_tokens_threshold']
+        return if raw.nil?
+
+        begin
+          fv = Float(raw)
+          unless fv >= 0.0 && fv <= 1.0 && fv.finite?
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
+              doc: 'docs/ranking.md#options'
+            )
+          end
+          out[:drop_tokens_threshold] = fv
+        rescue ArgumentError, TypeError
+          raise SearchEngine::Errors::InvalidOption.new(
+            "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
+            doc: 'docs/ranking.md#options'
+          )
+        end
+      end
+
+      def handle_prioritize_exact_match_option!(h, out)
+        return unless h.key?(:prioritize_exact_match) || h.key?('prioritize_exact_match')
+
+        raw = h[:prioritize_exact_match] || h['prioritize_exact_match']
+        out[:prioritize_exact_match] = raw.nil? ? nil : coerce_boolean_strict(raw, :prioritize_exact_match)
+      end
+
+      def handle_query_by_weights_option!(h, out)
+        return unless h.key?(:query_by_weights) || h.key?('query_by_weights')
+
+        raw = h[:query_by_weights] || h['query_by_weights']
+        return if raw.nil?
+
+        unless raw.is_a?(Hash)
+          raise SearchEngine::Errors::InvalidOption.new(
+            'InvalidOption: query_by_weights must be a Hash of { field => Integer }',
+            doc: 'docs/ranking.md#weights'
+          )
+        end
+        normalized = {}
+        raw.each do |k, v|
+          key = k.to_s.strip
+          next if key.empty?
+
+          begin
+            w = Integer(v)
+          rescue ArgumentError, TypeError
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: weight for #{k.inspect} must be an Integer >= 0",
+              doc: 'docs/ranking.md#weights',
+              details: { field: k, weight: v }
+            )
+          end
+          if w.negative?
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: weight for #{k.inspect} must be >= 0",
+              doc: 'docs/ranking.md#weights',
+              details: { field: k, weight: v }
+            )
+          end
+          normalized[key] = w
+        end
+        out[:query_by_weights] = normalized
       end
 
       def normalize_curation_ids(values)
@@ -1058,6 +1017,77 @@ module SearchEngine
         fch = raw_fch.nil? ? nil : coerce_boolean_strict(raw_fch, :filter_curated_hits)
 
         { pinned: pinned, hidden: hidden, override_tags: tags, filter_curated_hits: fch }
+      end
+
+      def validate_facet_field!(name, context: 'facet_by')
+        return unless name.start_with?('$') || name.include?('.')
+
+        raise SearchEngine::Errors::InvalidParams.new(
+          %(#{context}: supports base fields only (got #{name.inspect})),
+          doc: 'docs/faceting.md#supported-options',
+          details: { field: name }
+        )
+      end
+
+      def ensure_known_field!(name)
+        attrs = safe_attributes_map
+        return if attrs.nil? || attrs.empty? || attrs.key?(name.to_sym)
+
+        suggestions = suggest_fields(name.to_sym, attrs.keys.map(&:to_sym))
+        suggest = if suggestions.empty?
+                    ''
+                  elsif suggestions.length == 1
+                    " (did you mean :#{suggestions.first}?)"
+                  else
+                    last = suggestions.last
+                    others = suggestions[0..-2].map { |s| ":#{s}" }.join(', ')
+                    " (did you mean #{others}, or :#{last}?)"
+                  end
+        raise SearchEngine::Errors::UnknownField,
+              "UnknownField: unknown field #{name.inspect} for #{klass_name_for_inspect}#{suggest}"
+      end
+
+      def validate_facet_sort!(sort)
+        return if sort.nil?
+
+        raise SearchEngine::Errors::InvalidParams.new(
+          "facet_by: option :sort is not supported by Typesense facets (got #{sort.inspect})",
+          hint: 'Supported: default count-desc only at present.',
+          doc: 'docs/faceting.md#supported-options',
+          details: { sort: sort }
+        )
+      end
+
+      def validate_facet_stats!(stats)
+        return if stats.nil?
+
+        raise SearchEngine::Errors::InvalidParams.new(
+          'facet_by: option :stats is not supported at present',
+          doc: 'docs/faceting.md#supported-options',
+          details: { stats: stats }
+        )
+      end
+
+      def parse_facet_cap!(max_values)
+        return nil if max_values.nil?
+
+        cap = Integer(max_values)
+        raise SearchEngine::Errors::InvalidParams, 'facet_by: max_values must be >= 1' if cap < 1
+
+        cap
+      rescue ArgumentError, TypeError
+        raise SearchEngine::Errors::InvalidParams, 'facet_by: max_values must be an Integer or nil'
+      end
+
+      def validate_range_brackets!(expr)
+        return unless expr.include?('[') ^ expr.include?(']')
+
+        raise SearchEngine::Errors::InvalidParams.new(
+          %(facet_query: invalid range syntax #{expr.inspect} (unbalanced brackets)),
+          hint: 'Use shapes like "[0..9]", "[10..19]"',
+          doc: 'docs/faceting.md#facet-query-expressions',
+          details: { expr: expr }
+        )
       end
     end
   end

@@ -189,7 +189,6 @@ module RepoAudit
       end
     end
 
-    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockNesting
     def scan_tokens_for_scopes_and_methods
       i = 0
       n = @tokens.length
@@ -283,7 +282,6 @@ module RepoAudit
         i += 1
       end
     end
-    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockNesting
 
     def lookahead_eigenclass?(idx)
       # After 'class', check for '<<' 'self'
@@ -404,7 +402,6 @@ module RepoAudit
       end
     end
 
-    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
     def build_json
       files_hash = {}
       total_loc = 0
@@ -493,7 +490,6 @@ module RepoAudit
         }
       }
     end
-        # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     def avg_loc(arr)
       return 0 if arr.empty?
@@ -501,7 +497,6 @@ module RepoAudit
       (arr.map(&:loc).sum.to_f / arr.length).round(1)
     end
 
-    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Layout/LineLength
     def build_markdown(json_obj)
       summary = json_obj[:summary] || json_obj['summary']
 
@@ -626,7 +621,6 @@ module RepoAudit
 
       md
     end
-    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/PerceivedComplexity, Layout/LineLength
   end
 
   def self.main

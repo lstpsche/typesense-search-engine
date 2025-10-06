@@ -134,7 +134,7 @@ module SearchEngine
     # @param payload [Hash]
     # @yieldparam ctx [Hash]
     # @return [Object] block result when provided
-    def self.instrument(event, payload = {}) # rubocop:disable Metrics/AbcSize
+    def self.instrument(event, payload = {})
       started = monotonic_ms
       ctx = shape_payload(payload)
       ctx[:correlation_id] ||= (Thread.current[THREAD_CORRELATION_KEY] ||= generate_correlation_id)
@@ -146,12 +146,7 @@ module SearchEngine
           ctx[:status] = :ok unless ctx.key?(:status)
           result
         rescue StandardError => error
-          ctx[:status] = :error unless ctx.key?(:status)
-          ctx[:error_class] ||= error.class.name
-          ctx[:error_message] ||= SearchEngine::Observability.truncate_message(
-            error.message,
-            SearchEngine.config.observability&.max_message_length || 200
-          )
+          fill_error_context!(ctx, error)
           raise
         ensure
           ctx[:duration_ms] = (monotonic_ms - started).round(1)
@@ -165,12 +160,7 @@ module SearchEngine
         ctx[:status] = :ok unless ctx.key?(:status)
         result
       rescue StandardError => error
-        ctx[:status] = :error unless ctx.key?(:status)
-        ctx[:error_class] ||= error.class.name
-        ctx[:error_message] ||= SearchEngine::Observability.truncate_message(
-          error.message,
-          SearchEngine.config.observability&.max_message_length || 200
-        )
+        fill_error_context!(ctx, error)
         raise
       ensure
         ctx[:duration_ms] = (monotonic_ms - started).round(1)
@@ -303,5 +293,14 @@ module SearchEngine
       SecureRandom.urlsafe_base64(8)
     end
     private_class_method :generate_correlation_id
+
+    def self.fill_error_context!(ctx, error)
+      ctx[:status] = :error unless ctx.key?(:status)
+      ctx[:error_class] ||= error.class.name
+      ctx[:error_message] ||= SearchEngine::Observability.truncate_message(
+        error.message,
+        SearchEngine.config.observability&.max_message_length || 200
+      )
+    end
   end
 end

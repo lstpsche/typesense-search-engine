@@ -85,7 +85,7 @@ module SearchEngine
         @__groups_memo = groups_built.freeze
         first_hits = groups_built.map { |g| g.hits.first }.compact
         @hits = first_hits.freeze
-        instrument_group_parse(groups_built) if defined?(SearchEngine::Instrumentation)
+        instrument_group_parse(groups_built)
       else
         entries = Array(@raw['hits']).map { |h| symbolize_hit(h) }
         hydrated = []
@@ -288,7 +288,7 @@ module SearchEngine
       @__facets_parsed_memo || {}.freeze
     end
 
-    def build_parsed_facets(raw, ctx) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+    def build_parsed_facets(raw, ctx)
       raw_facets = (raw && (raw['facet_counts'] || raw[:facet_counts])) || []
       result = {}
       Array(raw_facets).each do |entry|
@@ -296,28 +296,34 @@ module SearchEngine
         next if field.empty?
 
         values = Array(entry['counts'] || entry[:counts])
-        list = values.map do |v|
-          value = v['value'] || v[:value]
-          count = v['count'] || v[:count]
-          highlighted = v['highlighted'] || v[:highlighted]
-          { value: value, count: Integer(count || 0), highlighted: highlighted, label: nil }
-        end
+        list = build_facet_value_list(values)
 
         if ctx && Array(ctx[:queries]).any?
           q_for_field = Array(ctx[:queries]).select { |q| (q[:field] || q['field']).to_s == field }
-          if q_for_field.any?
-            list.each do |h|
-              val_str = h[:value].to_s
-              match = q_for_field.find { |q| (q[:expr] || q['expr']).to_s == val_str }
-              h[:label] = ((match && (match[:label] || match['label'])) || nil)
-            end
-          end
+          annotate_labels_for_field!(list, q_for_field) if q_for_field.any?
         end
 
         result[field] = list.freeze
       end
 
       result
+    end
+
+    def build_facet_value_list(values)
+      Array(values).map do |v|
+        value = v['value'] || v[:value]
+        count = v['count'] || v[:count]
+        highlighted = v['highlighted'] || v[:highlighted]
+        { value: value, count: Integer(count || 0), highlighted: highlighted, label: nil }
+      end
+    end
+
+    def annotate_labels_for_field!(list, queries)
+      list.each do |h|
+        val_str = h[:value].to_s
+        match = queries.find { |q| (q[:expr] || q['expr']).to_s == val_str }
+        h[:label] = ((match && (match[:label] || match['label'])) || nil)
+      end
     end
 
     # Attempt to read a total groups count from the raw payload using common keys.

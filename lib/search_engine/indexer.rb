@@ -37,7 +37,7 @@ module SearchEngine
     # @param into [String, nil] target collection; defaults to resolver or the logical collection alias
     # @return [Summary]
     # @raise [SearchEngine::Errors::InvalidParams]
-    def self.rebuild_partition!(klass, partition:, into: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    def self.rebuild_partition!(klass, partition:, into: nil)
       raise Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
       unless klass.ancestors.include?(SearchEngine::Base)
         raise Errors::InvalidParams, 'klass must inherit from SearchEngine::Base'
@@ -59,33 +59,11 @@ module SearchEngine
       started_at = monotonic_ms
       pfields = SearchEngine::Observability.partition_fields(partition)
       dispatch_ctx = SearchEngine::Instrumentation.context
-      SearchEngine::Instrumentation.instrument(
-        'search_engine.indexer.partition_start',
-        {
-          collection: (klass.respond_to?(:collection) ? klass.collection : klass.name.to_s),
-          into: target_into,
-          partition: pfields[:partition],
-          partition_hash: pfields[:partition_hash],
-          dispatch_mode: dispatch_ctx[:dispatch_mode],
-          job_id: dispatch_ctx[:job_id],
-          timestamp: Time.now.utc.iso8601
-        }
-      ) {}
+      instrument_partition_start(klass, target_into, pfields, dispatch_ctx)
 
-      if before_hook
-        run_hook_with_timeout(before_hook, partition,
-                              timeout_ms: SearchEngine.config.partitioning.before_hook_timeout_ms
-        )
-      end
+      run_before_hook_if_present(before_hook, partition)
 
-      docs_enum = Enumerator.new do |y|
-        idx = 0
-        rows_enum.each do |rows|
-          docs, _report = mapper.map_batch!(rows, batch_index: idx)
-          y << docs
-          idx += 1
-        end
-      end
+      docs_enum = build_docs_enum(rows_enum, mapper)
 
       summary = import!(
         klass,
@@ -95,27 +73,9 @@ module SearchEngine
         action: :upsert
       )
 
-      if after_hook
-        run_hook_with_timeout(after_hook, partition,
-                              timeout_ms: SearchEngine.config.partitioning.after_hook_timeout_ms
-        )
-      end
+      run_after_hook_if_present(after_hook, partition)
 
-      SearchEngine::Instrumentation.instrument(
-        'search_engine.indexer.partition_finish',
-        {
-          collection: (klass.respond_to?(:collection) ? klass.collection : klass.name.to_s),
-          into: target_into,
-          partition: pfields[:partition],
-          partition_hash: pfields[:partition_hash],
-          batches_total: summary.batches_total,
-          docs_total: summary.docs_total,
-          success_total: summary.success_total,
-          failed_total: summary.failed_total,
-          status: summary.status,
-          duration_ms: (monotonic_ms - started_at).round(1)
-        }
-      ) {}
+      instrument_partition_finish(klass, target_into, pfields, summary, started_at)
 
       summary
     end
@@ -718,6 +678,70 @@ module SearchEngine
         return true if s.include?('*') && !s.match?(/[a-zA-Z0-9_]+\s*[:><=!]/)
 
         false
+      end
+
+      def run_before_hook_if_present(before_hook, partition)
+        return unless before_hook
+
+        run_hook_with_timeout(
+          before_hook,
+          partition,
+          timeout_ms: SearchEngine.config.partitioning.before_hook_timeout_ms
+        )
+      end
+
+      def run_after_hook_if_present(after_hook, partition)
+        return unless after_hook
+
+        run_hook_with_timeout(
+          after_hook,
+          partition,
+          timeout_ms: SearchEngine.config.partitioning.after_hook_timeout_ms
+        )
+      end
+
+      def instrument_partition_start(klass, target_into, pfields, dispatch_ctx)
+        SearchEngine::Instrumentation.instrument(
+          'search_engine.indexer.partition_start',
+          {
+            collection: (klass.respond_to?(:collection) ? klass.collection : klass.name.to_s),
+            into: target_into,
+            partition: pfields[:partition],
+            partition_hash: pfields[:partition_hash],
+            dispatch_mode: dispatch_ctx[:dispatch_mode],
+            job_id: dispatch_ctx[:job_id],
+            timestamp: Time.now.utc.iso8601
+          }
+        ) {}
+      end
+
+      def instrument_partition_finish(klass, target_into, pfields, summary, started_at)
+        SearchEngine::Instrumentation.instrument(
+          'search_engine.indexer.partition_finish',
+          {
+            collection: (klass.respond_to?(:collection) ? klass.collection : klass.name.to_s),
+            into: target_into,
+            partition: pfields[:partition],
+            partition_hash: pfields[:partition_hash],
+            batches_total: summary.batches_total,
+            docs_total: summary.docs_total,
+            success_total: summary.success_total,
+            failed_total: summary.failed_total,
+            status: summary.status,
+            duration_ms: (monotonic_ms - started_at).round(1)
+          }
+        ) {}
+      end
+
+      def build_docs_enum(rows_enum, mapper)
+        Enumerator.new do |y|
+          idx = 0
+          rows_enum.each do |rows|
+            docs, _report = mapper.map_batch!(rows, batch_index: idx)
+            y << docs
+            idx += 1
+          end
+        end
       end
     end
   end

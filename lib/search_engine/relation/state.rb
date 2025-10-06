@@ -55,76 +55,65 @@ module SearchEngine
 
       # Apply a single initial state key with normalization.
       # Delegates to the same normalizers used by DSL chainers.
-      # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
       def apply_initial_state_key!(normalized, key, value)
-        k = key.to_sym
-        case k
-        when :filters
-          normalized[:filters] = normalize_where(Array(value))
-        when :filters_ast
-          nodes = Array(value).flatten.compact
-          normalized[:ast] ||= []
-          normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                                nodes
-                              else
-                                SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                              end
-        when :ast
-          nodes = Array(value).flatten.compact
-          normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                               nodes
-                             else
-                               SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                             end
-        when :orders
-          normalized[:orders] = normalize_order(value)
-        when :select
-          normalized[:select] = normalize_select(Array(value))
-        when :select_nested
-          normalized[:select_nested] = (value || {})
-        when :select_nested_order
-          normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :exclude
-          normalized[:exclude] = normalize_select(Array(value))
-        when :exclude_nested
-          normalized[:exclude_nested] = (value || {})
-        when :exclude_nested_order
-          normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :joins
-          normalized[:joins] = normalize_joins(Array(value))
-        when :limit
-          normalized[:limit] = coerce_integer_min(value, :limit, 1)
-        when :offset
-          normalized[:offset] = coerce_integer_min(value, :offset, 0)
-        when :page
-          normalized[:page] = coerce_integer_min(value, :page, 1)
-        when :per_page
-          normalized[:per_page] = coerce_integer_min(value, :per, 1)
-        when :options
-          normalized[:options] = (value || {}).dup
-        when :grouping
-          normalized[:grouping] = normalize_grouping(value)
-        when :preset_name
-          normalized[:preset_name] = value&.to_s&.strip
-        when :preset_mode
-          normalized[:preset_mode] = value&.to_sym
-        when :curation
-          normalized[:curation] = normalize_curation_input(value)
-        when :facet_fields
-          normalized[:facet_fields] = Array(value).flatten.compact
-        when :facet_max_values
-          normalized[:facet_max_values] = Array(value).flatten.compact
-        when :facet_queries
-          normalized[:facet_queries] = Array(value).flatten.compact
-        when :highlight
-          normalized[:highlight] = normalize_highlight_input(value)
-        when :ranking
-          normalized[:ranking] = normalize_ranking_input(value || {})
-        when :hit_limits
-          normalized[:hit_limits] = normalize_hit_limits_input(value || {})
-        end
+        handlers = {
+          filters: :handle_state_filters!,
+          filters_ast: :handle_state_filters_ast!,
+          ast: :handle_state_ast!,
+          orders: :handle_state_orders!,
+          select: :handle_state_select!,
+          select_nested: :handle_state_select_nested!,
+          select_nested_order: :handle_state_select_nested_order!,
+          exclude: :handle_state_exclude!,
+          exclude_nested: :handle_state_exclude_nested!,
+          exclude_nested_order: :handle_state_exclude_nested_order!,
+          joins: :handle_state_joins!,
+          limit: :handle_state_limit!,
+          offset: :handle_state_offset!,
+          page: :handle_state_page!,
+          per_page: :handle_state_per_page!,
+          options: :handle_state_options!,
+          grouping: :handle_state_grouping!,
+          preset_name: :handle_state_preset_name!,
+          preset_mode: :handle_state_preset_mode!,
+          curation: :handle_state_curation!,
+          facet_fields: :handle_state_facet_fields!,
+          facet_max_values: :handle_state_facet_max_values!,
+          facet_queries: :handle_state_facet_queries!,
+          highlight: :handle_state_highlight!,
+          ranking: :handle_state_ranking!,
+          hit_limits: :handle_state_hit_limits!
+        }
+        h = handlers[key.to_sym]
+        return unless h
+
+        send(h, normalized, value)
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/MethodLength
+
+      private
+
+      def handle_state_filters!(normalized, value)
+        normalized[:filters] = normalize_where(Array(value))
+      end
+
+      def handle_state_filters_ast!(normalized, value)
+        nodes = Array(value).flatten.compact
+        normalized[:ast] ||= []
+        normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                              nodes
+                            else
+                              SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                            end
+      end
+
+      def handle_state_ast!(normalized, value)
+        nodes = Array(value).flatten.compact
+        normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                             nodes
+                           else
+                             SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                           end
+      end
 
       # One-time migration: when AST is empty and legacy string filters exist, map legacy to AST::Raw.
       # Idempotent and safe for repeated calls.
@@ -140,6 +129,114 @@ module SearchEngine
         raw_nodes = legacy.map { |fragment| SearchEngine::AST.raw(String(fragment)) }
         state[:ast] = raw_nodes
         nil
+      end
+
+      def handle_state_options!(normalized, value)
+        normalized[:options] = (value || {}).dup
+      end
+
+      def handle_state_grouping!(normalized, value)
+        normalized[:grouping] = normalize_grouping(value)
+      end
+
+      def handle_state_preset_name!(normalized, value)
+        normalized[:preset_name] = value&.to_s&.strip
+      end
+
+      def handle_state_preset_mode!(normalized, value)
+        normalized[:preset_mode] = value&.to_sym
+      end
+
+      def handle_state_curation!(normalized, value)
+        normalized[:curation] = normalize_curation_input(value)
+      end
+
+      def handle_state_facet_fields!(normalized, value)
+        normalized[:facet_fields] = Array(value).flatten.compact
+      end
+
+      def handle_state_facet_max_values!(normalized, value)
+        normalized[:facet_max_values] = Array(value).flatten.compact
+      end
+
+      def handle_state_facet_queries!(normalized, value)
+        normalized[:facet_queries] = Array(value).flatten.compact
+      end
+
+      def handle_state_highlight!(normalized, value)
+        normalized[:highlight] = normalize_highlight_input(value)
+      end
+
+      def handle_state_ranking!(normalized, value)
+        normalized[:ranking] = normalize_ranking_input(value || {})
+      end
+
+      def handle_state_hit_limits!(normalized, value)
+        normalized[:hit_limits] = normalize_hit_limits_input(value || {})
+      end
+
+      # Newly added handlers for remaining state keys
+      def handle_state_orders!(normalized, value)
+        additions = normalize_order(value)
+        normalized[:orders] = dedupe_orders_last_wins(additions)
+      end
+
+      def handle_state_select!(normalized, value)
+        normalized[:select] = normalize_select(value)
+      end
+
+      def handle_state_select_nested!(normalized, value)
+        nested_in = value || {}
+        nested = {}
+        nested_in.each do |k, v|
+          key = k.to_sym
+          fields = Array(v).flatten.compact
+          nested[key] = fields
+        end
+        normalized[:select_nested] = nested
+      end
+
+      def handle_state_select_nested_order!(normalized, value)
+        normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+      end
+
+      def handle_state_exclude!(normalized, value)
+        normalized[:exclude] = normalize_select(value)
+      end
+
+      def handle_state_exclude_nested!(normalized, value)
+        nested_in = value || {}
+        nested = {}
+        nested_in.each do |k, v|
+          key = k.to_sym
+          fields = Array(v).flatten.compact
+          nested[key] = fields
+        end
+        normalized[:exclude_nested] = nested
+      end
+
+      def handle_state_exclude_nested_order!(normalized, value)
+        normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+      end
+
+      def handle_state_joins!(normalized, value)
+        normalized[:joins] = normalize_joins(value)
+      end
+
+      def handle_state_limit!(normalized, value)
+        normalized[:limit] = coerce_integer_min(value, :limit, 1)
+      end
+
+      def handle_state_offset!(normalized, value)
+        normalized[:offset] = coerce_integer_min(value, :offset, 0)
+      end
+
+      def handle_state_page!(normalized, value)
+        normalized[:page] = coerce_integer_min(value, :page, 1)
+      end
+
+      def handle_state_per_page!(normalized, value)
+        normalized[:per_page] = coerce_integer_min(value, :per, 1)
       end
 
       # Deep duplicate Hash/Array trees; leaves are returned as-is.

@@ -56,7 +56,6 @@ end
 # Return array of absolute Ruby file paths to scan
 # Scan only lib/ and app/ under project root
 # Exclude test/spec/tmp/vendor/log/db examples/**/db
-
 def ruby_files_to_scan
   roots = %w[lib app].map { |d| File.join(ROOT, d) }.select { |p| Dir.exist?(p) }
   files = []
@@ -81,7 +80,6 @@ end
 
 # Extract const name string from const sexp
 # Handles :const_ref and :const_path_ref recursively
-
 def const_name(sexp)
   return nil unless sexp.is_a?(Array)
 
@@ -102,8 +100,6 @@ def const_name(sexp)
 end
 
 # Walk AST to collect public instance methods defined within SearchEngine::Relation
-# rubocop:disable Metrics/AbcSize
-
 def walk_relation_ast(node, stack, methods, visibility)
   return visibility unless node.is_a?(Array)
 
@@ -159,10 +155,8 @@ def walk_relation_ast(node, stack, methods, visibility)
 
   visibility
 end
-# rubocop:enable Metrics/AbcSize
 
 # Build sexp for Relation file
-
 def sexp_for_relation
   relation_path = File.join(ROOT, 'lib', 'search_engine', 'relation.rb')
   src = read_file(relation_path)
@@ -172,7 +166,6 @@ def sexp_for_relation
 end
 
 # Ensure essentials present; otherwise merge fallback
-
 def ensure_essentials(methods)
   essentials = %w[where order select include_fields joins limit offset page per per_page group_by preset]
   arr = methods.to_a
@@ -182,7 +175,6 @@ end
 
 # Parse public instance methods under SearchEngine::Relation via Ripper
 # Returns Set of method names (Strings)
-
 def parse_relation_public_surface
   sexp = sexp_for_relation
   return FALLBACK_SURFACE.to_set unless sexp
@@ -196,7 +188,6 @@ rescue StandardError
 end
 
 # Extract left-most constant path receiver string for a :call chain
-
 def left_most_const_path(node)
   return nil unless node.is_a?(Array)
 
@@ -214,7 +205,6 @@ def left_most_const_path(node)
 end
 
 # Return array of method names in the chain ending at node (Strings)
-
 def chain_methods(node)
   return [] unless node.is_a?(Array)
 
@@ -233,7 +223,6 @@ def chain_methods(node)
 end
 
 # Collect local variable names that are likely relations via simple regex heuristics
-
 def discover_relation_like_vars(content, relation_methods)
   names = Set.new
   # lhs = var; rhs mentions SearchEngine:: or any chained relation DSL method
@@ -250,14 +239,11 @@ def discover_relation_like_vars(content, relation_methods)
 end
 
 # Determine if a file is in SearchEngine proximity (namespaces/imports present)
-
 def file_in_se_proximity?(content)
   content.include?('SearchEngine::') || content.include?('search_engine/') || content.include?('module SearchEngine')
 end
 
 # For a given file, count inbound Relation calls using Ripper first, then regex fallback
-# rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/BlockNesting
-
 def count_relation_calls_in_file(path, relation_methods)
   content = read_file(path)
   counts = Hash.new(0)
@@ -332,7 +318,6 @@ def count_relation_calls_in_file(path, relation_methods)
 
   [counts, hits]
 end
-# rubocop:enable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/BlockNesting
 
 # Discover tokens present in file for co-occurrence
 

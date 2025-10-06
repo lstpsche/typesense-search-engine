@@ -7,7 +7,7 @@ module SearchEngine
     module Compiler
       # Compile immutable relation state and options into Typesense body params.
       # @return [SearchEngine::CompiledParams]
-      def to_typesense_params # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
+      def to_typesense_params
         cfg = SearchEngine.config
         opts = @state[:options] || {}
 
@@ -15,288 +15,58 @@ module SearchEngine
         runtime_flags = {}
 
         # Query basics
-        q_val = option_value(opts, :q) || '*'
-        query_by_val = option_value(opts, :query_by) || cfg.default_query_by
-        params[:q] = q_val
-        params[:query_by] = query_by_val if query_by_val
+        apply_query_basics!(params, opts, cfg)
 
         # Filters and sorting
         ast_nodes = Array(@state[:ast]).flatten.compact
         SearchEngine::Instrumentation.monotonic_ms if defined?(SearchEngine::Instrumentation)
-        filter_str = compiled_filter_by(ast_nodes)
-        params[:filter_by] = filter_str if filter_str
+        filter_str = assign_filter_by!(params, ast_nodes)
 
         orders = Array(@state[:orders])
-        sort_str = compiled_sort_by(orders)
-        params[:sort_by] = sort_str if sort_str
+        sort_str = assign_sort_by!(params, orders)
 
-        # Field selection (nested first, then base), honoring excludes
-        include_str = compile_include_fields_string
-        params[:include_fields] = include_str unless include_str.to_s.strip.empty?
-
-        # Exclude fields when provided and not fully derivable via include
-        exclude_str = compile_exclude_fields_string
-        params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
-
-        # Emit selection compile event with counts
-        begin
-          included_count = 0
-          excluded_count = 0
-          nested_assocs = []
-
-          unless include_str.to_s.strip.empty?
-            include_str.split(',').each do |segment|
-              seg = segment.strip
-              if (m = seg.match(/^\$(\w+)\(([^)]*)\)$/))
-                assoc = m[1]
-                inner = m[2]
-                nested_assocs << assoc
-                inner_fields = inner.to_s.split(',').map(&:strip).reject(&:empty?)
-                included_count += inner_fields.length
-              else
-                included_count += 1
-              end
-            end
-          end
-
-          unless exclude_str.to_s.strip.empty?
-            exclude_str.split(',').each do |segment|
-              seg = segment.strip
-              if (m = seg.match(/^\$(\w+)\(([^)]*)\)$/))
-                assoc = m[1]
-                inner = m[2]
-                nested_assocs << assoc
-                inner_fields = inner.to_s.split(',').map(&:strip).reject(&:empty?)
-                excluded_count += inner_fields.length
-              else
-                excluded_count += 1
-              end
-            end
-          end
-
-          s_payload = {
-            include_count: included_count,
-            exclude_count: excluded_count,
-            nested_assoc_count: nested_assocs.uniq.length
-          }
-          SearchEngine::Instrumentation.instrument('search_engine.selection.compile', s_payload) {}
-        rescue StandardError
-          # swallow observability errors
-        end
+        # Field selection and instrumentation
+        include_str, exclude_str = compile_selection_fields!(params)
+        instrument_selection_compile(include_str, exclude_str)
 
         # Highlighting
-        if (h = @state[:highlight])
-          hf = Array(h[:fields]).map(&:to_s).reject(&:empty?)
-          params[:highlight_fields] = hf.join(',') unless hf.empty?
-
-          hff = Array(h[:full_fields]).map(&:to_s).reject(&:empty?)
-          params[:highlight_full_fields] = hff.join(',') unless hff.empty?
-
-          params[:highlight_start_tag] = h[:start_tag] if h[:start_tag]
-          params[:highlight_end_tag] = h[:end_tag] if h[:end_tag]
-
-          params[:highlight_affix_num_tokens] = h[:affix_tokens] unless h[:affix_tokens].nil?
-          params[:snippet_threshold] = h[:snippet_threshold] unless h[:snippet_threshold].nil?
-        end
+        apply_highlighting!(params)
 
         # Faceting
-        facet_fields = Array(@state[:facet_fields]).map(&:to_s).reject(&:empty?)
-        params[:facet_by] = facet_fields.join(',') unless facet_fields.empty?
-
-        caps = Array(@state[:facet_max_values]).compact
-        if caps.any?
-          valid_caps = []
-          caps.each do |v|
-            valid_caps << Integer(v)
-          rescue ArgumentError, TypeError
-            # skip invalid cap
-          end
-          max_cap = valid_caps.max
-          params[:max_facet_values] = max_cap if max_cap&.positive?
-        end
-
-        queries = Array(@state[:facet_queries])
-        if queries.any?
-          tokens = queries.map { |q| "#{q[:field]}:#{q[:expr]}" }
-          params[:facet_query] = tokens.join(',') unless tokens.empty?
-        end
+        apply_faceting!(params)
 
         # Curation (body params only)
-        if (cur = @state[:curation])
-          pinned = Array(cur[:pinned]).map(&:to_s).reject(&:empty?)
-          hidden = Array(cur[:hidden]).map(&:to_s).reject(&:empty?)
-          tags   = Array(cur[:override_tags]).map(&:to_s).reject(&:empty?)
-          fch    = cur[:filter_curated_hits]
+        apply_curation!(params)
 
-          params[:pinned_hits] = pinned.join(',') if pinned.any?
-          params[:hidden_hits] = hidden.join(',') if hidden.any?
-          params[:override_tags] = tags.join(',') if tags.any?
-          params[:filter_curated_hits] = fch unless fch.nil?
-
-          # Emit curation compile event (counts/flags only)
-          begin
-            c_payload = {
-              pinned_count: pinned.size.positive? ? pinned.size : nil,
-              hidden_count: hidden.size.positive? ? hidden.size : nil,
-              has_override_tags: tags.any? || nil,
-              filter_curated_hits: (cur.key?(:filter_curated_hits) ? fch : nil)
-            }.compact
-            SearchEngine::Instrumentation.instrument('search_engine.curation.compile', c_payload) {}
-
-            overlap = (pinned & hidden)
-            if overlap.any?
-              SearchEngine::Instrumentation.instrument(
-                'search_engine.curation.conflict',
-                { type: :overlap, count: overlap.size }
-              ) {}
-            end
-          rescue StandardError
-            # swallow observability errors
-          end
-        end
-
-        # Pagination
-        pagination = compute_pagination
-        # Early limit (compiler mapping)
-        hits_info = {}
-        if (hl = @state[:hit_limits]) && hl[:early_limit]
-          if pagination.key?(:per_page) && pagination[:per_page].to_i > hl[:early_limit].to_i
-            pagination = pagination.merge(per_page: hl[:early_limit].to_i)
-            hits_info[:per_adjusted] = true
-          else
-            hits_info[:per_adjusted] = false
-          end
-          hits_info[:early_limit] = hl[:early_limit].to_i
-        end
-        params[:page] = pagination[:page] if pagination.key?(:page)
-        params[:per_page] = pagination[:per_page] if pagination.key?(:per_page)
+        # Pagination and early limit (compiler mapping)
+        hits_info = apply_pagination_and_hit_limits!(params)
 
         # Grouping
-        grouping = @state[:grouping]
-        if grouping
-          field = grouping[:field]
-          limit = grouping[:limit]
-          missing_values = grouping[:missing_values]
-
-          if field
-            params[:group_by] = field.to_s
-            params[:group_limit] = limit if limit
-            params[:group_missing_values] = true if missing_values
-          end
-
-          begin
-            payload = {
-              collection: klass_name_for_inspect,
-              field: field&.to_s,
-              limit: limit,
-              missing_values: missing_values
-            }.compact
-            SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', payload) {}
-          rescue StandardError
-            # swallow observability errors
-          end
-        end
+        apply_grouping!(params)
 
         # Keep infix last for stability; include when configured or overridden
-        infix_val = option_value(opts, :infix) || cfg.default_infix
-        params[:infix] = infix_val if infix_val
+        apply_infix!(params, opts, cfg)
 
         # Ranking & typo tuning — authoritative mapping
-        if (rk = @state[:ranking])
-          begin
-            plan = SearchEngine::RankingPlan.new(relation: self, query_by: params[:query_by], ranking: rk)
-            rparams = plan.params
-            params.merge!(rparams) unless rparams.empty?
-          rescue SearchEngine::Errors::Error
-            raise
-          rescue StandardError => error
-            raise SearchEngine::Errors::InvalidOption.new(
-              "InvalidOption: ranking options could not be compiled (#{error.class}: #{error.message})",
-              doc: 'docs/ranking.md#options'
-            )
-          end
-        end
+        apply_ranking!(params)
 
         # Internal join context (for downstream components; may be stripped before HTTP)
         compile_started_ms = SearchEngine::Instrumentation.monotonic_ms
         join_ctx = build_join_context(ast_nodes: ast_nodes, orders: orders)
         params[:_join] = join_ctx unless join_ctx.nil? || join_ctx.empty?
+        instrument_join_compile(join_ctx, include_str, filter_str, sort_str, compile_started_ms)
 
         # Preset emission and merge strategies
-        if (pn = @state[:preset_name])
-          pmode = (@state[:preset_mode] || :merge).to_sym
-          params[:preset] = pn
-
-          case pmode
-          when :only
-            allowed = ESSENTIAL_PARAM_KEYS
-            minimal = {}
-            (allowed + [:preset]).each do |k|
-              minimal[k] = params[k] if params.key?(k)
-            end
-            # Preserve internal join context if present for observability
-            minimal[:_join] = params[:_join] if params.key?(:_join)
-            params = minimal
-          when :lock
-            conflicts = []
-            locked = SearchEngine.config.presets.locked_domains_set
-            params.each_key do |k|
-              next unless locked.include?(k)
-
-              params.delete(k)
-              conflicts << k
-            end
-            params[:_preset_conflicts] = conflicts unless conflicts.empty?
-
-            instrument_preset_conflicts(pmode, pn, conflicts)
-          end
-        end
-
-        # Emit compile-time JOINs event summarizing usage (no raw strings)
-        begin
-          assocs = Array(join_ctx[:assocs]).map(&:to_s)
-          used = join_ctx[:referenced_in] || {}
-          used_in = {}
-          %i[include filter sort].each do |k|
-            arr = Array(used[k]).map(&:to_s)
-            used_in[k] = arr unless arr.empty?
-          end
-
-          payload = {
-            collection: klass_name_for_inspect,
-            join_count: assocs.size,
-            assocs: (assocs unless assocs.empty?),
-            used_in: (used_in unless used_in.empty?),
-            include_len: (include_str.to_s.length unless include_str.to_s.strip.empty?),
-            filter_len: (filter_str.to_s.length unless filter_str.to_s.strip.empty?),
-            sort_len:   (sort_str.to_s.length unless sort_str.to_s.strip.empty?),
-            duration_ms: (SearchEngine::Instrumentation.monotonic_ms - compile_started_ms if compile_started_ms),
-            has_joins: !assocs.empty?
-          }
-          SearchEngine::Instrumentation.instrument('search_engine.joins.compile', payload)
-        rescue StandardError
-          # swallow observability errors
-        end
+        params = apply_presets!(params)
 
         # Synonyms/Stopwords toggles
-        unless @state[:use_synonyms].nil?
-          params[:enable_synonyms] = @state[:use_synonyms]
-          runtime_flags[:use_synonyms] = @state[:use_synonyms]
-        end
-        unless @state[:use_stopwords].nil?
-          remove = !@state[:use_stopwords]
-          params[:remove_stop_words] = remove
-          runtime_flags[:use_stopwords] = @state[:use_stopwords]
-        end
+        apply_text_processing_flags!(params, runtime_flags)
 
         # Attach internal-only runtime flags preview
         params[:_runtime_flags] = runtime_flags unless runtime_flags.empty?
 
         # Attach internal-only hit limits preview for DX surfaces; stripped client-side
-        if (hl = @state[:hit_limits])
-          hits_info[:max] = hl[:max].to_i if hl[:max]
-          params[:_hits] = hits_info unless hits_info.empty?
-        end
+        attach_hits_info!(params, hits_info)
 
         SearchEngine::CompiledParams.new(params)
       end
@@ -559,7 +329,6 @@ module SearchEngine
       # @param conflicts [Array<Symbol>]
       # @return [void]
       def instrument_preset_conflicts(mode, name, conflicts)
-        return unless defined?(SearchEngine::Instrumentation)
         return if Array(conflicts).empty?
 
         payload = {
@@ -571,6 +340,303 @@ module SearchEngine
         SearchEngine::Instrumentation.instrument('search_engine.preset.conflict', payload) {}
       rescue StandardError
         nil
+      end
+
+      private
+
+      def apply_query_basics!(params, opts, cfg)
+        q_val = option_value(opts, :q) || '*'
+        query_by_val = option_value(opts, :query_by) || cfg.default_query_by
+        params[:q] = q_val
+        params[:query_by] = query_by_val if query_by_val
+      end
+
+      def assign_filter_by!(params, ast_nodes)
+        filter_str = compiled_filter_by(ast_nodes)
+        params[:filter_by] = filter_str if filter_str
+        filter_str
+      end
+
+      def assign_sort_by!(params, orders)
+        sort_str = compiled_sort_by(orders)
+        params[:sort_by] = sort_str if sort_str
+        sort_str
+      end
+
+      def compile_selection_fields!(params)
+        include_str = compile_include_fields_string
+        params[:include_fields] = include_str unless include_str.to_s.strip.empty?
+
+        exclude_str = compile_exclude_fields_string
+        params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
+
+        [include_str, exclude_str]
+      end
+
+      def instrument_selection_compile(include_str, exclude_str)
+        included_count = 0
+        excluded_count = 0
+        nested_assocs = []
+
+        unless include_str.to_s.strip.empty?
+          include_str.split(',').each do |segment|
+            seg = segment.strip
+            if (m = seg.match(/^\$(\w+)\(([^)]*)\)$/))
+              assoc = m[1]
+              inner = m[2]
+              nested_assocs << assoc
+              inner_fields = inner.to_s.split(',').map(&:strip).reject(&:empty?)
+              included_count += inner_fields.length
+            else
+              included_count += 1
+            end
+          end
+        end
+
+        unless exclude_str.to_s.strip.empty?
+          exclude_str.split(',').each do |segment|
+            seg = segment.strip
+            if (m = seg.match(/^\$(\w+)\(([^)]*)\)$/))
+              assoc = m[1]
+              inner = m[2]
+              nested_assocs << assoc
+              inner_fields = inner.to_s.split(',').map(&:strip).reject(&:empty?)
+              excluded_count += inner_fields.length
+            else
+              excluded_count += 1
+            end
+          end
+        end
+
+        s_payload = {
+          include_count: included_count,
+          exclude_count: excluded_count,
+          nested_assoc_count: nested_assocs.uniq.length
+        }
+        SearchEngine::Instrumentation.instrument('search_engine.selection.compile', s_payload) {}
+      rescue StandardError
+        # swallow observability errors
+      end
+
+      def apply_highlighting!(params)
+        return unless (h = @state[:highlight])
+
+        hf = Array(h[:fields]).map(&:to_s).reject(&:empty?)
+        params[:highlight_fields] = hf.join(',') unless hf.empty?
+
+        hff = Array(h[:full_fields]).map(&:to_s).reject(&:empty?)
+        params[:highlight_full_fields] = hff.join(',') unless hff.empty?
+
+        params[:highlight_start_tag] = h[:start_tag] if h[:start_tag]
+        params[:highlight_end_tag] = h[:end_tag] if h[:end_tag]
+
+        params[:highlight_affix_num_tokens] = h[:affix_tokens] unless h[:affix_tokens].nil?
+        params[:snippet_threshold] = h[:snippet_threshold] unless h[:snippet_threshold].nil?
+      end
+
+      def apply_curation!(params)
+        return unless (cur = @state[:curation])
+
+        pinned = Array(cur[:pinned]).map(&:to_s).reject(&:empty?)
+        hidden = Array(cur[:hidden]).map(&:to_s).reject(&:empty?)
+        tags   = Array(cur[:override_tags]).map(&:to_s).reject(&:empty?)
+        fch    = cur[:filter_curated_hits]
+
+        params[:pinned_hits] = pinned.join(',') if pinned.any?
+        params[:hidden_hits] = hidden.join(',') if hidden.any?
+        params[:override_tags] = tags.join(',') if tags.any?
+        params[:filter_curated_hits] = fch unless fch.nil?
+
+        instrument_curation_compile(pinned, hidden, tags, cur)
+      end
+
+      def instrument_curation_compile(pinned, hidden, tags, cur)
+        c_payload = {
+          pinned_count: pinned.size.positive? ? pinned.size : nil,
+          hidden_count: hidden.size.positive? ? hidden.size : nil,
+          has_override_tags: tags.any? || nil,
+          filter_curated_hits: (cur.key?(:filter_curated_hits) ? cur[:filter_curated_hits] : nil)
+        }.compact
+        SearchEngine::Instrumentation.instrument('search_engine.curation.compile', c_payload) {}
+
+        overlap = (pinned & hidden)
+        if overlap.any?
+          SearchEngine::Instrumentation.instrument(
+            'search_engine.curation.conflict',
+            { type: :overlap, count: overlap.size }
+          ) {}
+        end
+      rescue StandardError
+        # swallow observability errors
+      end
+
+      def apply_pagination_and_hit_limits!(params)
+        hits_info = {}
+        pagination = compute_pagination
+        if (hl = @state[:hit_limits]) && hl[:early_limit]
+          if pagination.key?(:per_page) && pagination[:per_page].to_i > hl[:early_limit].to_i
+            pagination = pagination.merge(per_page: hl[:early_limit].to_i)
+            hits_info[:per_adjusted] = true
+          else
+            hits_info[:per_adjusted] = false
+          end
+          hits_info[:early_limit] = hl[:early_limit].to_i
+        end
+        params[:page] = pagination[:page] if pagination.key?(:page)
+        params[:per_page] = pagination[:per_page] if pagination.key?(:per_page)
+        hits_info
+      end
+
+      def apply_grouping!(params)
+        grouping = @state[:grouping]
+        return unless grouping
+
+        field = grouping[:field]
+        limit = grouping[:limit]
+        missing_values = grouping[:missing_values]
+
+        if field
+          params[:group_by] = field.to_s
+          params[:group_limit] = limit if limit
+          params[:group_missing_values] = true if missing_values
+        end
+
+        instrument_grouping_compile(field, limit, missing_values)
+      end
+
+      def instrument_grouping_compile(field, limit, missing_values)
+        payload = {
+          collection: klass_name_for_inspect,
+          field: field&.to_s,
+          limit: limit,
+          missing_values: missing_values
+        }.compact
+        SearchEngine::Instrumentation.instrument('search_engine.grouping.compile', payload) {}
+      rescue StandardError
+        # swallow observability errors
+      end
+
+      def apply_infix!(params, opts, cfg)
+        infix_val = option_value(opts, :infix) || cfg.default_infix
+        params[:infix] = infix_val if infix_val
+      end
+
+      def apply_ranking!(params)
+        return unless (rk = @state[:ranking])
+
+        plan = SearchEngine::RankingPlan.new(relation: self, query_by: params[:query_by], ranking: rk)
+        rparams = plan.params
+        params.merge!(rparams) unless rparams.empty?
+      rescue SearchEngine::Errors::Error
+        raise
+      rescue StandardError => error
+        raise SearchEngine::Errors::InvalidOption.new(
+          "InvalidOption: ranking options could not be compiled (#{error.class}: #{error.message})",
+          doc: 'docs/ranking.md#options'
+        )
+      end
+
+      def instrument_join_compile(join_ctx, include_str, filter_str, sort_str, compile_started_ms)
+        assocs = Array(join_ctx[:assocs]).map(&:to_s)
+        used = join_ctx[:referenced_in] || {}
+        used_in = {}
+        %i[include filter sort].each do |k|
+          arr = Array(used[k]).map(&:to_s)
+          used_in[k] = arr unless arr.empty?
+        end
+
+        payload = {
+          collection: klass_name_for_inspect,
+          join_count: assocs.size,
+          assocs: (assocs unless assocs.empty?),
+          used_in: (used_in unless used_in.empty?),
+          include_len: (include_str.to_s.length unless include_str.to_s.strip.empty?),
+          filter_len: (filter_str.to_s.length unless filter_str.to_s.strip.empty?),
+          sort_len:   (sort_str.to_s.length unless sort_str.to_s.strip.empty?),
+          duration_ms: (SearchEngine::Instrumentation.monotonic_ms - compile_started_ms if compile_started_ms),
+          has_joins: !assocs.empty?
+        }
+        SearchEngine::Instrumentation.instrument('search_engine.joins.compile', payload)
+      rescue StandardError
+        # swallow observability errors
+      end
+
+      def apply_presets!(params)
+        return params unless (pn = @state[:preset_name])
+
+        pmode = (@state[:preset_mode] || :merge).to_sym
+        params[:preset] = pn
+
+        case pmode
+        when :only
+          allowed = ESSENTIAL_PARAM_KEYS
+          minimal = {}
+          (allowed + [:preset]).each do |k|
+            minimal[k] = params[k] if params.key?(k)
+          end
+          # Preserve internal join context if present for observability
+          minimal[:_join] = params[:_join] if params.key?(:_join)
+          minimal
+        when :lock
+          conflicts = []
+          locked = SearchEngine.config.presets.locked_domains_set
+          params.each_key do |k|
+            next unless locked.include?(k)
+
+            params.delete(k)
+            conflicts << k
+          end
+          params[:_preset_conflicts] = conflicts unless conflicts.empty?
+
+          instrument_preset_conflicts(pmode, pn, conflicts)
+          params
+        else
+          params
+        end
+      end
+
+      def attach_hits_info!(params, hits_info)
+        return unless (hl = @state[:hit_limits])
+
+        hits_info[:max] = hl[:max].to_i if hl[:max]
+        params[:_hits] = hits_info unless hits_info.empty?
+      end
+
+      # Faceting block extracted for clarity
+      def apply_faceting!(params)
+        facet_fields = Array(@state[:facet_fields]).map(&:to_s).reject(&:empty?)
+        params[:facet_by] = facet_fields.join(',') unless facet_fields.empty?
+
+        caps = Array(@state[:facet_max_values]).compact
+        if caps.any?
+          valid_caps = []
+          caps.each do |v|
+            valid_caps << Integer(v)
+          rescue ArgumentError, TypeError
+            # skip invalid cap
+          end
+          max_cap = valid_caps.max
+          params[:max_facet_values] = max_cap if max_cap&.positive?
+        end
+
+        queries = Array(@state[:facet_queries])
+        return unless queries.any?
+
+        tokens = queries.map { |q| "#{q[:field]}:#{q[:expr]}" }
+        params[:facet_query] = tokens.join(',') unless tokens.empty?
+      end
+
+      # Synonyms/stopwords toggles extracted for clarity
+      def apply_text_processing_flags!(params, runtime_flags)
+        unless @state[:use_synonyms].nil?
+          params[:enable_synonyms] = @state[:use_synonyms]
+          runtime_flags[:use_synonyms] = @state[:use_synonyms]
+        end
+        return if @state[:use_stopwords].nil?
+
+        remove = !@state[:use_stopwords]
+        params[:remove_stop_words] = remove
+        runtime_flags[:use_stopwords] = @state[:use_stopwords]
       end
     end
   end
