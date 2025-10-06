@@ -62,4 +62,23 @@ class RequestBuilderTest < Minitest::Test
       req.body_json
     )
   end
+
+  def test_constants_are_frozen_and_values
+    rb = SearchEngine::Client::RequestBuilder
+    assert_equal '/collections/', rb::COLLECTIONS_PREFIX
+    assert_equal '/documents/search', rb::DOCUMENTS_SEARCH_SUFFIX
+    assert_equal '/documents', rb::DOCUMENTS_SUFFIX
+    assert_equal '/documents/import', rb::DOCUMENTS_IMPORT_SUFFIX
+    assert_equal '/collections', rb::COLLECTIONS_ROOT
+    assert_equal '/aliases/', rb::ALIASES_PREFIX
+    assert_equal '/synonyms', rb::SYNONYMS_SUFFIX
+    assert_equal '/synonyms/', rb::SYNONYMS_PREFIX
+    assert_equal '/stopwords', rb::STOPWORDS_SUFFIX
+    assert_equal '/stopwords/', rb::STOPWORDS_PREFIX
+    assert_equal '/health', rb::HEALTH_PATH
+    assert_equal 'docs/client.md#errors', rb::DOC_CLIENT_ERRORS
+
+    assert rb::DEFAULT_HEADERS_JSON.frozen?
+    assert rb::INTERNAL_ONLY_KEYS.frozen?
+  end
 end
