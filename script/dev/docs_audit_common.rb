@@ -170,7 +170,6 @@ module DocsAudit
     end
   end
 
-  # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/BlockLength
   # Parse Ruby public methods from lib/search_engine/relation.rb similar to scan_calls
   def self.parse_relation_public_methods
     relation_path = File.join(ROOT, 'lib', 'search_engine', 'relation.rb')
@@ -235,7 +234,6 @@ module DocsAudit
   rescue StandardError
     Set.new
   end
-  # rubocop:enable Metrics/AbcSize, Metrics/PerceivedComplexity, Metrics/BlockLength
 
   def self.const_from(sexp)
     return nil unless sexp.is_a?(Array)

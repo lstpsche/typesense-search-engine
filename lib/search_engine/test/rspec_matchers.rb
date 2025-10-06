@@ -13,7 +13,6 @@ if defined?(RSpec)
       # RSpec matcher to assert that an event is emitted during a block.
       # Usage:
       #   expect { rel.to_a }.to emit_event('search_engine.search').with(hash_including(collection: 'products'))
-      # rubocop:disable Metrics/BlockLength
       RSpec::Matchers.define :emit_event do |expected_name|
         supports_block_expectations
 
@@ -68,7 +67,6 @@ if defined?(RSpec)
           payload
         end
       end
-      # rubocop:enable Metrics/BlockLength
     end
   end
 end

@@ -56,35 +56,38 @@ module SearchEngine
       # Apply a single initial state key with normalization.
       # Delegates to the same normalizers used by DSL chainers.
       def apply_initial_state_key!(normalized, key, value)
-        k = key.to_sym
-        case k
-        when :filters then handle_state_filters!(normalized, value)
-        when :filters_ast then handle_state_filters_ast!(normalized, value)
-        when :ast then handle_state_ast!(normalized, value)
-        when :orders then normalized[:orders] = normalize_order(value)
-        when :select then normalized[:select] = normalize_select(Array(value))
-        when :select_nested then normalized[:select_nested] = (value || {})
-        when :select_nested_order then normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :exclude then normalized[:exclude] = normalize_select(Array(value))
-        when :exclude_nested then normalized[:exclude_nested] = (value || {})
-        when :exclude_nested_order then normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :joins then normalized[:joins] = normalize_joins(Array(value))
-        when :limit then normalized[:limit] = coerce_integer_min(value, :limit, 1)
-        when :offset then normalized[:offset] = coerce_integer_min(value, :offset, 0)
-        when :page then normalized[:page] = coerce_integer_min(value, :page, 1)
-        when :per_page then normalized[:per_page] = coerce_integer_min(value, :per, 1)
-        when :options then normalized[:options] = (value || {}).dup
-        when :grouping then normalized[:grouping] = normalize_grouping(value)
-        when :preset_name then normalized[:preset_name] = value&.to_s&.strip
-        when :preset_mode then normalized[:preset_mode] = value&.to_sym
-        when :curation then normalized[:curation] = normalize_curation_input(value)
-        when :facet_fields then normalized[:facet_fields] = Array(value).flatten.compact
-        when :facet_max_values then normalized[:facet_max_values] = Array(value).flatten.compact
-        when :facet_queries then normalized[:facet_queries] = Array(value).flatten.compact
-        when :highlight then normalized[:highlight] = normalize_highlight_input(value)
-        when :ranking then normalized[:ranking] = normalize_ranking_input(value || {})
-        when :hit_limits then normalized[:hit_limits] = normalize_hit_limits_input(value || {})
-        end
+        handlers = {
+          filters: :handle_state_filters!,
+          filters_ast: :handle_state_filters_ast!,
+          ast: :handle_state_ast!,
+          orders: :handle_state_orders!,
+          select: :handle_state_select!,
+          select_nested: :handle_state_select_nested!,
+          select_nested_order: :handle_state_select_nested_order!,
+          exclude: :handle_state_exclude!,
+          exclude_nested: :handle_state_exclude_nested!,
+          exclude_nested_order: :handle_state_exclude_nested_order!,
+          joins: :handle_state_joins!,
+          limit: :handle_state_limit!,
+          offset: :handle_state_offset!,
+          page: :handle_state_page!,
+          per_page: :handle_state_per_page!,
+          options: :handle_state_options!,
+          grouping: :handle_state_grouping!,
+          preset_name: :handle_state_preset_name!,
+          preset_mode: :handle_state_preset_mode!,
+          curation: :handle_state_curation!,
+          facet_fields: :handle_state_facet_fields!,
+          facet_max_values: :handle_state_facet_max_values!,
+          facet_queries: :handle_state_facet_queries!,
+          highlight: :handle_state_highlight!,
+          ranking: :handle_state_ranking!,
+          hit_limits: :handle_state_hit_limits!
+        }
+        h = handlers[key.to_sym]
+        return unless h
+
+        send(h, normalized, value)
       end
 
       private
@@ -126,6 +129,50 @@ module SearchEngine
         raw_nodes = legacy.map { |fragment| SearchEngine::AST.raw(String(fragment)) }
         state[:ast] = raw_nodes
         nil
+      end
+
+      def handle_state_options!(normalized, value)
+        normalized[:options] = (value || {}).dup
+      end
+
+      def handle_state_grouping!(normalized, value)
+        normalized[:grouping] = normalize_grouping(value)
+      end
+
+      def handle_state_preset_name!(normalized, value)
+        normalized[:preset_name] = value&.to_s&.strip
+      end
+
+      def handle_state_preset_mode!(normalized, value)
+        normalized[:preset_mode] = value&.to_sym
+      end
+
+      def handle_state_curation!(normalized, value)
+        normalized[:curation] = normalize_curation_input(value)
+      end
+
+      def handle_state_facet_fields!(normalized, value)
+        normalized[:facet_fields] = Array(value).flatten.compact
+      end
+
+      def handle_state_facet_max_values!(normalized, value)
+        normalized[:facet_max_values] = Array(value).flatten.compact
+      end
+
+      def handle_state_facet_queries!(normalized, value)
+        normalized[:facet_queries] = Array(value).flatten.compact
+      end
+
+      def handle_state_highlight!(normalized, value)
+        normalized[:highlight] = normalize_highlight_input(value)
+      end
+
+      def handle_state_ranking!(normalized, value)
+        normalized[:ranking] = normalize_ranking_input(value || {})
+      end
+
+      def handle_state_hit_limits!(normalized, value)
+        normalized[:hit_limits] = normalize_hit_limits_input(value || {})
       end
 
       # Deep duplicate Hash/Array trees; leaves are returned as-is.

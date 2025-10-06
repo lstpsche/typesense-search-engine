@@ -552,71 +552,85 @@ module SearchEngine
       def normalize_order(value)
         return [] if value.nil?
 
-        case value
-        when Hash
-          value.flat_map do |k, dir|
-            if dir.is_a?(Hash)
-              assoc = k.to_sym
-              @klass.join_for(assoc)
-              SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, assoc, context: 'sorting')
+        dispatch = {
+          Hash => :normalize_order_hash,
+          String => :normalize_order_string,
+          Array => :normalize_order_array,
+          Symbol => :normalize_order_symbol
+        }
+        meth = dispatch[value.class]
+        return send(meth, value) if meth
 
-              dir.flat_map do |field_name, d|
-                field = field_name.to_s.strip
-                raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+        raise ArgumentError, "order: unsupported input #{value.class}"
+      end
 
-                begin
-                  cfg = @klass.join_for(assoc)
-                  SearchEngine::Joins::Guard.validate_joined_field!(cfg, field)
-                rescue StandardError
-                  nil
-                end
+      def normalize_order_hash(value)
+        value.flat_map do |k, dir|
+          if dir.is_a?(Hash)
+            assoc = k.to_sym
+            @klass.join_for(assoc)
+            SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, assoc, context: 'sorting')
 
-                direction = d.to_s.strip.downcase
-                unless %w[asc desc].include?(direction)
-                  raise ArgumentError,
-                        "order: direction must be :asc or :desc (got #{d.inspect} for field #{field_name.inspect})"
-                end
-
-                "$#{assoc}.#{field}:#{direction}"
-              end
-            else
-              field = k.to_s.strip
+            dir.flat_map do |field_name, d|
+              field = field_name.to_s.strip
               raise ArgumentError, 'order: field name must be non-empty' if field.empty?
 
-              direction = dir.to_s.strip.downcase
-              unless %w[asc desc].include?(direction)
-                raise ArgumentError,
-                      "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
+              begin
+                cfg = @klass.join_for(assoc)
+                SearchEngine::Joins::Guard.validate_joined_field!(cfg, field)
+              rescue StandardError
+                nil
               end
 
-              "#{field}:#{direction}"
-            end
-          end
-        when String
-          value.split(',').map(&:strip).reject(&:empty?).map do |chunk|
-            name, direction = chunk.split(':', 2).map { |p| p.to_s.strip }
-            if name.empty? || direction.empty?
-              raise ArgumentError, "order: expected 'field:direction' (got #{chunk.inspect})"
-            end
+              direction = d.to_s.strip.downcase
+              unless %w[asc desc].include?(direction)
+                raise ArgumentError,
+                      "order: direction must be :asc or :desc (got #{d.inspect} for field #{field_name.inspect})"
+              end
 
-            downcased = direction.downcase
-            unless %w[asc desc].include?(downcased)
+              "$#{assoc}.#{field}:#{direction}"
+            end
+          else
+            field = k.to_s.strip
+            raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+            direction = dir.to_s.strip.downcase
+            unless %w[asc desc].include?(direction)
               raise ArgumentError,
-                    "order: direction must be :asc or :desc (got #{direction.inspect} for field #{name.inspect})"
+                    "order: direction must be :asc or :desc (got #{dir.inspect} for field #{k.inspect})"
             end
 
-            "#{name}:#{downcased}"
+            "#{field}:#{direction}"
           end
-        when Array
-          value.flat_map { |v| normalize_order(v) }
-        when Symbol
-          field = value.to_s.strip
-          raise ArgumentError, 'order: field name must be non-empty' if field.empty?
-
-          ["#{field}:asc"]
-        else
-          raise ArgumentError, "order: unsupported input #{value.class}"
         end
+      end
+
+      def normalize_order_string(value)
+        value.split(',').map(&:strip).reject(&:empty?).map do |chunk|
+          name, direction = chunk.split(':', 2).map { |p| p.to_s.strip }
+          if name.empty? || direction.empty?
+            raise ArgumentError, "order: expected 'field:direction' (got #{chunk.inspect})"
+          end
+
+          downcased = direction.downcase
+          unless %w[asc desc].include?(downcased)
+            raise ArgumentError,
+                  "order: direction must be :asc or :desc (got #{direction.inspect} for field #{name.inspect})"
+          end
+
+          "#{name}:#{downcased}"
+        end
+      end
+
+      def normalize_order_array(value)
+        value.flat_map { |v| normalize_order(v) }
+      end
+
+      def normalize_order_symbol(value)
+        field = value.to_s.strip
+        raise ArgumentError, 'order: field name must be non-empty' if field.empty?
+
+        ["#{field}:asc"]
       end
 
       # Dedupe by field with last-wins semantics while preserving last positions.

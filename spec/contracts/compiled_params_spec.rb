@@ -110,7 +110,7 @@ class CompiledParamsContractSpec
 
   Case = Struct.new(:idx, :name, :builder, keyword_init: true)
 
-  def cases # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  def cases
     @cases ||= [
       -> { Case.new(idx: 1, name: 'base_query', builder: -> { p_rel.options(q: 'milk') }) }.call,
       lambda {

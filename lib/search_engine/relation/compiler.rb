@@ -7,7 +7,7 @@ module SearchEngine
     module Compiler
       # Compile immutable relation state and options into Typesense body params.
       # @return [SearchEngine::CompiledParams]
-      def to_typesense_params # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
+      def to_typesense_params
         cfg = SearchEngine.config
         opts = @state[:options] || {}
 
