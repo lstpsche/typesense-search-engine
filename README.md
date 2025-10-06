@@ -33,48 +33,74 @@ end
 SearchEngine::Product.where(name: "milk").select(:id, :name).limit(5).to_a
 ```
 
-See Quickstart for details → [docs/quickstart.md])(https://github.com/lstpsche/typesense-search-engine/wiki).
+See Quickstart → [Quickstart](https://github.com/lstpsche/typesense-search-engine/wiki/Quickstart).
+
+## Usage examples
+
+```ruby
+# Model
+class SearchEngine::Product < SearchEngine::Base
+  collection "products"
+  attribute :id, :integer
+  attribute :name, :string
+end
+
+# Basic query
+SearchEngine::Product
+  .where(name: "milk")
+  .select(:id, :name)
+  .order(price_cents: :asc)
+  .limit(5)
+  .to_a
+
+# JOIN + nested selection
+SearchEngine::Product
+  .joins(:brands)
+  .select(:id, :name, brands: %i[id name])
+  .where(brands: { name: "Acme" })
+  .per(10)
+  .to_a
+
+# Faceting + grouping
+rel = SearchEngine::Product
+        .facet_by(:brand_id, max_values: 5)
+        .facet_by(:category)
+        .group_by(:brand_id, limit: 3)
+params = rel.to_h # compiled Typesense params
+
+# Multi-search
+result_set = SearchEngine.multi_search(common: { query_by: SearchEngine.config.default_query_by }) do |m|
+  m.add :products, SearchEngine::Product.where("name:~rud").per(10)
+  m.add :brands,   SearchEngine::Brand.all.per(5)
+end
+result_set[:products].found
+
+# DX helpers
+rel = SearchEngine::Product.where(category: "snacks").limit(3)
+rel.dry_run!       # => { url:, body:, url_opts: }
+rel.to_params_json # => pretty JSON with redactions
+rel.to_curl        # => single-line curl with redacted API key
+```
 
 ## Documentation
 
-- **Quickstart**: [docs/quickstart.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Relation & DSL Guide**: [docs/relation_guide.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Cookbook (patterns)**: [docs/cookbook_queries.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Multi‑search Guide**: [docs/multi_search_guide.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **JOINs, Selection & Grouping**: [docs/joins_selection_grouping.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Presets & Curation playbook**: [docs/presets_curation_playbook.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Observability, DX & Testing**: [docs/observability_dx_testing.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **CLI (doctor)**: [docs/cli.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Schema & Indexer E2E**: [docs/schema_indexer_e2e.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- **Testing utilities**: [docs/testing.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
+See the wiki → [Home](https://github.com/lstpsche/typesense-search-engine/wiki)
 
 ## Example app
 
-See `examples/demo_shop` — demonstrates single/multi search, JOINs, grouping, presets/curation, and DX/observability. Supports offline mode via the stub client (see [docs/testing.md])(https://github.com/lstpsche/typesense-search-engine/wiki)).
+See `examples/demo_shop` — demonstrates single/multi search, JOINs, grouping, presets/curation, and DX/observability. Supports offline mode via the stub client (see [Testing](https://github.com/lstpsche/typesense-search-engine/wiki/Testing)).
 
-## Mermaid & screenshots
 
-Small diagrams illustrate key flows:
-- Request flow: [docs/quickstart.md → Request flow])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- Doctor flow: [docs/cli.md → Doctor flow])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- Docs portal overview: [docs/index.md])(https://github.com/lstpsche/typesense-search-engine/wiki)
 
 ## Contributing
 
-See [docs/contributing/docs_style.md])(https://github.com/lstpsche/typesense-search-engine/wiki). Follow YARDoc for public APIs, add backlinks on docs landing pages, and redact secrets in examples.
+See [Docs style guide](https://github.com/lstpsche/typesense-search-engine/wiki/contributing/docs_style). Follow YARDoc for public APIs, add backlinks on docs landing pages, and redact secrets in examples.
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
 
----
 
-### Deep links
-
-- Quickstart → [Installation])(https://github.com/lstpsche/typesense-search-engine/wiki), [Configure initializer])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- DX → [Helpers & examples (`dry_run!`, `to_params_json`, `to_curl`)])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- Ranking → [Ranking & typo tuning])(https://github.com/lstpsche/typesense-search-engine/wiki)
-- CLI → [Doctor flow])(https://github.com/lstpsche/typesense-search-engine/wiki)
 
 <!-- Badge references (placeholders) -->
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/lstpsche/typesense-search-engine/ci.yml?branch=main
