@@ -21,6 +21,14 @@ module SearchEngine
       cfg.warn_if_incomplete!
     end
 
+    # Ignore hyphenated compatibility shim so Zeitwerk doesn't try to constantize it.
+    initializer 'search_engine.zeitwerk_ignores', before: :set_autoload_paths do
+      # Rails 6.1+ exposes a loader per engine via `loader`. Guard presence for safety.
+      loader = respond_to?(:loader) ? self.loader : nil
+      shim = root.join('lib', 'typesense-search-engine.rb').to_s
+      loader&.ignore(shim)
+    end
+
     initializer 'search_engine.observability' do
       cfg = SearchEngine.config
 
