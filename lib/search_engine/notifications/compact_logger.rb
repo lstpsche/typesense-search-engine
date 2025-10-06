@@ -3,6 +3,7 @@
 require 'logger'
 require 'active_support/notifications'
 require 'json'
+require 'search_engine/logging/format_helpers'
 
 module SearchEngine
   module Notifications
@@ -42,81 +43,14 @@ module SearchEngine
       # @return [Array<Object>] subscription handles that can be passed to {.unsubscribe}
       # @since M8
       # @see docs/observability.md#logging
-      def self.subscribe(logger: default_logger, level: :info, include_params: false, format: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+      def self.subscribe(logger: default_logger, level: :info, include_params: false, format: nil)
         return [] unless defined?(ActiveSupport::Notifications)
 
         severity = map_level(level)
         log = logger || default_logger
         fmt = (format || (SearchEngine.config.observability&.log_format || :kv)).to_sym
 
-        search_sub = ActiveSupport::Notifications.subscribe(EVENT_SEARCH) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_line(log, severity, ev, include_params: include_params, multi: false)
-        end
-
-        multi_sub = ActiveSupport::Notifications.subscribe(EVENT_MULTI) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_line(log, severity, ev, include_params: include_params, multi: true)
-        end
-
-        schema_diff_sub = ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_DIFF) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_schema_diff(log, severity, ev, format: fmt)
-        end
-
-        schema_apply_sub = ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_APPLY) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_schema_apply(log, severity, ev, format: fmt)
-        end
-
-        joins_compile_sub = ActiveSupport::Notifications.subscribe(EVENT_JOINS_COMPILE) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_joins_compile(log, severity, ev, format: fmt)
-        end
-
-        part_start_sub = ActiveSupport::Notifications.subscribe(EVENT_PARTITION_START) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_partition_start(log, severity, ev, format: fmt)
-        end
-
-        part_finish_sub = ActiveSupport::Notifications.subscribe(EVENT_PARTITION_FINISH) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_partition_finish(log, severity, ev, format: fmt)
-        end
-
-        batch_sub = ActiveSupport::Notifications.subscribe(EVENT_BATCH_IMPORT) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_batch_import(log, severity, ev, format: fmt)
-        end
-
-        stale_sub = ActiveSupport::Notifications.subscribe(EVENT_DELETE_STALE) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_delete_stale(log, severity, ev, format: fmt)
-        end
-
-        # Backward-compat for legacy stale events, map to new formatter
-        legacy_started = ActiveSupport::Notifications.subscribe(LEGACY_STALE_STARTED) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_delete_stale(log, severity, ev, format: fmt, legacy: :started)
-        end
-        legacy_finished = ActiveSupport::Notifications.subscribe(LEGACY_STALE_FINISHED) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_delete_stale(log, severity, ev, format: fmt, legacy: :finished)
-        end
-        legacy_error = ActiveSupport::Notifications.subscribe(LEGACY_STALE_ERROR) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_delete_stale(log, severity, ev, format: fmt, legacy: :error)
-        end
-        legacy_skipped = ActiveSupport::Notifications.subscribe(LEGACY_STALE_SKIPPED) do |*args|
-          ev = ActiveSupport::Notifications::Event.new(*args)
-          emit_delete_stale(log, severity, ev, format: fmt, legacy: :skipped)
-        end
-
-        @last_handle = [
-          search_sub, multi_sub, schema_diff_sub, schema_apply_sub, joins_compile_sub,
-          part_start_sub, part_finish_sub, batch_sub, stale_sub,
-          legacy_started, legacy_finished, legacy_error, legacy_skipped
-        ]
+        @last_handle = build_subscriptions(log, severity, include_params: include_params, fmt: fmt)
       end
 
       # Unsubscribe a previous subscription set.
@@ -330,19 +264,13 @@ module SearchEngine
 
       # Emit according to format
       def self.emit(logger, severity, hash, format)
-        case format
-        when :json
-          line = JSON.generate(hash.compact)
-          log_with_level(logger, severity, line)
-        else
-          parts = []
-          hash.each do |k, v|
-            next if v.nil?
-
-            parts << "#{k}=#{v}"
+        line =
+          if format == :json
+            JSON.generate(hash.compact)
+          else
+            SearchEngine::Logging::FormatHelpers.kv_compact(hash)
           end
-          log_with_level(logger, severity, parts.join(' '))
-        end
+        log_with_level(logger, severity, line)
       end
 
       def self.normalize_stale_payload(p, legacy: nil)
@@ -531,67 +459,93 @@ module SearchEngine
       private_class_method :log_with_level
 
       # Build JSON object for search/multi events
-      def self.build_json_hash(payload, duration_ms:, multi:, include_params: false) # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+      def self.build_json_hash(payload, duration_ms:, multi:, include_params: false)
         if multi
-          labels = Array(payload[:labels]).map(&:to_s)
-          labels = Array(payload[:collections]).map(&:to_s) if labels.empty? || labels.all?(&:empty?)
-          {
-            'event' => 'multi',
-            'labels' => (labels unless labels.empty?),
-            'count' => payload[:searches_count] || (payload[:params].is_a?(Array) ? payload[:params].size : nil),
-            'status' => payload[:http_status] || payload[:status] || 'ok',
-            'duration.ms' => duration_ms,
-            'cache' => extract_cache_flag(payload[:url_opts]),
-            'ttl' => extract_ttl(payload[:url_opts])
-          }.compact
+          build_json_hash_multi(payload, duration_ms: duration_ms)
         else
-          params_hash = if payload[:params_preview].is_a?(Hash)
-                          payload[:params_preview]
-                        elsif payload[:params].is_a?(Hash)
-                          payload[:params]
-                        else
-                          {}
-                        end
-          h = {
-            'event' => 'search',
-            'collection' => payload[:collection],
-            'status' => payload[:http_status] || payload[:status] || 'ok',
-            'duration.ms' => duration_ms,
-            'cache' => extract_cache_flag(payload[:url_opts]),
-            'ttl' => extract_ttl(payload[:url_opts]),
-            'selection_include_count' => (payload[:selection_include_count] || 0).to_i,
-            'selection_exclude_count' => (payload[:selection_exclude_count] || 0).to_i,
-            'selection_nested_assoc_count' => (payload[:selection_nested_assoc_count] || 0).to_i,
-            'preset_name' => payload[:preset_name],
-            'preset_mode' => payload[:preset_mode],
-            'preset_pruned_keys_count' => payload[:preset_pruned_keys_count],
-            'preset_locked_domains_count' => payload[:preset_locked_domains_count],
-            'preset_pruned_keys' => begin
-              arr = Array(payload[:preset_pruned_keys])
-              arr.empty? ? nil : arr.map(&:to_s)
-            end,
-            'curation_pinned_count' => payload[:curation_pinned_count],
-            'curation_hidden_count' => payload[:curation_hidden_count],
-            'curation_has_override_tags' => payload[:curation_has_override_tags],
-            'curation_filter_flag' => (payload.key?(:curation_filter_flag) ? payload[:curation_filter_flag] : nil),
-            'curation_conflict_type' => payload[:curation_conflict_type],
-            'curation_conflict_count' => payload[:curation_conflict_count]
-          }
-          # Grouping fields at top-level when present
-          h['group_by'] = params_hash[:group_by] if params_hash.key?(:group_by)
-          h['group_limit'] = params_hash[:group_limit] if params_hash.key?(:group_limit)
-          h['group_missing_values'] = true if params_hash[:group_missing_values]
-
-          if include_params
-            %i[q query_by per_page page infix].each do |key|
-              h[key.to_s] = params_hash[key] if params_hash.key?(key)
-            end
-            h['filter_by'] = '***' if params_hash.key?(:filter_by)
-          end
-          h.compact
+          build_json_hash_single(payload, duration_ms: duration_ms, include_params: include_params)
         end
       end
       private_class_method :build_json_hash
+
+      def self.build_json_hash_multi(payload, duration_ms:)
+        labels = Array(payload[:labels]).map(&:to_s)
+        labels = Array(payload[:collections]).map(&:to_s) if labels.empty? || labels.all?(&:empty?)
+        {
+          'event' => 'multi',
+          'labels' => (labels unless labels.empty?),
+          'count' => payload[:searches_count] || (payload[:params].is_a?(Array) ? payload[:params].size : nil),
+          'status' => payload[:http_status] || payload[:status] || 'ok',
+          'duration.ms' => duration_ms,
+          'cache' => extract_cache_flag(payload[:url_opts]),
+          'ttl' => extract_ttl(payload[:url_opts])
+        }.compact
+      end
+      private_class_method :build_json_hash_multi
+
+      def self.build_json_hash_single(payload, duration_ms:, include_params:)
+        params_hash = extract_params_hash(payload)
+        h = base_single_json_hash(payload, duration_ms)
+        attach_grouping_fields!(h, params_hash)
+        attach_selected_params!(h, params_hash) if include_params
+        h.compact
+      end
+      private_class_method :build_json_hash_single
+
+      def self.extract_params_hash(payload)
+        if payload[:params_preview].is_a?(Hash)
+          payload[:params_preview]
+        elsif payload[:params].is_a?(Hash)
+          payload[:params]
+        else
+          {}
+        end
+      end
+      private_class_method :extract_params_hash
+
+      def self.base_single_json_hash(payload, duration_ms)
+        {
+          'event' => 'search',
+          'collection' => payload[:collection],
+          'status' => payload[:http_status] || payload[:status] || 'ok',
+          'duration.ms' => duration_ms,
+          'cache' => extract_cache_flag(payload[:url_opts]),
+          'ttl' => extract_ttl(payload[:url_opts]),
+          'selection_include_count' => (payload[:selection_include_count] || 0).to_i,
+          'selection_exclude_count' => (payload[:selection_exclude_count] || 0).to_i,
+          'selection_nested_assoc_count' => (payload[:selection_nested_assoc_count] || 0).to_i,
+          'preset_name' => payload[:preset_name],
+          'preset_mode' => payload[:preset_mode],
+          'preset_pruned_keys_count' => payload[:preset_pruned_keys_count],
+          'preset_locked_domains_count' => payload[:preset_locked_domains_count],
+          'preset_pruned_keys' => begin
+            arr = Array(payload[:preset_pruned_keys])
+            arr.empty? ? nil : arr.map(&:to_s)
+          end,
+          'curation_pinned_count' => payload[:curation_pinned_count],
+          'curation_hidden_count' => payload[:curation_hidden_count],
+          'curation_has_override_tags' => payload[:curation_has_override_tags],
+          'curation_filter_flag' => (payload.key?(:curation_filter_flag) ? payload[:curation_filter_flag] : nil),
+          'curation_conflict_type' => payload[:curation_conflict_type],
+          'curation_conflict_count' => payload[:curation_conflict_count]
+        }
+      end
+      private_class_method :base_single_json_hash
+
+      def self.attach_grouping_fields!(h, params_hash)
+        h['group_by'] = params_hash[:group_by] if params_hash.key?(:group_by)
+        h['group_limit'] = params_hash[:group_limit] if params_hash.key?(:group_limit)
+        h['group_missing_values'] = true if params_hash[:group_missing_values]
+      end
+      private_class_method :attach_grouping_fields!
+
+      def self.attach_selected_params!(h, params_hash)
+        %i[q query_by per_page page infix].each do |key|
+          h[key.to_s] = params_hash[key] if params_hash.key?(key)
+        end
+        h['filter_by'] = '***' if params_hash.key?(:filter_by)
+      end
+      private_class_method :attach_selected_params!
 
       def self.extract_cache_flag(url_opts)
         return nil unless url_opts.is_a?(Hash)
@@ -606,6 +560,116 @@ module SearchEngine
         url_opts[:cache_ttl]
       end
       private_class_method :extract_ttl
+
+      def self.build_subscriptions(log, severity, include_params:, fmt:)
+        handles = []
+        handles << subscribe_search(log, severity, include_params)
+        handles << subscribe_multi(log, severity, include_params)
+        handles << subscribe_schema_diff(log, severity, fmt)
+        handles << subscribe_schema_apply(log, severity, fmt)
+        handles << subscribe_joins_compile(log, severity, fmt)
+        handles << subscribe_partition_start(log, severity, fmt)
+        handles << subscribe_partition_finish(log, severity, fmt)
+        handles << subscribe_batch_import(log, severity, fmt)
+        handles << subscribe_delete_stale(log, severity, fmt)
+        handles.concat(subscribe_legacy_stale(log, severity, fmt))
+        handles
+      end
+      private_class_method :build_subscriptions
+
+      def self.subscribe_search(log, severity, include_params)
+        ActiveSupport::Notifications.subscribe(EVENT_SEARCH) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_line(log, severity, ev, include_params: include_params, multi: false)
+        end
+      end
+      private_class_method :subscribe_search
+
+      def self.subscribe_multi(log, severity, include_params)
+        ActiveSupport::Notifications.subscribe(EVENT_MULTI) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_line(log, severity, ev, include_params: include_params, multi: true)
+        end
+      end
+      private_class_method :subscribe_multi
+
+      def self.subscribe_schema_diff(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_DIFF) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_schema_diff(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_schema_diff
+
+      def self.subscribe_schema_apply(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_SCHEMA_APPLY) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_schema_apply(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_schema_apply
+
+      def self.subscribe_joins_compile(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_JOINS_COMPILE) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_joins_compile(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_joins_compile
+
+      def self.subscribe_partition_start(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_PARTITION_START) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_partition_start(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_partition_start
+
+      def self.subscribe_partition_finish(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_PARTITION_FINISH) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_partition_finish(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_partition_finish
+
+      def self.subscribe_batch_import(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_BATCH_IMPORT) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_batch_import(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_batch_import
+
+      def self.subscribe_delete_stale(log, severity, fmt)
+        ActiveSupport::Notifications.subscribe(EVENT_DELETE_STALE) do |*args|
+          ev = ActiveSupport::Notifications::Event.new(*args)
+          emit_delete_stale(log, severity, ev, format: fmt)
+        end
+      end
+      private_class_method :subscribe_delete_stale
+
+      def self.subscribe_legacy_stale(log, severity, fmt)
+        [
+          ActiveSupport::Notifications.subscribe(LEGACY_STALE_STARTED) do |*args|
+            ev = ActiveSupport::Notifications::Event.new(*args)
+            emit_delete_stale(log, severity, ev, format: fmt, legacy: :started)
+          end,
+          ActiveSupport::Notifications.subscribe(LEGACY_STALE_FINISHED) do |*args|
+            ev = ActiveSupport::Notifications::Event.new(*args)
+            emit_delete_stale(log, severity, ev, format: fmt, legacy: :finished)
+          end,
+          ActiveSupport::Notifications.subscribe(LEGACY_STALE_ERROR) do |*args|
+            ev = ActiveSupport::Notifications::Event.new(*args)
+            emit_delete_stale(log, severity, ev, format: fmt, legacy: :error)
+          end,
+          ActiveSupport::Notifications.subscribe(LEGACY_STALE_SKIPPED) do |*args|
+            ev = ActiveSupport::Notifications::Event.new(*args)
+            emit_delete_stale(log, severity, ev, format: fmt, legacy: :skipped)
+          end
+        ]
+      end
+      private_class_method :subscribe_legacy_stale
     end
   end
 end

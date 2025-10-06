@@ -2,6 +2,7 @@
 
 require 'json'
 require 'active_support/notifications'
+require 'search_engine/logging/format_helpers'
 
 module SearchEngine
   # Structured logging subscriber for unified instrumentation events.
@@ -133,8 +134,6 @@ module SearchEngine
 
       # --- Formatting helpers ---
 
-      EM_DASH = '—'
-
       def format_compact(event)
         p = event.payload || {}
         name = event.name
@@ -150,8 +149,8 @@ module SearchEngine
         )
         return specialized if specialized
 
-        groups = value_or_dash(p[:groups_count])
-        preset = p[:preset_name] || value_or_dash(nil)
+        groups = SearchEngine::Logging::FormatHelpers.value_or_dash(p[:groups_count])
+        preset = p[:preset_name] || SearchEngine::Logging::FormatHelpers.value_or_dash(nil)
         pinned = p[:curation_pinned_count] || p[:pinned_count] || 0
         hidden = p[:curation_hidden_count] || p[:hidden_count] || 0
 
@@ -234,9 +233,9 @@ module SearchEngine
         parts << "[#{short}]"
         parts << "id=#{cid}"
         parts << "coll=#{collection}" if collection
-        parts << "fields=#{p[:fields_count] || '—'}"
-        parts << "queries=#{p[:queries_count] || '—'}"
-        parts << "max=#{p[:max_facet_values] || '—'}"
+        parts << "fields=#{p[:fields_count] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "queries=#{p[:queries_count] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "max=#{p[:max_facet_values] || SearchEngine::Logging::FormatHelpers::DASH}"
         parts << "dur=#{duration}ms"
         parts.join(' ')
       end
@@ -246,10 +245,10 @@ module SearchEngine
         parts << "[#{short}]"
         parts << "id=#{cid}"
         parts << "coll=#{collection}" if collection
-        parts << "fields=#{p[:fields_count] || '—'}"
-        parts << "full=#{p[:full_fields_count] || '—'}"
-        parts << "affix=#{display_or_dash(p, :affix_tokens)}"
-        parts << "tag=#{p[:tag_kind] || '—'}"
+        parts << "fields=#{p[:fields_count] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "full=#{p[:full_fields_count] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "affix=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :affix_tokens)}"
+        parts << "tag=#{p[:tag_kind] || SearchEngine::Logging::FormatHelpers::DASH}"
         parts << "dur=#{duration}ms"
         parts.join(' ')
       end
@@ -259,9 +258,9 @@ module SearchEngine
         parts << "[#{short}]"
         parts << "id=#{cid}"
         parts << "coll=#{collection}" if collection
-        parts << "syn=#{display_or_dash(p, :use_synonyms)}"
-        parts << "stop=#{display_or_dash(p, :use_stopwords)}"
-        parts << "src=#{p[:source] || '—'}"
+        parts << "syn=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :use_synonyms)}"
+        parts << "stop=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :use_stopwords)}"
+        parts << "src=#{p[:source] || SearchEngine::Logging::FormatHelpers::DASH}"
         parts << "dur=#{duration}ms"
         parts.join(' ')
       end
@@ -276,8 +275,8 @@ module SearchEngine
         parts << "id=#{cid}"
         parts << "coll=#{collection}" if collection
         parts << "shapes=#{point}/#{rect}/#{circle}"
-        parts << "sort=#{p[:sort_mode] || '—'}"
-        parts << "radius=#{p[:radius_bucket] || '—'}"
+        parts << "sort=#{p[:sort_mode] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "radius=#{p[:radius_bucket] || SearchEngine::Logging::FormatHelpers::DASH}"
         parts << "dur=#{duration}ms"
         parts.join(' ')
       end
@@ -287,10 +286,10 @@ module SearchEngine
         parts << "[#{short}]"
         parts << "id=#{cid}"
         parts << "coll=#{collection}" if collection
-        parts << "qvec=#{display_or_dash(p, :query_vector_present)}"
-        parts << "dims=#{p[:dims] || '—'}"
-        parts << "hybrid=#{p[:hybrid_weight] || '—'}"
-        parts << "ann=#{display_or_dash(p, :ann_params_present)}"
+        parts << "qvec=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :query_vector_present)}"
+        parts << "dims=#{p[:dims] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "hybrid=#{p[:hybrid_weight] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "ann=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :ann_params_present)}"
         parts << "dur=#{duration}ms"
         parts.join(' ')
       end
@@ -300,11 +299,11 @@ module SearchEngine
         parts << "[#{short}]"
         parts << "id=#{cid}"
         parts << "coll=#{collection}" if collection
-        parts << "early=#{display_or_dash(p, :early_limit)}"
-        parts << "max=#{display_or_dash(p, :validate_max)}"
-        parts << "strat=#{p[:applied_strategy] || '—'}"
-        parts << "trig=#{p[:triggered] || '—'}"
-        parts << "total=#{display_or_dash(p, :total_hits)}"
+        parts << "early=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :early_limit)}"
+        parts << "max=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :validate_max)}"
+        parts << "strat=#{p[:applied_strategy] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "trig=#{p[:triggered] || SearchEngine::Logging::FormatHelpers::DASH}"
+        parts << "total=#{SearchEngine::Logging::FormatHelpers.display_or_dash(p, :total_hits)}"
         parts << "status=#{status}"
         parts << "dur=#{duration}ms"
         parts.join(' ')
@@ -339,13 +338,6 @@ module SearchEngine
         end
       end
 
-      def display_or_dash(payload, key)
-        return '—' unless payload.key?(key)
-
-        val = payload[key]
-        val.nil? ? '—' : val
-      end
-
       def safe_duration(event, payload)
         d = (event.respond_to?(:duration) ? event.duration : payload[:duration_ms]).to_f
         d = payload[:duration_ms].to_f if d.zero? && payload[:duration_ms]
@@ -367,10 +359,6 @@ module SearchEngine
         rng = (Thread.current[:__se_log_rng__] ||= Random.new)
         val = rng.rand(0x10000)
         val.to_s(16).rjust(4, '0')
-      end
-
-      def value_or_dash(v)
-        v.nil? || (v.respond_to?(:empty?) && v.empty?) ? EM_DASH : v
       end
 
       def safe_jsonable(obj)
