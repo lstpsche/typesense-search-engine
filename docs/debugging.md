@@ -50,7 +50,7 @@ Sample output:
 
 ```text
 SearchEngine::Product Relation
-  where: active:=true AND brand_id IN [1, 2]
+  where: active:=true AND brand_id NOT IN [1, 2]
   order: updated_at:desc
   select: id,name
   page/per: 2/20

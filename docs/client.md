@@ -69,6 +69,12 @@ Public errors are exposed via `SearchEngine::Errors`:
 
 See `lib/search_engine/errors.rb` for details.
 
+### Internals boundary
+
+- `SearchEngine::Client::RequestBuilder` assembles concrete request shapes (HTTP method, path, body) from compiled params. It has no network concerns.
+- `SearchEngine::Client::HttpAdapter` executes an assembled request using the injected `Typesense::Client`. It has no knowledge of Typesense domain semantics.
+- These roles clarify responsibilities; there is no change to public behavior.
+
 #### Troubleshooting
 
 - **Timeout / Connection**: Check host/port/protocol and network reachability.

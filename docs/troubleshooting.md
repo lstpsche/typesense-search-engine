@@ -19,10 +19,10 @@ Related: [Observability](./observability.md), [CLI](./cli.md), [Testing](./testi
 
 - `group_limit` ignored
   - Provide a positive integer; omitted when `nil`
-  - See [Grouping → Mapping](./grouping.md#mapping-ruby-dsl--typesense-params)
+  - See [Grouping → Mapping](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)
 - Unexpected missing‑values behavior
   - Set `missing_values: true` explicitly
-  - See [Grouping → State → Params](./grouping.md#state--params)
+  - See [Grouping → State → Params](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)
 
 ## Presets
 
@@ -31,7 +31,7 @@ Related: [Observability](./observability.md), [CLI](./cli.md), [Testing](./testi
   - See [Presets → Config & Default](./presets.md#config--default-preset)
 - `:lock` mode not locking as expected
   - Check `locked_domains` normalization and compiler pruning
-  - See [Presets → Modes](./presets.md#modes)
+  - See [Presets → Modes](./presets.md#strategies-merge-only-lock)
 
 ## Curation
 
@@ -40,7 +40,7 @@ Related: [Observability](./observability.md), [CLI](./cli.md), [Testing](./testi
   - See [Curation → DSL](./curation.md#dsl)
 - Order of pinned hits unstable
   - Pin order is first‑occurrence; avoid duplicates
-  - See [Curation → Inspect/explain](./curation.md#inspectexplain)
+  - See [Curation → Inspect/explain](./curation.md#materializers--explain)
 
 ## CLI
 

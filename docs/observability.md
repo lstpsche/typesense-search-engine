@@ -6,6 +6,8 @@ Related: [DX](./dx.md), [Troubleshooting → Observability](./troubleshooting.md
 
 This engine emits lightweight ActiveSupport::Notifications events around client calls and provides an opt-in compact logging subscriber. Events are redacted and stable to keep logs useful without leaking secrets.
 
+## Events
+
 - **Events**
   - `search_engine.search` — wraps `SearchEngine::Client#search`
   - `search_engine.multi_search` — wraps the top-level helper around `Client#multi_search`
@@ -63,6 +65,12 @@ sequenceDiagram
 - **duration_ms**: Float measured duration in milliseconds
 - **grouping.compile**: `{ field: String, limit: Integer|nil, missing_values: Boolean, collection?: String, duration_ms?: Float }`
 - **selection.compile**: `{ include_count: Integer, exclude_count: Integer, nested_assoc_count: Integer }`
+- **facet.compile**: `{ collection, fields_count, queries_count, max_facet_values, sort_flags, conflicts, duration_ms }`
+- **highlight.compile**: `{ collection, fields_count, full_fields_count, affix_tokens, snippet_threshold, tag_kind, duration_ms }`
+- **synonyms.apply**: `{ collection, use_synonyms, use_stopwords, source, duration_ms }`
+- **geo.compile**: `{ collection, filters_count, shapes, sort_mode, radius_bucket, duration_ms }`
+- **vector.compile**: `{ collection, query_vector_present, dims, hybrid_weight, ann_params_present, duration_ms }`
+- **hits.limit**: `{ collection, early_limit, validate_max, applied_strategy, triggered, total_hits, duration_ms }`
 
 Redaction rules:
 - Sensitive keys matching `/key|token|secret|password/i` are redacted
@@ -181,7 +189,7 @@ flowchart TD
 
 ## Relation execution events
 
-Execution initiated by `SearchEngine::Relation` results in a single client call and emits `search_engine.search` with a compact, redacted payload. When a preset is applied, compile also emits `search_engine.preset.apply`. See [Presets](./presets.md#observability).
+Execution initiated by `SearchEngine::Relation` results in a single client call and emits `search_engine.search` with a compact, redacted payload. When a preset is applied, compile also emits `search_engine.preset.apply`. See [Presets](./presets.md#observability--troubleshooting).
 
 - **Event**: `search_engine.search`
 - **Payload**: `{ collection, params_preview: Instrumentation.redact(params), url_opts: { use_cache, cache_ttl }, status, error_class }`

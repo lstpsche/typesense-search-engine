@@ -56,7 +56,7 @@ SearchEngine::Product
   .where(["price <= ?", 200])
 ```
 
-See: [DX helpers](./dx.md#helpers--examples) to preview compiled params.
+See: [DX helpers](./dx.md#helpers--examples) to preview compiled params. NOT-IN is rendered as `NOT IN [...]` in explain output.
 
 ## Grouping
 
@@ -77,9 +77,9 @@ Caveats and interactions:
 - **Selection**: Selection applies to hydrated hits; nested includes are unaffected
 - **Sorting**: Sort is applied before grouping; within‑group order follows backend order
 
-See: [Grouping](./grouping.md#working-with-groups),
-[Guardrails & errors](./grouping.md#guardrails--errors),
-[Troubleshooting](./grouping.md#troubleshooting).
+See: [Grouping](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping),
+[Guardrails & errors](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping),
+[Troubleshooting](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping).
 
 [Back to top ⤴](#relation-and-query-dsl-%E2%80%94-guide)
 
@@ -154,7 +154,7 @@ See: [Compiler](./compiler.md#integration) for precedence, quoting rules, and jo
 - **Joined fields**: require `.joins(:assoc)` before filtering/sorting/selection on `$assoc.field`
   (see [Joins](./joins.md)).
 - **Grouping field**: base fields only; joined paths like `$assoc.field` are rejected
-  (see [Grouping → Troubleshooting](./grouping.md#troubleshooting)).
+  (see [Grouping → Troubleshooting](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)).
 - **Special characters**: raw fragments are passed through; prefer templates for quoting
 
 [Back to top ⤴](#relation-and-query-dsl-%E2%80%94-guide)

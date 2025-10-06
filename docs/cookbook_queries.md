@@ -22,7 +22,7 @@ Copy these minimal patterns and adapt fields to your models. Prefer `dry_run!` a
 - [Facet filters](#facet-filters)
 - [Faceting DSL](#faceting-dsl)
 - [Pinned/hidden curation](#pinnedhidden-curation)
-- [Grouping top‑N](#grouping-topn)
+- [Grouping top‑N](#grouping-top-n)
 - [Joins — basic](#joins--basic)
 - [Multi‑search two relations](#multi-search-two-relations)
 

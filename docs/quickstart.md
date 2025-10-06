@@ -93,7 +93,7 @@ sequenceDiagram
 - Connection refused or timeout: verify `host`/`port`/`protocol`; see the
   [CLI → Doctor](./cli.md#doctor-flow).
 - Unknown field errors: declare attributes on the model or adjust selection; see
-  [Field selection → Guardrails](./field_selection.md#guardrails--errors).
+  [Field selection → Guardrails](./field_selection.md#guardrails-errors).
 
 ## Related links
 

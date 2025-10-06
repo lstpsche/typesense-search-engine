@@ -70,7 +70,7 @@ Notes:
   with “did you mean …” hints
 
 See: [Field selection](./field_selection.md),
-[Field selection → Guardrails](./field_selection.md#guardrails--errors).
+[Field selection → Guardrails](./field_selection.md#guardrails-errors).
 
 ## Filtering & ordering on joined fields
 
@@ -118,8 +118,9 @@ Caveats:
 - Grouping supports base fields only; joined paths like `$authors.last_name` are rejected
 - Large `group_limit` can increase memory use during hydration
 
-See: [Grouping](./grouping.md#working-with-groups),
-[Grouping → Guardrails](./grouping.md#guardrails--errors).
+See: [Grouping](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping),
+[Grouping → Guardrails](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping),
+[Grouping → Troubleshooting](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping).
 
 ## Guardrails & errors
 
@@ -135,20 +136,20 @@ respond to `#to_h` for structured logging):
   - See: [Joins → Troubleshooting](./joins.md#troubleshooting)
 - Unknown joined field (e.g., `authors: [:middle_name]`): raises `UnknownJoinField`
   - Hint: “Did you mean `:first_name`?” (suggestions provided)
-  - See: [Field selection → Guardrails](./field_selection.md#guardrails--errors)
+  - See: [Field selection → Guardrails](./field_selection.md#guardrails-errors)
 - Invalid grouping limit (e.g., `limit: 0`): raises `InvalidGroup`
   - Hint: “Provide a positive integer; omit to use server default”
-  - See: [Grouping → Validation](./grouping.md#validation)
+  - See: [Grouping → Validation](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)
 - Non‑boolean `missing_values` (e.g., `"yes"`): raises `InvalidGroup`
   - Hint: “Use `true`/`false`; `nil` omits the parameter”
-  - See: [Grouping → Guardrails](./grouping.md#guardrails--errors)
+  - See: [Grouping → Guardrails](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)
 - Grouping on joined path (e.g., `$authors.last_name`): raises `UnsupportedGroupField`
   - Hint: “Group by a base field (e.g., `:author_id`)”
-  - See: [Grouping → Troubleshooting](./grouping.md#troubleshooting)
+  - See: [Grouping → Troubleshooting](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)
 - “Conflicting” order with grouping (surprising results): compiles, but remember sort is applied
   before grouping; it selects the representatives, not the group order
   - Hint: “Adjust sort to pick desired representatives; group order is preserved”
-  - See: [Grouping → Gotchas](./grouping.md#gotchas)
+  - See: [Grouping → Gotchas](./grouping.md#grouping-%E2%80%94-overview--compiler-mapping)
 
 ## Debugging & DX
 
