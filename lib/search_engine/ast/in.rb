@@ -8,8 +8,6 @@ module SearchEngine
     # @!attribute [r] values
     #   @return [Array]
     class In < BinaryOp
-      attr_reader :field
-
       def type = :in
 
       # Preserve public API name

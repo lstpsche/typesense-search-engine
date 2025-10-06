@@ -8,8 +8,6 @@ module SearchEngine
     # @!attribute [r] value
     #   @return [Object]
     class Eq < BinaryOp
-      attr_reader :field
-
       # @return [Symbol]
       def type = :eq
 
