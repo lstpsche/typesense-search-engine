@@ -881,91 +881,106 @@ module SearchEngine
         end
 
         out = {}
-
-        if h.key?(:num_typos) || h.key?('num_typos')
-          raw = h[:num_typos] || h['num_typos']
-          unless raw.nil?
-            begin
-              iv = Integer(raw)
-              unless [0, 1, 2].include?(iv)
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: num_typos must be 0, 1, or 2 (got #{raw.inspect})",
-                  doc: 'docs/ranking.md#options'
-                )
-              end
-              out[:num_typos] = iv
-            rescue ArgumentError, TypeError
-              raise SearchEngine::Errors::InvalidOption.new(
-                "InvalidOption: num_typos must be an Integer in {0,1,2} (got #{raw.inspect})",
-                doc: 'docs/ranking.md#options'
-              )
-            end
-          end
-        end
-
-        if h.key?(:drop_tokens_threshold) || h.key?('drop_tokens_threshold')
-          raw = h[:drop_tokens_threshold] || h['drop_tokens_threshold']
-          unless raw.nil?
-            begin
-              fv = Float(raw)
-              unless fv >= 0.0 && fv <= 1.0 && fv.finite?
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
-                  doc: 'docs/ranking.md#options'
-                )
-              end
-              out[:drop_tokens_threshold] = fv
-            rescue ArgumentError, TypeError
-              raise SearchEngine::Errors::InvalidOption.new(
-                "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
-                doc: 'docs/ranking.md#options'
-              )
-            end
-          end
-        end
-
-        if h.key?(:prioritize_exact_match) || h.key?('prioritize_exact_match')
-          raw = h[:prioritize_exact_match] || h['prioritize_exact_match']
-          out[:prioritize_exact_match] = raw.nil? ? nil : coerce_boolean_strict(raw, :prioritize_exact_match)
-        end
-
-        if h.key?(:query_by_weights) || h.key?('query_by_weights')
-          raw = h[:query_by_weights] || h['query_by_weights']
-          unless raw.nil?
-            unless raw.is_a?(Hash)
-              raise SearchEngine::Errors::InvalidOption.new(
-                'InvalidOption: query_by_weights must be a Hash of { field => Integer }',
-                doc: 'docs/ranking.md#weights'
-              )
-            end
-            normalized = {}
-            raw.each do |k, v|
-              key = k.to_s.strip
-              next if key.empty?
-
-              begin
-                w = Integer(v)
-              rescue ArgumentError, TypeError
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: weight for #{k.inspect} must be an Integer >= 0",
-                  doc: 'docs/ranking.md#weights',
-                  details: { field: k, weight: v }
-                )
-              end
-              if w.negative?
-                raise SearchEngine::Errors::InvalidOption.new(
-                  "InvalidOption: weight for #{k.inspect} must be >= 0",
-                  doc: 'docs/ranking.md#weights',
-                  details: { field: k, weight: v }
-                )
-              end
-              normalized[key] = w
-            end
-            out[:query_by_weights] = normalized
-          end
-        end
-
+        apply_ranking_handlers!(h, out)
         out
+      end
+
+      def apply_ranking_handlers!(h, out)
+        handle_num_typos_option!(h, out)
+        handle_drop_tokens_threshold_option!(h, out)
+        handle_prioritize_exact_match_option!(h, out)
+        handle_query_by_weights_option!(h, out)
+      end
+
+      def handle_num_typos_option!(h, out)
+        return unless h.key?(:num_typos) || h.key?('num_typos')
+
+        raw = h[:num_typos] || h['num_typos']
+        return if raw.nil?
+
+        begin
+          iv = Integer(raw)
+          unless [0, 1, 2].include?(iv)
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: num_typos must be 0, 1, or 2 (got #{raw.inspect})",
+              doc: 'docs/ranking.md#options'
+            )
+          end
+          out[:num_typos] = iv
+        rescue ArgumentError, TypeError
+          raise SearchEngine::Errors::InvalidOption.new(
+            "InvalidOption: num_typos must be an Integer in {0,1,2} (got #{raw.inspect})",
+            doc: 'docs/ranking.md#options'
+          )
+        end
+      end
+
+      def handle_drop_tokens_threshold_option!(h, out)
+        return unless h.key?(:drop_tokens_threshold) || h.key?('drop_tokens_threshold')
+
+        raw = h[:drop_tokens_threshold] || h['drop_tokens_threshold']
+        return if raw.nil?
+
+        begin
+          fv = Float(raw)
+          unless fv >= 0.0 && fv <= 1.0 && fv.finite?
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
+              doc: 'docs/ranking.md#options'
+            )
+          end
+          out[:drop_tokens_threshold] = fv
+        rescue ArgumentError, TypeError
+          raise SearchEngine::Errors::InvalidOption.new(
+            "InvalidOption: drop_tokens_threshold must be a float between 0.0 and 1.0 (got #{raw.inspect})",
+            doc: 'docs/ranking.md#options'
+          )
+        end
+      end
+
+      def handle_prioritize_exact_match_option!(h, out)
+        return unless h.key?(:prioritize_exact_match) || h.key?('prioritize_exact_match')
+
+        raw = h[:prioritize_exact_match] || h['prioritize_exact_match']
+        out[:prioritize_exact_match] = raw.nil? ? nil : coerce_boolean_strict(raw, :prioritize_exact_match)
+      end
+
+      def handle_query_by_weights_option!(h, out)
+        return unless h.key?(:query_by_weights) || h.key?('query_by_weights')
+
+        raw = h[:query_by_weights] || h['query_by_weights']
+        return if raw.nil?
+
+        unless raw.is_a?(Hash)
+          raise SearchEngine::Errors::InvalidOption.new(
+            'InvalidOption: query_by_weights must be a Hash of { field => Integer }',
+            doc: 'docs/ranking.md#weights'
+          )
+        end
+        normalized = {}
+        raw.each do |k, v|
+          key = k.to_s.strip
+          next if key.empty?
+
+          begin
+            w = Integer(v)
+          rescue ArgumentError, TypeError
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: weight for #{k.inspect} must be an Integer >= 0",
+              doc: 'docs/ranking.md#weights',
+              details: { field: k, weight: v }
+            )
+          end
+          if w.negative?
+            raise SearchEngine::Errors::InvalidOption.new(
+              "InvalidOption: weight for #{k.inspect} must be >= 0",
+              doc: 'docs/ranking.md#weights',
+              details: { field: k, weight: v }
+            )
+          end
+          normalized[key] = w
+        end
+        out[:query_by_weights] = normalized
       end
 
       def normalize_curation_ids(values)

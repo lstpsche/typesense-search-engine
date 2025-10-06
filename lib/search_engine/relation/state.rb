@@ -58,70 +58,58 @@ module SearchEngine
       def apply_initial_state_key!(normalized, key, value)
         k = key.to_sym
         case k
-        when :filters
-          normalized[:filters] = normalize_where(Array(value))
-        when :filters_ast
-          nodes = Array(value).flatten.compact
-          normalized[:ast] ||= []
-          normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                                nodes
-                              else
-                                SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                              end
-        when :ast
-          nodes = Array(value).flatten.compact
-          normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
-                               nodes
-                             else
-                               SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
-                             end
-        when :orders
-          normalized[:orders] = normalize_order(value)
-        when :select
-          normalized[:select] = normalize_select(Array(value))
-        when :select_nested
-          normalized[:select_nested] = (value || {})
-        when :select_nested_order
-          normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :exclude
-          normalized[:exclude] = normalize_select(Array(value))
-        when :exclude_nested
-          normalized[:exclude_nested] = (value || {})
-        when :exclude_nested_order
-          normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
-        when :joins
-          normalized[:joins] = normalize_joins(Array(value))
-        when :limit
-          normalized[:limit] = coerce_integer_min(value, :limit, 1)
-        when :offset
-          normalized[:offset] = coerce_integer_min(value, :offset, 0)
-        when :page
-          normalized[:page] = coerce_integer_min(value, :page, 1)
-        when :per_page
-          normalized[:per_page] = coerce_integer_min(value, :per, 1)
-        when :options
-          normalized[:options] = (value || {}).dup
-        when :grouping
-          normalized[:grouping] = normalize_grouping(value)
-        when :preset_name
-          normalized[:preset_name] = value&.to_s&.strip
-        when :preset_mode
-          normalized[:preset_mode] = value&.to_sym
-        when :curation
-          normalized[:curation] = normalize_curation_input(value)
-        when :facet_fields
-          normalized[:facet_fields] = Array(value).flatten.compact
-        when :facet_max_values
-          normalized[:facet_max_values] = Array(value).flatten.compact
-        when :facet_queries
-          normalized[:facet_queries] = Array(value).flatten.compact
-        when :highlight
-          normalized[:highlight] = normalize_highlight_input(value)
-        when :ranking
-          normalized[:ranking] = normalize_ranking_input(value || {})
-        when :hit_limits
-          normalized[:hit_limits] = normalize_hit_limits_input(value || {})
+        when :filters then handle_state_filters!(normalized, value)
+        when :filters_ast then handle_state_filters_ast!(normalized, value)
+        when :ast then handle_state_ast!(normalized, value)
+        when :orders then normalized[:orders] = normalize_order(value)
+        when :select then normalized[:select] = normalize_select(Array(value))
+        when :select_nested then normalized[:select_nested] = (value || {})
+        when :select_nested_order then normalized[:select_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+        when :exclude then normalized[:exclude] = normalize_select(Array(value))
+        when :exclude_nested then normalized[:exclude_nested] = (value || {})
+        when :exclude_nested_order then normalized[:exclude_nested_order] = Array(value).flatten.compact.map(&:to_sym)
+        when :joins then normalized[:joins] = normalize_joins(Array(value))
+        when :limit then normalized[:limit] = coerce_integer_min(value, :limit, 1)
+        when :offset then normalized[:offset] = coerce_integer_min(value, :offset, 0)
+        when :page then normalized[:page] = coerce_integer_min(value, :page, 1)
+        when :per_page then normalized[:per_page] = coerce_integer_min(value, :per, 1)
+        when :options then normalized[:options] = (value || {}).dup
+        when :grouping then normalized[:grouping] = normalize_grouping(value)
+        when :preset_name then normalized[:preset_name] = value&.to_s&.strip
+        when :preset_mode then normalized[:preset_mode] = value&.to_sym
+        when :curation then normalized[:curation] = normalize_curation_input(value)
+        when :facet_fields then normalized[:facet_fields] = Array(value).flatten.compact
+        when :facet_max_values then normalized[:facet_max_values] = Array(value).flatten.compact
+        when :facet_queries then normalized[:facet_queries] = Array(value).flatten.compact
+        when :highlight then normalized[:highlight] = normalize_highlight_input(value)
+        when :ranking then normalized[:ranking] = normalize_ranking_input(value || {})
+        when :hit_limits then normalized[:hit_limits] = normalize_hit_limits_input(value || {})
         end
+      end
+
+      private
+
+      def handle_state_filters!(normalized, value)
+        normalized[:filters] = normalize_where(Array(value))
+      end
+
+      def handle_state_filters_ast!(normalized, value)
+        nodes = Array(value).flatten.compact
+        normalized[:ast] ||= []
+        normalized[:ast] += if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                              nodes
+                            else
+                              SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                            end
+      end
+
+      def handle_state_ast!(normalized, value)
+        nodes = Array(value).flatten.compact
+        normalized[:ast] = if nodes.all? { |n| n.is_a?(SearchEngine::AST::Node) }
+                             nodes
+                           else
+                             SearchEngine::DSL::Parser.parse_list(nodes, klass: @klass)
+                           end
       end
 
       # One-time migration: when AST is empty and legacy string filters exist, map legacy to AST::Raw.
