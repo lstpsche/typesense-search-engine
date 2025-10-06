@@ -664,8 +664,6 @@ module SearchEngine
           filter_hash: filter_hash
         }
         ActiveSupport::Notifications.instrument('search_engine.stale_deletes.started', payload) {}
-        pf = SearchEngine::Observability.partition_fields(partition)
-        SearchEngine::Instrumentation.instrument('search_engine.indexer.delete_stale', payload.merge(partition_hash: pf[:partition_hash], status: 'started')) {}
       end
 
       def instrument_finished(klass:, into:, partition:, duration_ms:, deleted_count:)

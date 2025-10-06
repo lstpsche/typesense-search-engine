@@ -19,6 +19,7 @@ module SearchEngine
         @klass = klass
         validate_signature!(filter_proc)
         @filter_proc = filter_proc
+        @partition_kw = detect_partition_keyword(filter_proc)
         freeze
       end
 
@@ -28,7 +29,7 @@ module SearchEngine
       # @return [String, nil] non-empty filter string or nil when disabled
       # @raise [SearchEngine::Errors::InvalidParams] when the block returns a non-String
       def call(partition: nil)
-        str = @filter_proc.call(partition: partition)
+        str = @filter_proc.call(@partition_kw => partition)
         return nil if str.nil?
 
         unless str.is_a?(String)
@@ -44,12 +45,25 @@ module SearchEngine
 
       def validate_signature!(proc_obj)
         params = proc_obj.parameters
-        # Accept either optional or required keyword for :partition
-        has_partition_kw = params.any? { |(kind, name)| %i[key keyreq].include?(kind) && name == :partition }
+        # Accept either optional or required keyword for :partition. Allow underscore-prefixed name (:_partition).
+        has_partition_kw = params.any? do |(kind, name)|
+          %i[key keyreq].include?(kind) && %i[partition _partition].include?(name)
+        end
         return if has_partition_kw
 
         raise SearchEngine::Errors::InvalidParams,
               'stale_filter_by block must accept a keyword argument `partition:`'
+      end
+
+      def detect_partition_keyword(proc_obj)
+        params = proc_obj.parameters
+        params.each do |(kind, name)|
+          next unless %i[key keyreq].include?(kind)
+
+          return :partition if name == :partition
+          return :_partition if name == :_partition
+        end
+        :partition
       end
     end
 
