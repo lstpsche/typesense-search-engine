@@ -45,7 +45,7 @@ class LoggingSubscriberSnapshotTest < Minitest::Test
     ev = EventStub.new('search_engine.hits.limit', p, 0.5)
 
     line = format_line(ev)
-    expected = '[se.hits.limit] id=ff00 coll=products early=200 max=1000 '
+    expected = +'[se.hits.limit] id=ff00 coll=products early=200 max=1000 '
     expected << 'strat=cap_total trig=true total=1200 status=ok dur=0.5ms'
     assert_equal expected, line
   end

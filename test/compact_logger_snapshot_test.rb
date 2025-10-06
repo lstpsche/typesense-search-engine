@@ -36,7 +36,7 @@ class CompactLoggerSnapshotTest < Minitest::Test
       logger, Logger::INFO, event, include_params: false, multi: false
     )
 
-    expected = '[se.search] collection=products status=200 duration=12.3ms cache=false ttl=30 '
+    expected = +'[se.search] collection=products status=200 duration=12.3ms cache=false ttl=30 '
     expected << 'sel=I:1|X:0|N:2 pz=sale|ld=4 cu=p:2|h:0|f:∅|t:0'
     assert_equal "#{expected}\n", io.string
   end
@@ -61,7 +61,7 @@ class CompactLoggerSnapshotTest < Minitest::Test
       logger, Logger::INFO, event, include_params: false, multi: false
     )
 
-    expected = '[se.search] collection=products status=500 duration=1.0ms cache=true ttl=120 '
+    expected = +'[se.search] collection=products status=500 duration=1.0ms cache=true ttl=120 '
     expected << 'sel=I:0|X:0|N:0 cu=p:0|h:0|t:0'
     assert_equal "#{expected}\n", io.string
   end
@@ -87,7 +87,7 @@ class CompactLoggerSnapshotTest < Minitest::Test
       logger, Logger::INFO, event, format: :kv
     )
 
-    expected = 'event=indexer.batch_import collection=products into=products_2025_10 '
+    expected = +'event=indexer.batch_import collection=products into=products_2025_10 '
     expected << 'batch_index=3 docs.count=10 success.count=10 failure.count=0 attempts=1 http_status=200 '
     expected << 'bytes.sent=12345 duration.ms=45.6'
     assert_equal "#{expected}\n", io.string
