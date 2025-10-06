@@ -220,7 +220,7 @@ module SearchEngine
       end
 
       def handle_state_joins!(normalized, value)
-        normalized[:joins] = Array(value).flatten.compact.map(&:to_sym)
+        normalized[:joins] = normalize_joins(value)
       end
 
       def handle_state_limit!(normalized, value)
