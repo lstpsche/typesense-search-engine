@@ -124,7 +124,7 @@ index do
   partitions { Shop.pluck(:id) }
   partition_fetch { |shop_id| ::Product.where(shop_id: shop_id).in_batches(of: 2000) }
   before_partition { |shop_id| delete_by filter_by: "shop_id:=#{shop_id}" }
-  after_partition  { |shop_id| # custom metrics }
+  after_partition  { |shop_id| nil } # custom metrics
 end
 ```
 

@@ -49,7 +49,7 @@ flowchart LR
   - weight vector (defaults filled with 1)
   - `num_typos`, `drop_tokens_threshold`, `prioritize_exact_match`, `prefix` (via `infix` token)
 
-See also: [DX](./dx.md), [Relation Guide](./relation_guide.md), and [Cookbook Queries](./cookbook_queries.md).
+See also: [DX](./dx.md), [Relation Guide](./relation_guide.md), and [Cookbook Queries](./cookbook_queries.md#recipes).
 
 ## Guidance
 
@@ -60,7 +60,7 @@ See also: [DX](./dx.md), [Relation Guide](./relation_guide.md), and [Cookbook Qu
 ## Troubleshooting
 
 - Weight for unknown field:
-  - Ensure the key exists in the effective `query_by` list; see [Relation Guide → selection](./relation_guide.md#selection)
+  - Ensure the key exists in the effective `query_by` list; see [Relation Guide → selection](./field_selection.md#dsl)
 - Threshold out of range:
   - Use `0.0..1.0`
 - All weights zero:

@@ -225,9 +225,11 @@ No raw filters or string literal values are included.
 
 ### Sample logs
 
+```text
 KV format:
-
 ```
+
+```text
 event=joins.compile collection=SearchEngine::Book joins.assocs=authors,orders joins.count=2 joins.used_in=include:authors|filter:authors|sort:authors joins.include.len=24 joins.filter.len=42 joins.sort.len=16 has_joins=true duration.ms=0.8
 ```
 

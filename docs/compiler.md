@@ -6,6 +6,14 @@ Related: [Query DSL](./query_dsl.md), [Relation](./relation.md), [Debugging](./d
 
 > Instrumentation: `search_engine.compile` is emitted by the compiler. See [Debugging](./debugging.md).
 
+## Compiled Params boundary
+
+- Public output type: `SearchEngine::CompiledParams` — immutable, read-only wrapper around compiled Typesense params.
+- Determinism: `to_h` returns a symbol-keyed, lexicographically ordered Hash; `to_json` is stable across runs.
+- Usage: callers may treat it like a Hash for read methods (`[]`, `key?`, `keys`, `each`) or call `to_h`.
+- Construction: internal to the relation/compiler; user code does not instantiate it directly.
+
+
 The compiler turns a Predicate AST under `SearchEngine::AST` into a deterministic Typesense `filter_by` string. It is pure (no I/O), safe (centralized quoting/escaping), and consistent with the `where` DSL.
 
 ## Overview
@@ -94,6 +102,8 @@ rel.to_typesense_params
 ```
 
 Note: the `:_join` section is an internal context map for downstream components and may be removed by the HTTP layer before sending the request. See [Joins](./joins.md) for details.
+
+See also: [DX](./dx.md#helpers--examples) for `Relation#to_params_json` — it uses `SearchEngine::CompiledParams` to ensure stable ordering.
 
 See also: [Relation](./relation.md) · [Query DSL](./query_dsl.md) · [Joins](./joins.md)
 

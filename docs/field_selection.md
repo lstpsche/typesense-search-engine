@@ -133,25 +133,13 @@ SearchEngine.configure { |c| c.selection = OpenStruct.new(strict_missing: false)
 rel = SearchEngine::Product.select(:id).options(selection: { strict_missing: true })
 ```
 
-### Hydration decision (strict vs lenient)
+### Propagation and enforcement
 
-```mermaid
-flowchart TD
-  H[Typesense hit] --> P[Present keys]
-  S[Effective selection] --> Q{strict_missing?}
-  P --> A[Assign only present keys]
-  Q -- yes --> M[Missing = Requested − Present]
-  M -- empty --> A
-  M -- non-empty --> R[Raise MissingField]
-  Q -- no --> L[Leave absents unset]
-  L --> A
-```
+- During compile, the effective base selection is captured as `requested_root` and the strict flag is recorded.
+- During hydration, `Result` computes `missing = requested_root − present_keys` for each hit; when strict, it raises `MissingField` with a helpful message and a pointer back to these docs.
+- When includes are empty (effective “all fields”), no `requested_root` is set and strict enforcement is a no‑op.
 
-See also: [Relation](./relation.md), [Materializers](./materializers.md#pluck--selection), and [Compiler](./compiler.md).
-
-## Pluck alignment
-
-`pluck(*fields)` validates against the effective selection and fails fast with guidance when a field is not permitted. See [Materializers → Pluck & selection](./materializers.md#pluck--selection).
+See also: [Materializers](./materializers.md#pluck--selection) for validation on `pluck`, and [Materializers](./materializers.md) for hydration flow.
 
 ## Guardrails & errors
 
@@ -163,7 +151,7 @@ Validation happens during chaining (after normalization, before mutating state) 
 
 Example:
 
-```
+```text
 UnknownJoinField: :middle_name is not declared on association :authors for SearchEngine::Book
 ```
 
@@ -173,11 +161,7 @@ Notes:
 
 See also: [Relation](./relation.md), [JOINs](./joins.md), and [Materializers](./materializers.md#pluck--selection).
 
-## Troubleshooting
+## Hydration decision (strict vs lenient)
 
-- **Invalid selection on pluck**: Ensure the field is within the effective selection; either include it or remove it from excludes. Consider `reselect(:id,:name)`.
-- **Unknown nested field**: Verify the association is joined and the field exists on the target collection.
-- **Strict missing**: Disable `strict_missing` or adjust selection when hydrating strict.
-
-Backlinks: [README](../README.md), [Query DSL](./query_dsl.md), [JOINs](./joins.md)
-
+```
+```

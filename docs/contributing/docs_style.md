@@ -1,4 +1,4 @@
-[← Back to Index](./index.md)
+[← Back to Index](../index.md)
 
 # Docs style guide
 
@@ -68,13 +68,13 @@ flowchart LR
 - Put this exact backlink line at the very top of every page (adjust the relative path when inside subfolders):
 
 ```md
-[← Back to Index](./index.md)
+[← Back to Index](../index.md)
 ```
 
 - Add a compact Related block with 2–4 nearby links (use relative links):
 
 ```md
-Related: [Observability](./observability.md), [DX](./dx.md), [Testing](./testing.md)
+Related: [Observability](../observability.md), [DX](../dx.md), [Testing](../testing.md)
 ```
 
 ## Link phrasing
@@ -94,7 +94,7 @@ Bad
 Click [here](./observability.md#logging).
 ```
 
-## YARDoc mentions
+## Cross-referencing with YARDoc
 
 - When public APIs are introduced or changed, update docs and YARDoc together
 - Use `@see` to link from YARDoc back to the exact docs anchor
@@ -104,8 +104,8 @@ Example
 ```ruby
 # Compiles the schema for a collection.
 #
-# @see docs/schema.md#api for the API overview and return shape
-# @return [Hash] deeply frozen Typesense-compatible schema
+# See docs/schema.md#api for the API overview and return shape
+# Returns a deeply frozen Typesense-compatible schema (Hash)
 ```
 
 ## Examples: good vs bad
@@ -130,13 +130,13 @@ Links
 Backlink line
 
 ```md
-[← Back to Index](./index.md)
+[← Back to Index](../index.md)
 ```
 
 Related block template
 
 ```md
-Related: [Observability](./observability.md), [DX](./dx.md), [Testing](./testing.md)
+Related: [Observability](../observability.md), [DX](../dx.md), [Testing](../testing.md)
 ```
 
 Troubleshooting callout

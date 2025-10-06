@@ -29,10 +29,10 @@ rel.to_curl
 rel.dry_run!
 # => { url: "https://host:8108/collections/products/documents/search", body: "{...}", url_opts: { use_cache: true, cache_ttl: 60 } }
 
-puts rel.explain
+puts rel.explain # shows NOT IN formatting for membership negation
 ```
 
-### Event prediction (no emit)
+## Event prediction (no emit)
 
 Use `rel.explain` to preview which events would fire without emitting them:
 
@@ -79,4 +79,4 @@ Backlinks: [Quickstart](./quickstart.md), [Relation](./relation.md), [Multi‑se
 ### Troubleshooting
 
 - **No default model configured**: Set `SearchEngine.config.default_console_model = 'SearchEngine::Product'` or ensure only one model is registered. See section above.
-- **Unknown attribute type**: Allowed types are `string`, `integer`, `float`, `boolean`, `datetime`, `json`. See [Field selection → Guardrails](./field_selection.md#guardrails--errors) and [Troubleshooting](./troubleshooting.md).
+- **Unknown attribute type**: Allowed types are `string`, `integer`, `float`, `boolean`, `datetime`, `json`. See [Field selection → Guardrails](./field_selection.md#guardrails-errors) and [Troubleshooting](./troubleshooting.md).

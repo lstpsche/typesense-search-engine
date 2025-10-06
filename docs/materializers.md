@@ -115,7 +115,7 @@ When the relation has no memo yet, `count`/`exists?` issue a minimal search usin
 
 The response’s `found` is returned and no full `Result` is memoized.
 
-### Examples
+## Examples
 
 ```ruby
 rel = SearchEngine::Product.where(active: true).limit(10)
