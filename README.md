@@ -8,7 +8,7 @@ Mountless Rails::Engine for Typesense. Expressive Relation/DSL with JOINs, group
 
 ```ruby
 # Gemfile
-gem "typesense_search_engine"
+gem "typesense-search-engine"
 ```
 
 ```ruby
@@ -76,7 +76,7 @@ MIT — see [LICENSE](./LICENSE).
 <!-- Badge references (placeholders) -->
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/lstpsche/typesense-search-engine/ci.yml?branch=main
 [ci-url]: #
-[gem-badge]: https://img.shields.io/gem/v/search_engine.svg?label=gem
-[gem-url]: https://rubygems.org/gems/typesense_search_engine
+[gem-badge]: https://img.shields.io/gem/v/typesense-search-engine.svg?label=gem
+[gem-url]: https://rubygems.org/gems/typesense-search-engine
 [docs-badge]: https://img.shields.io/badge/docs-index-blue
 [docs-url]: ./docs/index.md

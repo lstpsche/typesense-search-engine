@@ -18,7 +18,7 @@ Client/Relation APIs (no cURL).
 
 ```ruby
 # Gemfile
-gem "search_engine", path: "./"
+gem "typesense-search-engine"
 ```
 
 Then run Bundler to install dependencies in your host app.

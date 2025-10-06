@@ -12,4 +12,4 @@ gem 'sqlite3'
 # examples/demo_shop -> repo root
 # Idempotent: safe to re-run bundler
 
-gem 'search_engine', path: '../..'
+gem 'typesense-search-engine', path: '../..'

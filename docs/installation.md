@@ -7,7 +7,7 @@ Related: [Quickstart](./quickstart.md), [Configuration](./configuration.md), [CL
 Add the gem to your host app:
 
 ```ruby
-gem "search_engine"
+gem "typesense-search-engine"
 ```
 
 Create an initializer `config/initializers/search_engine.rb`:

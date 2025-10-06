@@ -74,6 +74,10 @@ Metrics/BlockLength:
 Metrics/ParameterLists:
   Max: 10
 
+Naming/FileName:
+  Exclude:
+    - 'lib/typesense-search-engine.rb'
+
 Naming/MethodParameterName:
   Enabled: false
 

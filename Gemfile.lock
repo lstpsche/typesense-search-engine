@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    search_engine (0.9.0)
+    typesense-search-engine (0.9.0)
       rails (>= 6.1)
       typesense (>= 4.1.0)
 
@@ -253,8 +253,8 @@ DEPENDENCIES
   puma
   rubocop
   rubocop-performance
-  search_engine!
   sqlite3
+  typesense-search-engine!
 
 BUNDLED WITH
    2.7.2
