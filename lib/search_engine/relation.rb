@@ -76,45 +76,21 @@ module SearchEngine
       @state == DEFAULT_STATE
     end
 
-    # Concise single-line inspection containing only non-empty keys.
+    # Console-friendly inspect:
+    # - In interactive consoles, execute and render hydrated records for quick preview
+    # - In non-interactive contexts, keep a concise summary without I/O
     # @return [String]
     def inspect
-      parts = []
-      parts << "Model=#{klass_name_for_inspect}"
-
-      if (pn = @state[:preset_name])
-        pm = @state[:preset_mode] || :merge
-        parts << %(preset=#{pn}(mode=#{pm}))
+      if interactive_console?
+        begin
+          records = SearchEngine::Hydration::Materializers.to_a(self)
+          return "#<#{self.class.name} [#{records.map(&:inspect).join(', ')}]>"
+        rescue StandardError
+          # fall back to summary below
+        end
       end
 
-      filters = Array(@state[:filters])
-      parts << "filters=#{filters.length}" unless filters.empty?
-
-      ast_nodes = Array(@state[:ast])
-      parts << "ast=#{ast_nodes.length}" unless ast_nodes.empty?
-
-      compiled = begin
-        SearchEngine::CompiledParams.from(to_typesense_params)
-      rescue StandardError
-        {}
-      end
-
-      sort_str = compiled[:sort_by]
-      parts << %(sort="#{truncate_for_inspect(sort_str)}") if sort_str && !sort_str.to_s.empty?
-
-      append_selection_inspect_parts(parts, compiled)
-
-      if (g = @state[:grouping])
-        gparts = ["group_by=#{g[:field]}"]
-        gparts << "limit=#{g[:limit]}" if g[:limit]
-        gparts << 'missing_values=true' if g[:missing_values]
-        parts << gparts.join(' ')
-      end
-
-      parts << "page=#{compiled[:page]}" if compiled.key?(:page)
-      parts << "per=#{compiled[:per_page]}" if compiled.key?(:per_page)
-
-      "#<#{self.class.name} #{parts.join(' ')} >"
+      summary_inspect_string
     end
 
     # Explain the current relation without performing any network calls.
@@ -208,6 +184,53 @@ module SearchEngine
     end
 
     private
+
+    def summary_inspect_string
+      parts = []
+      parts << "Model=#{klass_name_for_inspect}"
+
+      if (pn = @state[:preset_name])
+        pm = @state[:preset_mode] || :merge
+        parts << %(preset=#{pn}(mode=#{pm}))
+      end
+
+      filters = Array(@state[:filters])
+      parts << "filters=#{filters.length}" unless filters.empty?
+
+      ast_nodes = Array(@state[:ast])
+      parts << "ast=#{ast_nodes.length}" unless ast_nodes.empty?
+
+      compiled = begin
+        SearchEngine::CompiledParams.from(to_typesense_params)
+      rescue StandardError
+        {}
+      end
+
+      sort_str = compiled[:sort_by]
+      parts << %(sort="#{truncate_for_inspect(sort_str)}") if sort_str && !sort_str.to_s.empty?
+
+      append_selection_inspect_parts(parts, compiled)
+
+      if (g = @state[:grouping])
+        gparts = ["group_by=#{g[:field]}"]
+        gparts << "limit=#{g[:limit]}" if g[:limit]
+        gparts << 'missing_values=true' if g[:missing_values]
+        parts << gparts.join(' ')
+      end
+
+      parts << "page=#{compiled[:page]}" if compiled.key?(:page)
+      parts << "per=#{compiled[:per_page]}" if compiled.key?(:per_page)
+
+      "#<#{self.class.name} #{parts.join(' ')} >"
+    end
+
+    def interactive_console?
+      return true if defined?(Rails::Console)
+      return true if defined?(IRB) && $stdout.respond_to?(:tty?) && $stdout.tty?
+      return true if $PROGRAM_NAME&.end_with?('console')
+
+      false
+    end
 
     def klass_name_for_inspect
       @klass.respond_to?(:name) && @klass.name ? @klass.name : @klass.to_s

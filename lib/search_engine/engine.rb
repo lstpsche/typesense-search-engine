@@ -27,6 +27,14 @@ module SearchEngine
       loader = respond_to?(:loader) ? self.loader : nil
       shim = root.join('lib', 'typesense-search-engine.rb').to_s
       loader&.ignore(shim)
+
+      # Also ensure Rails global autoloaders ignore the shim, since the engine
+      # adds lib/ to autoload paths and the main/once loaders may scan it.
+      if defined?(Rails) && Rails.respond_to?(:autoloaders)
+        al = Rails.autoloaders
+        al.main.ignore(shim) if al.respond_to?(:main)
+        al.once.ignore(shim) if al.respond_to?(:once)
+      end
     end
 
     initializer 'search_engine.observability' do

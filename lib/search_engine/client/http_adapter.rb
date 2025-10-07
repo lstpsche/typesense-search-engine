@@ -28,7 +28,14 @@ module SearchEngine
         path = request.path.to_s
         if method == :post && path.match?(%r{\A/collections/[^/]+/documents/search\z})
           collection = path.split('/')[2]
-          raw = @typesense.collections[collection].documents.search(request.body, common_params: request.params)
+          docs = @typesense.collections[collection].documents
+          begin
+            params = docs.method(:search).parameters
+            supports_common = params.any? { |(kind, _)| %i[key keyreq keyrest].include?(kind) }
+          rescue StandardError
+            supports_common = false
+          end
+          raw = supports_common ? docs.search(request.body, common_params: request.params) : docs.search(request.body)
           # The official client returns parsed JSON (Hash). No headers/status exposed here.
           return Response.new(status: 200, headers: {}, body: raw)
         end

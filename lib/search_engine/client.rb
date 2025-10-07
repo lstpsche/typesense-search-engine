@@ -48,7 +48,8 @@ module SearchEngine
         SearchEngine::Instrumentation.instrument('search_engine.search', se_payload) do |ctx|
           ctx[:params_preview] = SearchEngine::Instrumentation.redact(params_obj.to_h)
           result = with_exception_mapping(:post, path, cache_params, start) do
-            ts.collections[collection].documents.search(payload, common_params: cache_params)
+            docs = ts.collections[collection].documents
+            documents_search(docs, payload, cache_params)
           end
           ctx[:status] = :ok
         rescue Errors::Api => error
@@ -62,7 +63,8 @@ module SearchEngine
         end
       else
         result = with_exception_mapping(:post, path, cache_params, start) do
-          ts.collections[collection].documents.search(payload, common_params: cache_params)
+          docs = ts.collections[collection].documents
+          documents_search(docs, payload, cache_params)
         end
       end
 
@@ -138,7 +140,9 @@ module SearchEngine
       path = [Client::RequestBuilder::ALIASES_PREFIX, a].join
 
       result = with_exception_mapping(:put, path, {}, start) do
-        ts.aliases[a].upsert(collection_name: p)
+        # Minimal supported client: typesense-ruby >= 4.1.0
+        # API: ts.aliases.upsert(alias_name, collection_name)
+        ts.aliases.upsert(a, p)
       end
 
       symbolize_keys_deep(result)
@@ -421,6 +425,25 @@ module SearchEngine
       @adapter ||= SearchEngine::Client::HttpAdapter.new(typesense)
     end
 
+    # Execute a documents.search call against the Typesense client, adapting to the
+    # installed client version. Typesense 4.1.0 expects a single positional arg.
+    # When keyword support exists, pass common_params for cache controls.
+    def documents_search(docs, payload, common_params)
+      if documents_search_supports_common_params?(docs)
+        docs.search(payload, common_params: common_params)
+      else
+        docs.search(payload)
+      end
+    end
+
+    def documents_search_supports_common_params?(docs)
+      m = docs.method(:search)
+      params = m.parameters
+      params.any? { |(kind, _)| %i[key keyreq keyrest].include?(kind) }
+    rescue StandardError
+      false
+    end
+
     # Remove internal-only keys from the HTTP payload
     def sanitize_body_params(params)
       payload = params.dup
@@ -593,8 +616,12 @@ module SearchEngine
     # Map network and API exceptions into stable SearchEngine errors, with
     # redaction and logging.
     def map_and_raise(error, method, path, cache_params, start_ms)
-      if error.respond_to?(:http_code)
-        status = error.http_code
+      if error.respond_to?(:http_code) || error.class.name.start_with?('Typesense::Error')
+        status = if error.respond_to?(:http_code)
+                   error.http_code
+                 else
+                   infer_typesense_status(error)
+                 end
         body = parse_error_body(error)
         err = Errors::Api.new(
           "typesense api error: #{status}",
@@ -638,6 +665,19 @@ module SearchEngine
       return true if error.class.name.include?('Connection')
 
       defined?(OpenSSL::SSL::SSLError) && error.is_a?(OpenSSL::SSL::SSLError)
+    end
+
+    # Infer HTTP status code from typesense-ruby error class names when http_code is unavailable.
+    def infer_typesense_status(error)
+      klass = error.class.name
+      return 404 if klass.include?('ObjectNotFound')
+      return 401 if klass.include?('RequestUnauthorized')
+      return 403 if klass.include?('RequestForbidden')
+      return 400 if klass.include?('RequestMalformed')
+      return 409 if klass.include?('ObjectAlreadyExists')
+      return 500 if klass.include?('ServerError')
+
+      500
     end
 
     def instrument(method, path, duration_ms, cache_params, error_class: nil)

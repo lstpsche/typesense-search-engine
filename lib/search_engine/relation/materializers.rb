@@ -4,6 +4,12 @@ module SearchEngine
   class Relation
     # Materializers delegated to Hydration layer (single network call per Relation instance).
     module Materializers
+      # Execute the relation and return the memoized Result.
+      # @return [SearchEngine::Result]
+      def execute
+        SearchEngine::Hydration::Materializers.execute(self)
+      end
+
       # Return a shallow copy of hydrated hits.
       # @return [Array<Object>]
       def to_a

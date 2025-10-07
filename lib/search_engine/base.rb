@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'forwardable'
+
 module SearchEngine
   # Base class for SearchEngine models.
   #
@@ -9,6 +11,16 @@ module SearchEngine
   # subclass overwrites only at the subclass level.
   class Base
     class << self
+      # Enable AR-like class-level chaining by delegating DSL and materializers
+      # to a fresh Relation via `.all`. This allows calls like:
+      #   Product.where(id: 1).order(:updated_at).per(5)
+      #   Product.count
+      #   Product.pluck(:id)
+      # without requiring an explicit `.all` in user code.
+      #
+      # Uses stdlib SingleForwardable to avoid hard dependency on ActiveSupport.
+      extend SingleForwardable
+
       # Get or set the Typesense collection name for this model.
       #
       # When setting, the name is normalized to String and the mapping is
@@ -36,6 +48,9 @@ module SearchEngine
       def attribute(name, type = :string)
         n = name.to_sym
         (@attributes ||= {})[n] = type
+        # Define an instance reader for the attribute unless one already exists.
+        # Idempotent across repeated declarations and inheritance.
+        attr_reader n unless method_defined?(n)
         nil
       end
 
@@ -93,6 +108,99 @@ module SearchEngine
       def all
         SearchEngine::Relation.new(self)
       end
+
+      # Delegate Relation DSL chainers to `.all` for AR-style usage.
+      # @!method where(*args)
+      #   @see SearchEngine::Relation::DSL::Filters#where
+      # @!method rewhere(input, *args)
+      #   @see SearchEngine::Relation::DSL::Filters#rewhere
+      # @!method order(value)
+      #   @see SearchEngine::Relation::DSL#order
+      # @!method preset(name, mode: :merge)
+      #   @see SearchEngine::Relation::DSL#preset
+      # @!method ranking(**opts)
+      #   @see SearchEngine::Relation::DSL#ranking
+      # @!method prefix(mode)
+      #   @see SearchEngine::Relation::DSL#prefix
+      # @!method pin(*ids)
+      #   @see SearchEngine::Relation::DSL#pin
+      # @!method hide(*ids)
+      #   @see SearchEngine::Relation::DSL#hide
+      # @!method curate(pin: nil, hide: nil, override_tags: nil, filter_curated_hits: :__unset__)
+      #   @see SearchEngine::Relation::DSL#curate
+      # @!method clear_curation
+      #   @see SearchEngine::Relation::DSL#clear_curation
+      # @!method facet_by(field, max_values: nil, sort: nil, stats: nil)
+      #   @see SearchEngine::Relation::DSL#facet_by
+      # @!method facet_query(field, expression, label: nil)
+      #   @see SearchEngine::Relation::DSL#facet_query
+      # @!method group_by(field, limit: nil, missing_values: false)
+      #   @see SearchEngine::Relation::DSL#group_by
+      # @!method unscope(*parts)
+      #   @see SearchEngine::Relation::DSL#unscope
+      # @!method limit(n)
+      #   @see SearchEngine::Relation::DSL#limit
+      # @!method offset(n)
+      #   @see SearchEngine::Relation::DSL#offset
+      # @!method page(n)
+      #   @see SearchEngine::Relation::DSL#page
+      # @!method per_page(n)
+      #   @see SearchEngine::Relation::DSL#per_page
+      # @!method per(n)
+      #   @see SearchEngine::Relation::DSL#per
+      # @!method options(opts = {})
+      #   @see SearchEngine::Relation::DSL#options
+      # @!method joins(*assocs)
+      #   @see SearchEngine::Relation::DSL#joins
+      # @!method use_synonyms(value)
+      #   @see SearchEngine::Relation::DSL#use_synonyms
+      # @!method use_stopwords(value)
+      #   @see SearchEngine::Relation::DSL#use_stopwords
+      # @!method select(*fields)
+      #   @see SearchEngine::Relation::DSL::Selection#select
+      # @!method include_fields(*fields)
+      #   @see SearchEngine::Relation::DSL::Selection#include_fields
+      # @!method exclude(*fields)
+      #   @see SearchEngine::Relation::DSL::Selection#exclude
+      # @!method reselect(*fields)
+      #   @see SearchEngine::Relation::DSL::Selection#reselect
+      # @!method limit_hits(n)
+      #   @see SearchEngine::Relation::DSL#limit_hits
+      # @!method validate_hits!(max:)
+      #   @see SearchEngine::Relation::DSL#validate_hits!
+      def_single_delegators :all,
+                            :where, :rewhere, :order, :preset, :ranking, :prefix,
+                            :pin, :hide, :curate, :clear_curation,
+                            :facet_by, :facet_query, :group_by, :unscope,
+                            :limit, :offset, :page, :per_page, :per, :options,
+                            :joins, :use_synonyms, :use_stopwords,
+                            :select, :include_fields, :exclude, :reselect,
+                            :limit_hits, :validate_hits!
+
+      # Delegate materializers to `.all` so callers can do `Model.first` etc.
+      # @!method to_a
+      #   @return [Array<Object>]
+      # @!method each(&block)
+      #   @return [Enumerator]
+      # @!method first(n = nil)
+      #   @return [Object, Array<Object>]
+      # @!method last(n = nil)
+      #   @return [Object, Array<Object>]
+      # @!method take(n = 1)
+      #   @return [Object, Array<Object>]
+      # @!method ids
+      #   @return [Array<Object>]
+      # @!method pluck(*fields)
+      #   @return [Array<Object>, Array<Array<Object>>]
+      # @!method exists?
+      #   @return [Boolean]
+      # @!method count
+      #   @return [Integer]
+      # @!method execute
+      #   @return [SearchEngine::Result]
+      def_single_delegators :all,
+                            :to_a, :each, :first, :last, :take, :ids, :pluck,
+                            :exists?, :count, :execute
 
       # Define collection-level indexing configuration and mapping.
       #
@@ -267,9 +375,40 @@ module SearchEngine
           token.to_s
         end
       end
+
+      # Build a new instance from a Typesense document assigning only declared
+      # attributes and capturing any extra keys in {#unknown_attributes}.
+      #
+      # Unknown keys are preserved as a String-keyed Hash to avoid symbol bloat.
+      #
+      # @param doc [Hash] a document as returned by Typesense
+      # @return [Object] hydrated instance
+      def from_document(doc)
+        obj = new
+        declared = attributes # { Symbol => type }
+        unknown = {}
+
+        (doc || {}).each do |k, v|
+          key_str = k.to_s
+          key_sym = key_str.to_sym
+          if declared.key?(key_sym)
+            obj.instance_variable_set("@#{key_sym}", v)
+          else
+            unknown[key_str] = v
+          end
+        end
+
+        obj.instance_variable_set(:@__unknown_attributes__, unknown.freeze) unless unknown.empty?
+        obj
+      end
     end
 
-    # TODO: In a future change, implement instance-level hydration/initialization
-    # from a Typesense document using the declared {attributes} map.
+    # Return a shallow copy of unknown attributes captured during hydration.
+    # Keys are Strings and values are as returned by the backend.
+    # @return [Hash{String=>Object}]
+    def unknown_attributes
+      h = instance_variable_get(:@__unknown_attributes__)
+      h ? h.dup : {}
+    end
   end
 end

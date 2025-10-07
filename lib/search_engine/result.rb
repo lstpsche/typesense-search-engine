@@ -357,9 +357,13 @@ module SearchEngine
       keys = doc.is_a?(Hash) ? doc.keys.map(&:to_s) : []
       enforce_strict_missing_if_needed!(keys)
       if @klass
-        @klass.new.tap do |obj|
-          doc.each do |key, value|
-            obj.instance_variable_set(ivar_name(key), value)
+        if @klass.respond_to?(:from_document)
+          @klass.from_document(doc)
+        else
+          @klass.new.tap do |obj|
+            doc.each do |key, value|
+              obj.instance_variable_set(ivar_name(key), value)
+            end
           end
         end
       else

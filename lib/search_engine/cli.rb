@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'search_engine/cli/support'
+
 module SearchEngine
   # Internal helpers for operator-facing CLI/Rake tasks.
   #

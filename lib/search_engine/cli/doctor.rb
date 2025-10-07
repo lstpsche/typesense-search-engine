@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'search_engine/cli/support'
 
 module SearchEngine
   module CLI
@@ -13,6 +14,17 @@ module SearchEngine
     # @since M8
     # @see docs/cli.md#doctor
     module Doctor
+      WIKI_BASE = 'https://github.com/lstpsche/typesense-search-engine/wiki/'
+
+      module_function
+
+      # Build a link to the gem wiki (pass slug without .md, anchors allowed)
+      def wiki(slug)
+        return nil if slug.nil? || slug.to_s.strip.empty?
+
+        WIKI_BASE + slug.to_s
+      end
+
       class << self
         # Run all checks and print output to STDOUT.
         # Returns exit code (0 success, 1 failure).
@@ -136,7 +148,7 @@ module SearchEngine
             duration_ms: duration,
             details: details,
             hint: hint,
-            doc: 'docs/installation.md#configuration',
+            doc: Doctor.wiki('installation#configuration'),
             error_class: nil,
             error_message: nil
           )
@@ -165,7 +177,7 @@ module SearchEngine
             duration_ms: monotonic_ms - started,
             details: details,
             hint: hint,
-            doc: 'docs/configuration.md#typesense-connection',
+            doc: Doctor.wiki('configuration#typesense-connection'),
             error_class: nil,
             error_message: nil
           )
@@ -175,7 +187,7 @@ module SearchEngine
             started,
             error,
             hint: 'Check host/port/protocol and ingress/firewall settings.',
-            doc: 'docs/cli.md#doctor'
+            doc: Doctor.wiki('cli#doctor')
           )
         end
 
@@ -192,7 +204,7 @@ module SearchEngine
             duration_ms: monotonic_ms - started,
             details: details,
             hint: nil,
-            doc: 'docs/configuration.md#typesense-connection',
+            doc: Doctor.wiki('configuration#typesense-connection'),
             error_class: nil,
             error_message: nil
           )
@@ -206,7 +218,7 @@ module SearchEngine
               duration_ms: monotonic_ms - started,
               details: { http_status: status },
               hint: 'Your Typesense API key is invalid or lacks permissions. Verify TYPESENSE_API_KEY.',
-              doc: 'docs/configuration.md#typesense-connection',
+              doc: Doctor.wiki('configuration#typesense-connection'),
               error_class: error.class.name,
               error_message: error.message
             )
@@ -216,7 +228,7 @@ module SearchEngine
               started,
               error,
               hint: 'Unexpected API error while verifying key.',
-              doc: 'docs/client.md#errors'
+              doc: Doctor.wiki('client#errors')
             )
           end
         rescue SearchEngine::Errors::Error => error
@@ -225,7 +237,7 @@ module SearchEngine
             started,
             error,
             hint: 'Connectivity problem while verifying key.',
-            doc: 'docs/client.md#errors'
+            doc: Doctor.wiki('client#errors')
           )
         end
 
@@ -241,7 +253,7 @@ module SearchEngine
               duration_ms: monotonic_ms - started,
               details: { note: 'no registered collections' },
               hint: 'Define at least one model inheriting from SearchEngine::Base and declare collection name.',
-              doc: 'docs/schema.md',
+              doc: Doctor.wiki('schema'),
               error_class: nil,
               error_message: nil
             )
@@ -273,7 +285,7 @@ module SearchEngine
             duration_ms: monotonic_ms - started,
             details: details,
             hint: hint,
-            doc: 'docs/schema.md#lifecycle',
+            doc: Doctor.wiki('schema#lifecycle'),
             error_class: nil,
             error_message: nil
           )
@@ -283,7 +295,7 @@ module SearchEngine
             started,
             error,
             hint: 'Failed to check aliases due to API/connectivity error.',
-            doc: 'docs/schema.md'
+            doc: Doctor.wiki('schema')
           )
         end
 
@@ -298,7 +310,7 @@ module SearchEngine
               duration_ms: monotonic_ms - started,
               details: { note: 'no registered collections' },
               hint: 'Add a model inheriting from SearchEngine::Base to preview compile output.',
-              doc: 'docs/dx.md',
+              doc: Doctor.wiki('dx'),
               error_class: nil,
               error_message: nil
             )
@@ -318,7 +330,7 @@ module SearchEngine
             duration_ms: monotonic_ms - started,
             details: details,
             hint: nil,
-            doc: 'docs/dx.md',
+            doc: Doctor.wiki('dx'),
             error_class: nil,
             error_message: nil
           )
@@ -328,7 +340,7 @@ module SearchEngine
             started,
             error,
             hint: 'Compile failed. Check DSL, selection, and joins configuration.',
-            doc: 'docs/query_dsl.md'
+            doc: Doctor.wiki('query_dsl')
           )
         end
 
@@ -343,7 +355,7 @@ module SearchEngine
               duration_ms: monotonic_ms - started,
               details: { note: 'no registered collections' },
               hint: 'Add at least one model to preview multi-search compile.',
-              doc: 'docs/multi_search.md',
+              doc: Doctor.wiki('multi_search'),
               error_class: nil,
               error_message: nil
             )
@@ -362,7 +374,7 @@ module SearchEngine
             duration_ms: monotonic_ms - started,
             details: details,
             hint: nil,
-            doc: 'docs/multi_search.md',
+            doc: Doctor.wiki('multi_search'),
             error_class: nil,
             error_message: nil
           )
@@ -372,7 +384,7 @@ module SearchEngine
             started,
             error,
             hint: 'Multi-search compile failed. Verify relations.',
-            doc: 'docs/multi_search.md'
+            doc: Doctor.wiki('multi_search')
           )
         end
 
@@ -393,7 +405,7 @@ module SearchEngine
             duration_ms: monotonic_ms - started,
             details: details,
             hint: nil,
-            doc: 'docs/observability.md',
+            doc: Doctor.wiki('observability'),
             error_class: nil,
             error_message: nil
           )
@@ -403,7 +415,7 @@ module SearchEngine
             started,
             error,
             hint: 'Unable to read logging configuration.',
-            doc: 'docs/observability.md'
+            doc: Doctor.wiki('observability')
           )
         end
 
@@ -430,7 +442,7 @@ module SearchEngine
               details: { installed: installed, enabled: enabled, service_name: svc },
               hint: 'OpenTelemetry installed but disabled. Enable via ' \
                     'SearchEngine.config.opentelemetry.enabled = true.',
-              doc: 'docs/observability.md#opentelemetry',
+              doc: Doctor.wiki('observability#opentelemetry'),
               error_class: nil,
               error_message: nil
             )
@@ -442,7 +454,7 @@ module SearchEngine
               duration_ms: monotonic_ms - started,
               details: { installed: installed, enabled: enabled, service_name: svc },
               hint: nil,
-              doc: 'docs/observability.md#opentelemetry',
+              doc: Doctor.wiki('observability#opentelemetry'),
               error_class: nil,
               error_message: nil
             )
@@ -453,7 +465,7 @@ module SearchEngine
             started,
             error,
             hint: 'Unable to determine OpenTelemetry status.',
-            doc: 'docs/observability.md'
+            doc: Doctor.wiki('observability')
           )
         end
 
