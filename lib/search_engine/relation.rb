@@ -77,20 +77,39 @@ module SearchEngine
     end
 
     # Console-friendly inspect:
-    # - In interactive consoles, execute and render hydrated records for quick preview
+    # - In interactive consoles, execute and render hydrated records as a plain Array.
     # - In non-interactive contexts, keep a concise summary without I/O
     # @return [String]
     def inspect
       if interactive_console?
         begin
           records = SearchEngine::Hydration::Materializers.to_a(self)
-          return "#<#{self.class.name} [#{records.map(&:inspect).join(', ')}]>"
+          # Render as a plain Array.
+          # Prefer pretty-printed formatting when available.
+          begin
+            require 'pp'
+            rendered = PP.pp(records, +'')
+            return rendered.end_with?("\n") ? rendered[0..-2] : rendered
+          rescue StandardError
+            return records.inspect
+          end
         rescue StandardError
           # fall back to summary below
         end
       end
 
       summary_inspect_string
+    end
+
+    # Pretty print as a plain Array of hydrated records (no Relation wrapper).
+    # This mirrors ActiveRecord, allowing Pry/IRB to format multiline arrays nicely.
+    # @param pp [PP]
+    # @return [void]
+    def pretty_print(pp)
+      records = SearchEngine::Hydration::Materializers.to_a(self)
+      pp.pp(records)
+    rescue StandardError
+      pp.text(summary_inspect_string)
     end
 
     # Explain the current relation without performing any network calls.

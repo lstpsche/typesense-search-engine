@@ -141,8 +141,8 @@ module SearchEngine
 
       result = with_exception_mapping(:put, path, {}, start) do
         # Minimal supported client: typesense-ruby >= 4.1.0
-        # API: ts.aliases.upsert(alias_name, collection_name)
-        ts.aliases.upsert(a, p)
+        # API: ts.aliases.upsert(alias_name, collection_name: "...")
+        ts.aliases.upsert(a, collection_name: p)
       end
 
       symbolize_keys_deep(result)

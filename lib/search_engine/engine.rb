@@ -103,5 +103,57 @@ module SearchEngine
         end
       end
     end
+
+    # Manage a dedicated Zeitwerk loader for host app SearchEngine models.
+    # Loads after Rails so application models/constants are available.
+    initializer 'search_engine.models_loader' do
+      # Resolve configured path; allow disabling via nil/false/empty.
+      cfg = SearchEngine.config
+      models_path_value = cfg.respond_to?(:search_engine_models) ? cfg.search_engine_models : nil
+      next if models_path_value.nil? || models_path_value == false || models_path_value.to_s.strip.empty?
+
+      require 'pathname'
+      path = Pathname.new(models_path_value.to_s)
+      path = Rails.root.join(path) unless path.absolute?
+      path_s = path.to_s
+      next unless File.directory?(path_s)
+
+      # Ensure Rails' autoloaders do not also manage this directory.
+      if defined?(Rails) && Rails.respond_to?(:autoloaders)
+        al = Rails.autoloaders
+        %i[main once].each do |key|
+          al.public_send(key).ignore(path_s) if al.respond_to?(key)
+        end
+      end
+
+      # Create or reuse a dedicated loader under SearchEngine namespace.
+      loader = SearchEngine.instance_variable_get(:@_models_loader)
+      unless loader
+        loader = Zeitwerk::Loader.new
+        loader.tag = 'search_engine.models'
+        # Reuse Rails' inflector for consistent constantization rules.
+        if defined?(Rails) && Rails.respond_to?(:autoloaders) && Rails.autoloaders.respond_to?(:main)
+          loader.inflector = Rails.autoloaders.main.inflector
+        end
+        loader.push_dir(path_s, namespace: SearchEngine)
+        loader.enable_reloading if defined?(Rails) && Rails.env.development?
+        SearchEngine.instance_variable_set(:@_models_loader, loader)
+      end
+
+      # Set up and coordinate with Rails reloader lifecycle.
+      config.to_prepare do
+        l = SearchEngine.instance_variable_get(:@_models_loader)
+        next unless l
+
+        unless SearchEngine.instance_variable_defined?(:@_models_loader_setup)
+          l.setup
+          SearchEngine.instance_variable_set(:@_models_loader_setup, true)
+        else
+          l.reload if defined?(Rails) && Rails.env.development?
+        end
+
+        l.eager_load if Rails.application.config.eager_load
+      end
+    end
   end
 end

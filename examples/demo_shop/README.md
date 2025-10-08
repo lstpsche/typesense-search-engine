@@ -6,7 +6,7 @@
 bin/setup
 bin/rails db:setup
 bin/rails runner "Docs::SeedDemo.run"
-bin/rails search_engine:schema:apply[products]
+bin/rails 'search_engine:schema:apply[products]'
 ```
 
 Set Typesense env vars or run offline. See `.env.example` for placeholders.
@@ -23,9 +23,9 @@ Set Typesense env vars or run offline. See `.env.example` for placeholders.
 
 ## Indexing
 
-- Apply schema: `bin/rails search_engine:schema:apply[products]`
-- Rebuild: `bin/rails search_engine:index:rebuild[products]`
-- Delete stale: `bin/rails search_engine:index:delete_stale[products]`
+- Apply schema: `bin/rails 'search_engine:schema:apply[products]'`
+- Rebuild: `bin/rails 'search_engine:index:rebuild[products]'`
+- Delete stale: `bin/rails 'search_engine:index:delete_stale[products]'`
 - Convenience: `bin/rails demo:index:all`
 
 ## Offline mode

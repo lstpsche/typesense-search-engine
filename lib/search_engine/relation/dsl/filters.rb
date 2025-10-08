@@ -6,11 +6,46 @@ module SearchEngine
       # Filter-related chainers and normalizers.
       # These methods are mixed into Relation's DSL and must preserve copy-on-write semantics.
       module Filters
+        # AR-style where.not support via a small chain proxy.
+        class WhereChain
+          def initialize(relation)
+            @relation = relation
+          end
+
+          # Replace positive predicates with negated form.
+          # Supports Hash, String templates, Arrays (delegated to parser with a negation flag).
+          # @param args [Array<Object>]
+          # @return [SearchEngine::Relation]
+          def not(*args)
+            nodes = Array(@relation.send(:build_ast_with_empty_array_rewrites, args, negated: true))
+
+            # Invert non-hidden predicates (Eq, In) returned by the builder
+            negated = nodes.map do |node|
+              case node
+              when SearchEngine::AST::Eq
+                SearchEngine::AST.not_eq(node.field, node.value)
+              when SearchEngine::AST::In
+                SearchEngine::AST.not_in(node.field, node.values)
+              else
+                node
+              end
+            end
+
+            @relation.send(:spawn) do |s|
+              s[:ast] = Array(s[:ast]) + negated
+              s[:filters] = Array(s[:filters])
+            end
+          end
+        end
+
         # Add filters to the relation.
+        # When called without arguments, returns a WhereChain for `.where.not(...)` style.
         # @param args [Array<Object>] filter arguments
-        # @return [SearchEngine::Relation]
+        # @return [SearchEngine::Relation, WhereChain]
         def where(*args)
-          ast_nodes = SearchEngine::DSL::Parser.parse_list(args, klass: @klass, joins: joins_list)
+          return WhereChain.new(self) if args.nil? || args.empty?
+
+          ast_nodes = build_ast_with_empty_array_rewrites(args, negated: false)
           fragments = normalize_where(args)
           spawn do |s|
             s[:ast] = Array(s[:ast]) + Array(ast_nodes)
@@ -38,6 +73,110 @@ module SearchEngine
         end
 
         private
+
+        # Build AST nodes, rewriting empty-array predicates to hidden *_empty flags when enabled.
+        # Delegates other inputs to the DSL parser.
+        def build_ast_with_empty_array_rewrites(args, negated: false)
+          items = Array(args).flatten.compact
+          return [] if items.empty?
+
+          out_nodes = []
+          non_hash_items = []
+
+          items.each do |entry|
+            if entry.is_a?(Hash)
+              entry.each do |k, v|
+                if v.is_a?(Hash)
+                  # Joined: { assoc => { field => value } }
+                  assoc = k.to_sym
+                  v.each do |inner_field, inner_value|
+                    field_sym = inner_field.to_sym
+                    if array_like?(inner_value)
+                      arr = Array(inner_value).flatten(1).compact
+                      if arr.empty?
+                        if joined_empty_filtering_enabled?(assoc, field_sym)
+                          lhs = "$#{assoc}.#{field_sym}_empty"
+                          out_nodes << SearchEngine::AST.raw("#{lhs}:=#{negated ? 'false' : 'true'}")
+                        else
+                          raise_empty_array_type!(field_sym)
+                        end
+                      else
+                        out_nodes << SearchEngine::DSL::Parser.parse(
+                          { assoc => { field_sym => inner_value } }, klass: @klass, joins: joins_list
+                        )
+                      end
+                    else
+                      out_nodes << SearchEngine::DSL::Parser.parse(
+                        { assoc => { field_sym => inner_value } }, klass: @klass, joins: joins_list
+                      )
+                    end
+                  end
+                else
+                  field = k.to_sym
+                  if array_like?(v) && Array(v).flatten(1).compact.empty?
+                    arr = Array(v).flatten(1).compact
+                    if arr.empty?
+                      if base_empty_filtering_enabled?(field)
+                        lhs = "#{field}_empty"
+                        out_nodes << SearchEngine::AST.raw("#{lhs}:=#{negated ? 'false' : 'true'}")
+                      else
+                        raise_empty_array_type!(field)
+                      end
+                    else
+                      out_nodes << SearchEngine::DSL::Parser.parse({ field => v }, klass: @klass, joins: joins_list)
+                    end
+                  else
+                    out_nodes << SearchEngine::DSL::Parser.parse({ field => v }, klass: @klass, joins: joins_list)
+                  end
+                end
+              end
+            else
+              non_hash_items << entry
+            end
+          end
+
+          unless non_hash_items.empty?
+            out_nodes.concat(
+              Array(SearchEngine::DSL::Parser.parse_list(non_hash_items, klass: @klass, joins: joins_list))
+            )
+          end
+
+          out_nodes.flatten.compact
+        end
+
+        def base_empty_filtering_enabled?(field_sym)
+          opts = @klass.respond_to?(:attribute_options) ? (@klass.attribute_options || {}) : {}
+          o = opts[field_sym]
+          o.is_a?(Hash) && o[:empty_filtering]
+        rescue StandardError
+          false
+        end
+
+        def joined_empty_filtering_enabled?(assoc_sym, field_sym)
+          cfg = @klass.join_for(assoc_sym)
+          collection = cfg[:collection]
+          return false if collection.nil? || collection.to_s.strip.empty?
+
+          target_klass = SearchEngine.collection_for(collection)
+          return false unless target_klass.respond_to?(:attribute_options)
+
+          o = (target_klass.attribute_options || {})[field_sym]
+          o.is_a?(Hash) && o[:empty_filtering]
+        rescue StandardError
+          false
+        end
+
+        def array_like?(value)
+          value.is_a?(Array)
+        end
+
+        def raise_empty_array_type!(field_sym)
+          raise SearchEngine::Errors::InvalidType.new(
+            %(expected #{field_sym.inspect} to be a non-empty Array),
+            doc: 'docs/query_dsl.md#troubleshooting',
+            details: { field: field_sym }
+          )
+        end
 
         # Normalize where arguments into an array of string fragments safe for Typesense.
         def normalize_where(args)

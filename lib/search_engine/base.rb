@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require 'forwardable'
-
 module SearchEngine
   # Base class for SearchEngine models.
   #
@@ -11,16 +9,6 @@ module SearchEngine
   # subclass overwrites only at the subclass level.
   class Base
     class << self
-      # Enable AR-like class-level chaining by delegating DSL and materializers
-      # to a fresh Relation via `.all`. This allows calls like:
-      #   Product.where(id: 1).order(:updated_at).per(5)
-      #   Product.count
-      #   Product.pluck(:id)
-      # without requiring an explicit `.all` in user code.
-      #
-      # Uses stdlib SingleForwardable to avoid hard dependency on ActiveSupport.
-      extend SingleForwardable
-
       # Get or set the Typesense collection name for this model.
       #
       # When setting, the name is normalized to String and the mapping is
@@ -40,14 +28,93 @@ module SearchEngine
         self
       end
 
+      # Set or get the per-collection default query_by fields.
+      #
+      # Accepts a String (comma-separated), a Symbol, or an Array of Strings/Symbols.
+      # Values are normalized into a canonical comma-separated String with single
+      # spaces after commas (e.g., "name, brand, description"). When called
+      # without arguments, returns the canonical String or nil if unset.
+      #
+      # @param values [Array<String,Symbol,Array>] zero or more field tokens; Arrays are flattened
+      # @return [String, Class] returns the canonical String on read; returns self on write
+      def query_by(*values)
+        return @__model_default_query_by__ if values.nil? || values.empty?
+
+        flat = values.flatten(1).compact
+
+        list = if flat.size == 1 && flat.first.is_a?(String)
+                 flat.first.split(',').map { |s| s.to_s.strip }.reject(&:empty?)
+               else
+                 flat.map do |v|
+                   case v
+                   when String, Symbol then v.to_s.strip
+                   else
+                     raise ArgumentError, 'query_by accepts Symbols, Strings, or Arrays thereof'
+                   end
+                 end.reject(&:empty?)
+               end
+
+        canonical = list.join(', ')
+        @__model_default_query_by__ = canonical.empty? ? nil : canonical
+        self
+      end
+
       # Declare an attribute with an optional type (symbol preferred).
       #
       # @param name [#to_sym]
       # @param type [Object] type descriptor (e.g., :string, :integer)
+      # @param locale [String, nil] only applicable to :string and [:string]; when set,
+      #   the raw value is passed to the Typesense field's `locale`
+      # @param empty_filtering [Boolean, nil] only applicable to array types (e.g., [:string]).
+      #   When true, the gem will add an internal hidden boolean field "<name>_empty" used to
+      #   support `.where(name: [])` and `.where.not(name: [])` semantics. Hidden fields are
+      #   not exposed via public APIs or inspect and are populated automatically by the mapper.
       # @return [void]
-      def attribute(name, type = :string)
+      def attribute(name, type = :string, locale: nil, empty_filtering: nil)
         n = name.to_sym
+        if n == :id
+          raise SearchEngine::Errors::InvalidField,
+                'The :id field is reserved; use `identify_by` to set the Typesense document id.'
+        end
         (@attributes ||= {})[n] = type
+        # Validate and persist per-attribute options: locale and empty_filtering
+        if !locale.nil? || !empty_filtering.nil?
+          @attribute_options ||= {}
+          new_opts = (@attribute_options[n] || {}).dup
+
+          unless locale.nil?
+            is_string = type.to_s.downcase == 'string'
+            is_string_array = type.is_a?(Array) && type.size == 1 && type.first.to_s.downcase == 'string'
+            unless is_string || is_string_array
+              raise SearchEngine::Errors::InvalidOption,
+                    "`locale` is only applicable to :string and [:string] (got #{type.inspect})"
+            end
+            new_opts[:locale] = locale.to_s
+          else
+            new_opts.delete(:locale)
+          end
+
+          unless empty_filtering.nil?
+            is_array_type = type.is_a?(Array) && type.size == 1
+            unless is_array_type
+              raise SearchEngine::Errors::InvalidOption,
+                    "`empty_filtering` is only applicable to array types (e.g., [:string]); got #{type.inspect}"
+            end
+            new_opts[:empty_filtering] = !!empty_filtering
+          else
+            new_opts.delete(:empty_filtering)
+          end
+
+          if new_opts.empty?
+            # Remove stored options for this field if none remain
+            @attribute_options = @attribute_options.dup
+            @attribute_options.delete(n)
+          else
+            @attribute_options[n] = new_opts
+          end
+        elsif instance_variable_defined?(:@attribute_options) && (@attribute_options || {}).key?(n)
+          # When re-declared without options, keep prior options as-is (idempotent)
+        end
         # Define an instance reader for the attribute unless one already exists.
         # Idempotent across repeated declarations and inheritance.
         attr_reader n unless method_defined?(n)
@@ -59,6 +126,13 @@ module SearchEngine
       # @return [Hash{Symbol=>Object}] a frozen copy of attributes
       def attributes
         (@attributes || {}).dup.freeze
+      end
+
+      # Read-only view of declared per-attribute options (e.g., locale).
+      #
+      # @return [Hash{Symbol=>Hash}] frozen copy of options map
+      def attribute_options
+        (@attribute_options || {}).dup.freeze
       end
 
       # Configure schema retention policy for this collection.
@@ -83,6 +157,10 @@ module SearchEngine
         parent_attrs = @attributes || {}
         subclass.instance_variable_set(:@attributes, parent_attrs.dup)
 
+        # Inherit per-attribute options via copy-on-write snapshot
+        parent_attr_opts = @attribute_options || {}
+        subclass.instance_variable_set(:@attribute_options, parent_attr_opts.dup)
+
         parent_retention = @schema_retention || {}
         subclass.instance_variable_set(:@schema_retention, parent_retention.dup)
 
@@ -91,10 +169,21 @@ module SearchEngine
         subclass.instance_variable_set(:@joins_config, parent_joins.dup.freeze)
 
         # Inherit declared default preset token if present
-        return unless instance_variable_defined?(:@__declared_default_preset__)
+        if instance_variable_defined?(:@__declared_default_preset__)
+          token = instance_variable_get(:@__declared_default_preset__)
+          subclass.instance_variable_set(:@__declared_default_preset__, token)
+        end
 
-        token = instance_variable_get(:@__declared_default_preset__)
-        subclass.instance_variable_set(:@__declared_default_preset__, token)
+        # Inherit model-level default query_by if present
+        if instance_variable_defined?(:@__model_default_query_by__)
+          qb = instance_variable_get(:@__model_default_query_by__)
+          subclass.instance_variable_set(:@__model_default_query_by__, qb)
+        end
+
+        return unless instance_variable_defined?(:@identify_by_proc)
+
+        # Propagate identity strategy to subclasses
+        subclass.instance_variable_set(:@identify_by_proc, @identify_by_proc)
       end
 
       # Return a fresh, immutable relation bound to this model class.
@@ -108,74 +197,6 @@ module SearchEngine
       def all
         SearchEngine::Relation.new(self)
       end
-
-      # Delegate Relation DSL chainers to `.all` for AR-style usage.
-      # @!method where(*args)
-      #   @see SearchEngine::Relation::DSL::Filters#where
-      # @!method rewhere(input, *args)
-      #   @see SearchEngine::Relation::DSL::Filters#rewhere
-      # @!method order(value)
-      #   @see SearchEngine::Relation::DSL#order
-      # @!method preset(name, mode: :merge)
-      #   @see SearchEngine::Relation::DSL#preset
-      # @!method ranking(**opts)
-      #   @see SearchEngine::Relation::DSL#ranking
-      # @!method prefix(mode)
-      #   @see SearchEngine::Relation::DSL#prefix
-      # @!method pin(*ids)
-      #   @see SearchEngine::Relation::DSL#pin
-      # @!method hide(*ids)
-      #   @see SearchEngine::Relation::DSL#hide
-      # @!method curate(pin: nil, hide: nil, override_tags: nil, filter_curated_hits: :__unset__)
-      #   @see SearchEngine::Relation::DSL#curate
-      # @!method clear_curation
-      #   @see SearchEngine::Relation::DSL#clear_curation
-      # @!method facet_by(field, max_values: nil, sort: nil, stats: nil)
-      #   @see SearchEngine::Relation::DSL#facet_by
-      # @!method facet_query(field, expression, label: nil)
-      #   @see SearchEngine::Relation::DSL#facet_query
-      # @!method group_by(field, limit: nil, missing_values: false)
-      #   @see SearchEngine::Relation::DSL#group_by
-      # @!method unscope(*parts)
-      #   @see SearchEngine::Relation::DSL#unscope
-      # @!method limit(n)
-      #   @see SearchEngine::Relation::DSL#limit
-      # @!method offset(n)
-      #   @see SearchEngine::Relation::DSL#offset
-      # @!method page(n)
-      #   @see SearchEngine::Relation::DSL#page
-      # @!method per_page(n)
-      #   @see SearchEngine::Relation::DSL#per_page
-      # @!method per(n)
-      #   @see SearchEngine::Relation::DSL#per
-      # @!method options(opts = {})
-      #   @see SearchEngine::Relation::DSL#options
-      # @!method joins(*assocs)
-      #   @see SearchEngine::Relation::DSL#joins
-      # @!method use_synonyms(value)
-      #   @see SearchEngine::Relation::DSL#use_synonyms
-      # @!method use_stopwords(value)
-      #   @see SearchEngine::Relation::DSL#use_stopwords
-      # @!method select(*fields)
-      #   @see SearchEngine::Relation::DSL::Selection#select
-      # @!method include_fields(*fields)
-      #   @see SearchEngine::Relation::DSL::Selection#include_fields
-      # @!method exclude(*fields)
-      #   @see SearchEngine::Relation::DSL::Selection#exclude
-      # @!method reselect(*fields)
-      #   @see SearchEngine::Relation::DSL::Selection#reselect
-      # @!method limit_hits(n)
-      #   @see SearchEngine::Relation::DSL#limit_hits
-      # @!method validate_hits!(max:)
-      #   @see SearchEngine::Relation::DSL#validate_hits!
-      def_single_delegators :all,
-                            :where, :rewhere, :order, :preset, :ranking, :prefix,
-                            :pin, :hide, :curate, :clear_curation,
-                            :facet_by, :facet_query, :group_by, :unscope,
-                            :limit, :offset, :page, :per_page, :per, :options,
-                            :joins, :use_synonyms, :use_stopwords,
-                            :select, :include_fields, :exclude, :reselect,
-                            :limit_hits, :validate_hits!
 
       # Delegate materializers to `.all` so callers can do `Model.first` etc.
       # @!method to_a
@@ -198,9 +219,16 @@ module SearchEngine
       #   @return [Integer]
       # @!method execute
       #   @return [SearchEngine::Result]
-      def_single_delegators :all,
-                            :to_a, :each, :first, :last, :take, :ids, :pluck,
-                            :exists?, :count, :execute
+      %i[
+        where rewhere order preset ranking prefix
+        pin hide curate clear_curation
+        facet_by facet_query group_by unscope
+        limit offset page per_page per options
+        joins use_synonyms use_stopwords
+        select include_fields exclude reselect
+        limit_hits validate_hits!
+        first last take pluck exists? count
+      ].each { |method| delegate method, to: :all }
 
       # Define collection-level indexing configuration and mapping.
       #
@@ -233,6 +261,58 @@ module SearchEngine
         # Store definition on the class; Mapper.for will compile and cache
         instance_variable_set(:@__mapper_dsl__, definition)
         nil
+      end
+
+      # Configure how to compute the Typesense document id for this collection.
+      #
+      # Accepts either a Symbol/String referring to a record method name, or a Proc/Lambda
+      # that takes the source record and returns the id value. The value is coerced to String.
+      #
+      # When not configured, the default is +record.id.to_s+.
+      #
+      # @param strategy [Symbol, String, Proc] method name or callable
+      # @yield [record] optional block form to compute id
+      # @yieldparam record [Object]
+      # @return [Class] self (for macro chaining)
+      # @raise [SearchEngine::Errors::InvalidOption] when inputs are invalid
+      def identify_by(strategy = nil, &block)
+        callable = if block_given?
+                     block
+                   elsif strategy.is_a?(Proc)
+                     if strategy.arity != 1 && strategy.arity != -1
+                       raise SearchEngine::Errors::InvalidOption,
+                             'identify_by Proc/Lambda must accept exactly 1 argument (record)'
+                     end
+
+                     strategy
+                   elsif strategy.is_a?(Symbol) || strategy.is_a?(String)
+                     meth = strategy.to_s
+                     ->(record) { record.public_send(meth) }
+                   else
+                     raise SearchEngine::Errors::InvalidOption,
+                           'identify_by expects a Symbol/String method name or a Proc/Lambda (or block)'
+                   end
+
+        # Normalize to a proc that always returns String
+        @identify_by_proc = lambda do |record|
+          val = callable.call(record)
+          val.is_a?(String) ? val : val.to_s
+        end
+        self
+      end
+
+      # Compute the Typesense document id for a given source record using the configured
+      # identity strategy (or the default +record.id.to_s+ when unset).
+      # @param record [Object]
+      # @return [String]
+      def compute_document_id(record)
+        val =
+          if instance_variable_defined?(:@identify_by_proc) && (proc = @identify_by_proc)
+            proc.call(record)
+          else
+            record.respond_to?(:id) ? record.id : nil
+          end
+        val.is_a?(String) ? val : val.to_s
       end
 
       # Define a stale filter builder for delete-by-filter operations.
@@ -388,12 +468,55 @@ module SearchEngine
         declared = attributes # { Symbol => type }
         unknown = {}
 
+        # Build sets of hidden field names to strip from unknown attributes.
+        begin
+          attr_opts = respond_to?(:attribute_options) ? attribute_options : {}
+        rescue StandardError
+          attr_opts = {}
+        end
+        hidden_local = []
+        attr_opts.each do |fname, opts|
+          next unless opts.is_a?(Hash) && opts[:empty_filtering]
+
+          hidden_local << "#{fname}_empty"
+        end
+
+        # For joined associations, hide $assoc.<field>_empty when target collection enabled it.
+        hidden_join = []
+        begin
+          joins_cfg = self.class.respond_to?(:joins_config) ? self.class.joins_config : {}
+          joins_cfg.each do |assoc_name, cfg|
+            collection = cfg[:collection]
+            next if collection.nil? || collection.to_s.strip.empty?
+
+            begin
+              target_klass = SearchEngine.collection_for(collection)
+              next unless target_klass.respond_to?(:attribute_options)
+
+              opts = target_klass.attribute_options || {}
+              opts.each do |field_sym, o|
+                next unless o.is_a?(Hash) && o[:empty_filtering]
+
+                hidden_join << "$#{assoc_name}.#{field_sym}_empty"
+              end
+            rescue StandardError
+              # Best-effort; skip when registry/metadata unavailable
+            end
+          end
+        rescue StandardError
+          # ignore
+        end
+
         (doc || {}).each do |k, v|
           key_str = k.to_s
           key_sym = key_str.to_sym
           if declared.key?(key_sym)
             obj.instance_variable_set("@#{key_sym}", v)
           else
+            # Strip hidden fields from unknowns
+            next if hidden_local.include?(key_str)
+            next if hidden_join.include?(key_str)
+
             unknown[key_str] = v
           end
         end
@@ -409,6 +532,196 @@ module SearchEngine
     def unknown_attributes
       h = instance_variable_get(:@__unknown_attributes__)
       h ? h.dup : {}
+    end
+
+    # Return the document update timestamp coerced to Time.
+    #
+    # Prefers a declared attribute reader (when present). Falls back to the
+    # unknown attributes payload (as returned by the backend) when the field
+    # was not declared via the DSL. The value is coerced using the same logic
+    # used for console rendering.
+    #
+    # @return [Time, nil]
+    def doc_updated_at
+      value = if instance_variable_defined?(:@doc_updated_at)
+                instance_variable_get(:@doc_updated_at)
+              else
+                raw = instance_variable_get(:@__unknown_attributes__)
+                if raw&.key?('doc_updated_at')
+                  raw['doc_updated_at']
+                elsif raw&.key?(:doc_updated_at)
+                  raw[:doc_updated_at]
+                end
+              end
+
+      return nil if value.nil?
+
+      __se_coerce_doc_updated_at_for_display(value)
+    rescue StandardError
+      nil
+    end
+
+    # Return a symbol-keyed Hash of attributes for this record.
+    #
+    # - Includes declared attributes in declaration order
+    # - Ensures :doc_updated_at is present and coerced to Time when available
+    # - Includes unknown fields under :unknown_attributes (String-keyed), with
+    #   "doc_updated_at" removed to avoid duplication
+    #
+    # @return [Hash{Symbol=>Object}]
+    def attributes
+      declared = begin
+        self.class.respond_to?(:attributes) ? self.class.attributes : {}
+      rescue StandardError
+        {}
+      end
+
+      out = {}
+
+      declared.each_key do |name|
+        val = instance_variable_get("@#{name}")
+        out[name] =
+          if name.to_s == 'doc_updated_at' && !val.nil?
+            __se_coerce_doc_updated_at_for_display(val)
+          else
+            val
+          end
+      end
+
+      raw_unknowns = instance_variable_get(:@__unknown_attributes__)
+      unknowns = raw_unknowns ? raw_unknowns.dup : {}
+
+      unless out.key?(:doc_updated_at)
+        raw_val = unknowns['doc_updated_at']
+        raw_val = unknowns[:doc_updated_at] if raw_val.nil?
+        out[:doc_updated_at] = __se_coerce_doc_updated_at_for_display(raw_val) unless raw_val.nil?
+      end
+
+      # Remove duplicate source of doc_updated_at from nested unknowns
+      unknowns.delete('doc_updated_at')
+      unknowns.delete(:doc_updated_at)
+
+      out[:unknown_attributes] = unknowns unless unknowns.empty?
+      out
+    end
+
+    # Human-friendly inspect that lists declared attributes and, when present,
+    # unknown attributes captured during hydration.
+    # @return [String]
+    def inspect
+      pairs = __attribute_pairs_for_render
+      hex_id = begin
+        # Mimic Ruby's default hex object id formatting
+        format('0x%014x', object_id << 1)
+      rescue StandardError
+        object_id
+      end
+      attrs = pairs.map { |(k, v)| "#{k}: #{v.inspect}" }.join(', ')
+      "#<#{self.class.name}:#{hex_id} #{attrs}>"
+    end
+
+    # Pretty-print with attributes on separate lines for readability in consoles.
+    # Integrates with PP so arrays of models render multiline.
+    # @param pp [PP]
+    # @return [void]
+    def pretty_print(pp)
+      hex_id = begin
+        format('0x%014x', object_id << 1)
+      rescue StandardError
+        object_id
+      end
+      pairs = __attribute_pairs_for_render
+      pp.group(2, "#<#{self.class.name}:#{hex_id} ", '>') do
+        pp.breakable ''
+        pairs.each_with_index do |(k, v), idx|
+          if v.is_a?(Array) || v.is_a?(Hash)
+            pp.text("#{k}:")
+            pp.nest(2) do
+              pp.breakable ''
+              pp.pp(v)
+            end
+          else
+            pp.text("#{k}: ")
+            pp.pp(v)
+          end
+          if idx < pairs.length - 1
+            pp.text(',')
+            pp.breakable ''
+          end
+        end
+      end
+    end
+
+    private
+
+    # Build ordered list of attribute pairs for rendering:
+    # - Declared attributes in declaration order (with id rendered first when present)
+    # - Followed by unknown attributes (when present)
+    # @return [Array<[String, Object]>]
+    def __attribute_pairs_for_render
+      declared = begin
+        self.class.respond_to?(:attributes) ? self.class.attributes : {}
+      rescue StandardError
+        {}
+      end
+      pairs = []
+
+      # Render id first if declared
+      if declared.key?(:id)
+        id_val = instance_variable_get('@id')
+        pairs << ['id', id_val]
+      end
+
+      declared.each_key do |name|
+        next if name.to_s == 'id'
+
+        value = instance_variable_get("@#{name}")
+        pairs << if name.to_s == 'doc_updated_at' && !value.nil?
+                   [name.to_s, __se_coerce_doc_updated_at_for_display(value)]
+                 else
+                   [name.to_s, value]
+                 end
+      end
+
+      extras = unknown_attributes
+      unless extras.empty?
+        # If id wasn't declared but present in unknowns (e.g., no attribute declared), render it first
+        if !declared.key?(:id) && (extras.key?('id') || extras.key?(:id))
+          id_v = extras['id'] || extras[:id]
+          pairs.unshift(['id', id_v])
+        end
+
+        extras.each do |k, v|
+          next if k.to_s == 'id' # already rendered first
+
+          pairs <<
+            if k.to_s == 'doc_updated_at' && !v.nil?
+              [k.to_s, __se_coerce_doc_updated_at_for_display(v)]
+            else
+              pairs << [k.to_s, v]
+            end
+        end
+      end
+      pairs
+    end
+
+    # Convert integer epoch seconds to a Time in the current zone for display.
+    # Falls back gracefully when value is not an Integer.
+    def __se_coerce_doc_updated_at_for_display(value)
+      int_val = begin
+        Integer(value)
+      rescue StandardError
+        nil
+      end
+      return value if int_val.nil?
+
+      if defined?(Time) && defined?(Time.zone) && Time.zone
+        Time.zone.at(int_val)
+      else
+        Time.at(int_val)
+      end
+    rescue StandardError
+      value
     end
   end
 end

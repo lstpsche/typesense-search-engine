@@ -121,6 +121,7 @@ module SearchEngine
         @required_keys = @schema_fields.map(&:to_sym).to_set.freeze
         @allowed_keys = @required_keys
         @options = default_options.merge(options || {})
+        @__empty_filtering_targets__ = compute_empty_filtering_targets
         freeze
       end
 
@@ -136,6 +137,29 @@ module SearchEngine
 
         rows.each do |row|
           hash = normalize_document(@map_proc.call(row))
+          # Ignore any provided id from map; always inject computed document id
+          hash.delete(:id)
+          hash.delete('id')
+          begin
+            computed_id = @klass.compute_document_id(row)
+          rescue NoMethodError
+            # Fallback for older compiled mappers if needed; derive from record.id
+            rid = row.respond_to?(:id) ? row.id : nil
+            computed_id = rid.is_a?(String) ? rid : rid.to_s
+          end
+          hash[:id] = computed_id
+          # Force system timestamp field on every document; developers cannot override.
+          now_i = if defined?(Time) && defined?(Time.zone) && Time.zone
+                    Time.zone.now.to_i
+                  else
+                    Time.now.to_i
+                  end
+          # Overwrite any provided value
+          hash[:doc_updated_at] = now_i
+
+          # Populate hidden empty flags for eligible array fields
+          set_hidden_empty_flags!(hash)
+
           update_stats_for_doc!(stats, hash)
           validate_and_coerce_types!(stats, hash)
           docs << hash
@@ -209,6 +233,19 @@ module SearchEngine
           elsif !valid && stats[:invalid_type_samples].size < @options[:max_error_samples]
             stats[:invalid_type_samples] << err
           end
+        end
+      end
+
+      # Compute and set hidden *_empty flags based on configured array fields.
+      # Adds the hidden flag only when the field is present in the schema (allowed_keys).
+      def set_hidden_empty_flags!(doc)
+        return if @__empty_filtering_targets__.empty?
+
+        @__empty_filtering_targets__.each do |base_name|
+          value = doc[base_name.to_sym]
+          value = doc[base_name.to_s] if value.nil?
+          flag_name = (base_name.to_s + '_empty')
+          doc[flag_name.to_sym] = (value.nil? || (value.is_a?(Array) && value.empty?)) ? true : false
         end
       end
 
@@ -337,6 +374,25 @@ module SearchEngine
         got_class = got.nil? ? 'NilClass' : got.class.name
         got_preview = got.is_a?(String) ? got[0, 50] : got.to_s[0, 50]
         "Invalid type for field :#{field} (expected #{expected}, got #{got_class}: \"#{got_preview}\")."
+      end
+
+      # Determine which declared array attributes have empty_filtering enabled.
+      # Returns an Array of base field names as Strings.
+      def compute_empty_filtering_targets
+        begin
+          opts = @klass.respond_to?(:attribute_options) ? (@klass.attribute_options || {}) : {}
+        rescue StandardError
+          opts = {}
+        end
+        targets = []
+        opts.each do |fname, o|
+          next unless o.is_a?(Hash) && o[:empty_filtering]
+          hidden = (fname.to_s + '_empty')
+          if @types_by_field.key?(hidden) || @required_keys.include?(hidden.to_sym)
+            targets << fname.to_s
+          end
+        end
+        targets.freeze
       end
 
       def instrument_batch_mapped(batch_index:, docs_count:, duration_ms:,

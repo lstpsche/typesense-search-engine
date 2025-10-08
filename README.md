@@ -19,15 +19,17 @@ SearchEngine.configure do |c|
   c.port = 8108
   c.protocol = "http"
   c.api_key = ENV.fetch("TYPESENSE_API_KEY")
-  c.default_query_by = "name, description"
 end
 ```
 
 ```ruby
 class SearchEngine::Product < SearchEngine::Base
   collection :products
+
   attribute :id, :integer
   attribute :name, :string
+
+  query_by %i[name brand description]
 end
 
 SearchEngine::Product.where(name: "milk").select(:id, :name).limit(5).to_a
@@ -35,12 +37,27 @@ SearchEngine::Product.where(name: "milk").select(:id, :name).limit(5).to_a
 
 See Quickstart → [Quickstart](https://github.com/lstpsche/typesense-search-engine/wiki/Quickstart).
 
+### Host app SearchEngine models
+
+By default, the gem manages a dedicated Zeitwerk loader for your SearchEngine models under `app/search_engine/`. The loader is initialized after Rails so that application models/constants are available, auto-reloads in development, and is eager-loaded in production/test.
+
+Customize or disable via configuration:
+
+```ruby
+# config/initializers/search_engine.rb
+SearchEngine.configure do |c|
+  # Relative to Rails.root or absolute; set to nil/false to disable
+  c.search_engine_models = 'app/search_engine'
+end
+```
+
 ## Usage examples
 
 ```ruby
 # Model
 class SearchEngine::Product < SearchEngine::Base
   collection "products"
+
   attribute :id, :integer
   attribute :name, :string
 end
@@ -48,6 +65,8 @@ end
 # Basic query
 SearchEngine::Product
   .where(name: "milk")
+  # Explicit query_by always wins over model/global defaults
+  .options(query_by: 'name,brand')
   .select(:id, :name)
   .order(price_cents: :asc)
   .limit(5)

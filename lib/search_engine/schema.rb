@@ -47,11 +47,45 @@ module SearchEngine
         end
 
         attributes_map = klass.respond_to?(:attributes) ? klass.attributes : {}
+        attribute_options = klass.respond_to?(:attribute_options) ? (klass.attribute_options || {}) : {}
         fields_array = []
         attributes_map.each do |attribute_name, type_descriptor|
           ts_type = typesense_type_for(type_descriptor)
           fields_array << { name: attribute_name.to_s, type: ts_type }
+
+          # Hidden *_empty field for array attributes with empty_filtering enabled
+          begin
+            opts = attribute_options[attribute_name.to_sym] || {}
+            if opts[:empty_filtering]
+              # Ensure it applies only to array types in schema as well
+              if type_descriptor.is_a?(Array) && type_descriptor.size == 1
+                fields_array << { name: "#{attribute_name}_empty", type: 'bool' }
+              end
+            end
+          rescue StandardError
+            # best-effort
+          end
         end
+
+        # Ensure mandatory system field is present with enforced type.
+        # Developers should not declare this field; if they do, we coerce type to int64.
+        has_updated_at = false
+        fields_array.each do |f|
+          fname = (f[:name] || f['name']).to_s
+          next unless fname == 'doc_updated_at'
+
+          # Coerce type deterministically to int64
+          if f.key?(:type)
+            f[:type] = 'int64'
+          elsif f.key?('type')
+            f['type'] = 'int64'
+          else
+            f[:type] = 'int64'
+          end
+          has_updated_at = true
+          break
+        end
+        fields_array << { name: 'doc_updated_at', type: 'int64' } unless has_updated_at
 
         schema = { name: collection_name.to_s, fields: fields_array }
         deep_freeze(schema)

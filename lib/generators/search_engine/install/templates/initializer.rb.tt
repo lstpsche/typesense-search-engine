@@ -25,7 +25,19 @@ SearchEngine.configure do |c|
   # Uncomment and customize to your schema.
   # c.default_query_by = 'name, description'
 
+  # Tip: You can also set per-collection defaults in your model:
+  # class SearchEngine::Product < SearchEngine::Base
+  #   collection 'products'
+  #   # Accepts String, Symbol, or Array; stored as a canonical String
+  #   query_by %i[name brand description]
+  # end
+
   # Optional: set a default console model for SE.q/SE.rel helpers.
   # Accepts a constant or String name (e.g., 'SearchEngine::Product').
   # c.default_console_model = nil
+
+  # Host app SearchEngine models directory. Relative paths are resolved against
+  # Rails.root. Set to nil/false to disable gem-managed loading.
+  # Defaults to 'app/search_engine'.
+  # c.search_engine_models = 'app/search_engine'
 end

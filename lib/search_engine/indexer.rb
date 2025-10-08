@@ -513,6 +513,15 @@ module SearchEngine
         docs.each do |raw|
           doc = ensure_hash_document(raw)
           ensure_id!(doc)
+          # Force system timestamp field just before serialization; developers cannot override.
+          now_i = if defined?(Time) && defined?(Time.zone) && Time.zone
+                    Time.zone.now.to_i
+                  else
+                    Time.now.to_i
+                  end
+          if doc.is_a?(Hash)
+            doc[:doc_updated_at] = now_i
+          end
           buffer << JSON.generate(doc)
           buffer << "\n" if count < (docs.size - 1)
           count += 1

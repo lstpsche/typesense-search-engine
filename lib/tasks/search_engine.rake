@@ -8,7 +8,7 @@ require 'search_engine/cli'
 namespace :search_engine do
   # ------------------------- Schema tasks -------------------------
   namespace :schema do
-    desc 'Diff compiled schema vs live collection. Usage: rails search_engine:schema:diff[collection]'
+    desc "Diff compiled schema vs live collection. Usage: rails 'search_engine:schema:diff[collection]'"
     task :diff, [:collection] => :environment do |_t, args|
       begin
         klass = SearchEngine::CLI.resolve_collection!(args[:collection])
@@ -50,7 +50,7 @@ namespace :search_engine do
       Kernel.exit(1)
     end
 
-    desc 'Apply schema (create + reindex + swap + retention). Usage: rails search_engine:schema:apply[collection]'
+    desc "Apply schema (create + reindex + swap + retention). Usage: rails 'search_engine:schema:apply[collection]'"
     task :apply, [:collection] => :environment do |_t, args|
       begin
         klass = SearchEngine::CLI.resolve_collection!(args[:collection])
@@ -94,7 +94,7 @@ namespace :search_engine do
       Kernel.exit(1)
     end
 
-    desc 'Rollback schema alias to previous retained physical. Usage: rails search_engine:schema:rollback[collection]'
+    desc "Rollback schema alias to previous retained physical. Usage: rails 'search_engine:schema:rollback[collection]'"
     task :rollback, [:collection] => :environment do |_t, args|
       begin
         klass = SearchEngine::CLI.resolve_collection!(args[:collection])
@@ -135,7 +135,7 @@ namespace :search_engine do
 
   # ------------------------- Index tasks -------------------------
   namespace :index do
-    desc 'Rebuild entire index (all partitions or single). Usage: rails search_engine:index:rebuild[collection]'
+    desc "Rebuild entire index (all partitions or single). Usage: rails 'search_engine:index:rebuild[collection]'"
     task :rebuild, [:collection] => :environment do |_t, args|
       begin
         klass = SearchEngine::CLI.resolve_collection!(args[:collection])
@@ -197,13 +197,28 @@ namespace :search_engine do
             partition: nil,
             into: SearchEngine::CLI.resolve_into!(klass, partition: nil, into: nil)
           )
+          # Aggregate a small sample of error messages for visibility when failed/partial
+          error_samples = []
+          if summary.failed_total.to_i > 0
+            Array(summary.batches).each do |b|
+              samples = (b[:errors_sample] || b['errors_sample'])
+              Array(samples).each do |msg|
+                error_samples << msg
+                break if error_samples.size >= 5
+              end
+              break if error_samples.size >= 5
+            end
+            error_samples.uniq!
+          end
           actions << {
             mode: :inline,
             indexer_summary: {
               status: summary.status,
               docs_total: summary.docs_total,
               batches_total: summary.batches_total,
-              duration_ms_total: summary.duration_ms_total
+              duration_ms_total: summary.duration_ms_total,
+              failed_total: summary.failed_total,
+              error_samples: (error_samples && !error_samples.empty? ? error_samples : nil)
             },
             partition: nil
           }
@@ -220,13 +235,38 @@ namespace :search_engine do
             puts("Enqueued partition=#{a[:partition].inspect} to queue=#{a[:queue]} (job_id=#{a[:job_id]})")
           else
             sum = a[:indexer_summary]
+            # Support both Struct and Hash forms
+            status = sum.respond_to?(:status) ? sum.status : sum[:status]
+            docs_total = sum.respond_to?(:docs_total) ? sum.docs_total : sum[:docs_total]
+            batches_total = sum.respond_to?(:batches_total) ? sum.batches_total : sum[:batches_total]
+            duration_ms_total = sum.respond_to?(:duration_ms_total) ? sum.duration_ms_total : sum[:duration_ms_total]
             puts(
               "Imported partition=#{a[:partition].inspect} " \
-              "status=#{sum[:status]} " \
-              "docs=#{sum[:docs_total]} " \
-              "batches=#{sum[:batches_total]} " \
-              "duration_ms=#{sum[:duration_ms_total]}"
+              "status=#{status} " \
+              "docs=#{docs_total} " \
+              "batches=#{batches_total} " \
+              "duration_ms=#{duration_ms_total}"
             )
+            if status != :ok
+              failed_total = sum.respond_to?(:failed_total) ? sum.failed_total : sum[:failed_total]
+              error_samples = if sum.respond_to?(:batches)
+                                 errs = []
+                                 Array(sum.batches).each do |b|
+                                   samples = (b[:errors_sample] || b['errors_sample'])
+                                   Array(samples).each do |msg|
+                                     errs << msg
+                                     break if errs.size >= 5
+                                   end
+                                   break if errs.size >= 5
+                                 end
+                                 errs.uniq
+                               else
+                                 Array(sum[:error_samples])
+                               end
+              if failed_total.to_i > 0
+                puts("Failures=#{failed_total}#{error_samples && !error_samples.empty? ? ' sample_errors=' + error_samples.join(' | ') : ''}")
+              end
+            end
           end
         end
       end
@@ -237,7 +277,7 @@ namespace :search_engine do
       Kernel.exit(1)
     end
 
-    desc 'Rebuild a single partition. Usage: rails search_engine:index:rebuild_partition[collection,partition]'
+    desc "Rebuild a single partition. Usage: rails 'search_engine:index:rebuild_partition[collection,partition]'"
     task :rebuild_partition, %i[collection partition] => :environment do |_t, args|
       begin
         klass = SearchEngine::CLI.resolve_collection!(args[:collection])
@@ -289,13 +329,37 @@ namespace :search_engine do
         puts("Enqueued partition=#{partition.inspect} to queue=#{action[:queue]} (job_id=#{action[:job_id]})")
       else
         sum = action[:indexer_summary]
+        status = sum.respond_to?(:status) ? sum.status : sum[:status]
+        docs_total = sum.respond_to?(:docs_total) ? sum.docs_total : sum[:docs_total]
+        batches_total = sum.respond_to?(:batches_total) ? sum.batches_total : sum[:batches_total]
+        duration_ms_total = sum.respond_to?(:duration_ms_total) ? sum.duration_ms_total : sum[:duration_ms_total]
         puts(
           "Imported partition=#{partition.inspect} " \
-          "status=#{sum[:status]} " \
-          "docs=#{sum[:docs_total]} " \
-          "batches=#{sum[:batches_total]} " \
-          "duration_ms=#{sum[:duration_ms_total]}"
+          "status=#{status} " \
+          "docs=#{docs_total} " \
+          "batches=#{batches_total} " \
+          "duration_ms=#{duration_ms_total}"
         )
+        if status != :ok
+          failed_total = sum.respond_to?(:failed_total) ? sum.failed_total : sum[:failed_total]
+          error_samples = if sum.respond_to?(:batches)
+                             errs = []
+                             Array(sum.batches).each do |b|
+                               samples = (b[:errors_sample] || b['errors_sample'])
+                               Array(samples).each do |msg|
+                                 errs << msg
+                                 break if errs.size >= 5
+                               end
+                               break if errs.size >= 5
+                             end
+                             errs.uniq
+                           else
+                             Array(sum[:error_samples])
+                           end
+          if failed_total.to_i > 0
+            puts("Failures=#{failed_total}#{error_samples && !error_samples.empty? ? ' sample_errors=' + error_samples.join(' | ') : ''}")
+          end
+        end
       end
 
       Kernel.exit(0)
@@ -304,7 +368,7 @@ namespace :search_engine do
       Kernel.exit(1)
     end
 
-    desc 'Delete stale documents (by filter). Usage: rails search_engine:index:delete_stale[collection,partition]'
+    desc "Delete stale documents (by filter). Usage: rails 'search_engine:index:delete_stale[collection,partition]'"
     task :delete_stale, %i[collection partition] => :environment do |_t, args|
       begin
         klass = SearchEngine::CLI.resolve_collection!(args[:collection])
@@ -367,27 +431,27 @@ namespace :search_engine do
   def print_schema_usage
     puts <<~USAGE
       Usage:
-        rails search_engine:schema:diff[collection]
-        rails search_engine:schema:apply[collection]
-        rails search_engine:schema:rollback[collection]
+        rails 'search_engine:schema:diff[collection]'
+        rails 'search_engine:schema:apply[collection]'
+        rails 'search_engine:schema:rollback[collection]'
 
       Examples:
-        rails search_engine:schema:diff[SearchEngine::Product]
-        rails search_engine:schema:apply[products]
-        rails search_engine:schema:rollback[products]
+        rails 'search_engine:schema:diff[SearchEngine::Product]'
+        rails 'search_engine:schema:apply[products]'
+        rails 'search_engine:schema:rollback[products]'
 
       Tips:
-        - Quote arguments that contain commas or spaces.
-        - Example: rails search_engine:index:rebuild_partition[SearchEngine::Product,42]
+        - Quote rake tasks with brackets to avoid shell globbing (e.g., zsh):
+          rails 'search_engine:index:rebuild_partition[SearchEngine::Product,42]'
     USAGE
   end
 
   def print_index_usage
     puts <<~USAGE
       Usage:
-        rails search_engine:index:rebuild[collection]
-        rails search_engine:index:rebuild_partition[collection,partition]
-        rails search_engine:index:delete_stale[collection,partition]
+        rails 'search_engine:index:rebuild[collection]'
+        rails 'search_engine:index:rebuild_partition[collection,partition]'
+        rails 'search_engine:index:delete_stale[collection,partition]'
 
       Environment:
         DRY_RUN=1    Preview first batch only (no HTTP); also for delete_stale shows filter and estimation when enabled
@@ -397,13 +461,14 @@ namespace :search_engine do
         STRICT=1     For delete_stale: treat missing filter as violation (exit 3)
 
       Examples:
-        rails search_engine:index:rebuild[SearchEngine::Product]
-        rails search_engine:index:rebuild_partition[products,42]
-        rails search_engine:index:delete_stale[SearchEngine::Product,42]
+        rails 'search_engine:index:rebuild[SearchEngine::Product]'
+        rails 'search_engine:index:rebuild_partition[products,42]'
+        rails 'search_engine:index:delete_stale[SearchEngine::Product,42]'
 
-      Tip about commas:
-        Use brackets without spaces. Example with class + partition id:
-        rails search_engine:index:rebuild_partition[SearchEngine::Product,42]
+      Tips:
+        - Use brackets without spaces.
+        - Quote rake tasks with brackets to avoid shell globbing (e.g., zsh):
+          rails 'search_engine:index:rebuild_partition[SearchEngine::Product,42]'
     USAGE
   end
 end

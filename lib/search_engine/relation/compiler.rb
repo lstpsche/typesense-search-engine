@@ -346,7 +346,16 @@ module SearchEngine
 
       def apply_query_basics!(params, opts, cfg)
         q_val = option_value(opts, :q) || '*'
-        query_by_val = option_value(opts, :query_by) || cfg.default_query_by
+        model_qb = begin
+          if @klass.respond_to?(:query_by)
+            @klass.query_by
+          else
+            nil
+          end
+        rescue StandardError
+          nil
+        end
+        query_by_val = option_value(opts, :query_by) || model_qb || cfg.default_query_by
         params[:q] = q_val
         params[:query_by] = query_by_val if query_by_val
       end

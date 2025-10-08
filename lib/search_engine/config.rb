@@ -50,6 +50,10 @@ module SearchEngine
     #   @return [Integer] maximum number of searches allowed in a single multi-search call (default: 50)
     # @!attribute [rw] default_console_model
     #   @return [Class, String, nil] default model used by console helpers (SE.q/SE.rel)
+    # @!attribute [rw] search_engine_models
+    #   @return [String, nil, false] path to host app SearchEngine models directory. May be
+    #     relative to `Rails.root` (e.g., "app/search_engine") or absolute. When `nil` or
+    #     `false`, gem-managed loading of host SearchEngine models is disabled.
     attr_accessor :logger,
                   :default_query_by,
                   :default_infix,
@@ -58,7 +62,8 @@ module SearchEngine
                   :strict_fields,
                   :multi_search_limit,
                   :client,
-                  :default_console_model
+                  :default_console_model,
+                  :search_engine_models
 
     # Lightweight nested configuration for schema lifecycle.
     class SchemaConfig
@@ -347,6 +352,8 @@ module SearchEngine
       @presets = PresetsConfig.new
       @curation = CurationConfig.new
       @default_console_model = nil
+      # Path may be relative to Rails.root or absolute. Set nil/false to disable.
+      @search_engine_models = 'app/search_engine'
     end
 
     # Expose schema lifecycle configuration.
@@ -615,6 +622,7 @@ module SearchEngine
         default_console_model: (
           default_console_model.respond_to?(:name) ? default_console_model.name : default_console_model
         ),
+        search_engine_models: search_engine_models,
         schema: schema_hash_for_to_h,
         indexer: indexer_hash_for_to_h,
         sources: sources_hash_for_to_h,
