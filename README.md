@@ -1,4 +1,5 @@
 # Search Engine for Typesense [![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
+[![Typesense](https://img.shields.io/badge/Typesense-Typesense-blue)](https://typesense.org) [![Typesense Ruby gem](https://img.shields.io/badge/Typesense%20Ruby%20gem-TypesenseRubyGem-blue)](https://github.com/typesense/typesense-ruby)
 
 > [!WARNING]
 > **⚠️ This project is under maintenance – work in progress. APIs and docs may change. ⚠️**
