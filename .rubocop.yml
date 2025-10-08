@@ -76,7 +76,7 @@ Metrics/ParameterLists:
 
 Naming/FileName:
   Exclude:
-    - 'lib/typesense-search-engine.rb'
+    - 'lib/search-engine-for-typesense.rb'
 
 Naming/MethodParameterName:
   Enabled: false

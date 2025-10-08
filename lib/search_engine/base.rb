@@ -456,6 +456,217 @@ module SearchEngine
         end
       end
 
+      # Run indexing workflow for this collection.
+      #
+      # Full flow (partition: nil):
+      # 1. Presence check
+      # 2. If missing -> create collection and apply schema (with reindex)
+      # 3. If present -> check schema drift
+      # 4. If drift -> apply schema (with reindex)
+      # 5. If nothing applied -> index current collection (single or partitioned)
+      # 6. Retention cleanup (skipped when Schema.apply! already ran)
+      #
+      # Partial flow (partition provided):
+      # 1. Presence check; quit if missing
+      # 2. Schema drift check; quit if drift
+      # 3. Reindex only the provided partition(s)
+      #
+      # @param partition [Object, Array<Object>, nil]
+      # @param client [SearchEngine::Client, nil]
+      # @return [void]
+      # @example Full indexation flow
+      #   SearchEngine::Product.indexate
+      # @example Partitioned indexation
+      #   SearchEngine::Product.indexate(partition: shop_id)
+      #   SearchEngine::Product.indexate(partition: [shop_id_1, shop_id_2])
+      def indexate(partition: nil, client: nil)
+        client_obj = client || (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+
+        if partition.nil?
+          __se_indexate_full(client: client_obj)
+        else
+          __se_indexate_partial(partition: partition, client: client_obj)
+        end
+        nil
+      end
+
+      private
+
+      # --------------------------- Full flow ---------------------------
+      def __se_indexate_full(client:)
+        logical = respond_to?(:collection) ? collection.to_s : name.to_s
+
+        # Step 1: Presence
+        diff_res = SearchEngine::Schema.diff(self, client: client)
+        diff = diff_res[:diff] || {}
+        missing = __se_schema_missing?(diff)
+        puts("Step 1: Presence — processing → #{missing ? 'missing' : 'present'}")
+
+        applied = false
+        indexed_inside_apply = false
+
+        # Step 2: Create + apply schema if missing
+        if missing
+          puts('Step 2: Create+Apply Schema — processing')
+          SearchEngine::Schema.apply!(self, client: client) do |new_physical|
+            __se_index_partitions!(into: new_physical)
+            indexed_inside_apply = true
+          end
+          applied = true
+          puts('Step 2: Create+Apply Schema — done')
+        else
+          puts('Step 2: Create+Apply Schema — skip (already present)')
+        end
+
+        # Step 3: Check schema status (only when present initially)
+        drift = false
+        if !missing
+          puts('Step 3: Check Schema Status — processing')
+          drift = __se_schema_drift?(diff)
+          puts("Step 3: Check Schema Status — #{drift ? 'drift' : 'in_sync'}")
+        else
+          puts('Step 3: Check Schema Status — skip (just created)')
+        end
+
+        # Step 4: Apply new schema when drift detected
+        if drift
+          puts('Step 4: Apply New Schema — processing')
+          SearchEngine::Schema.apply!(self, client: client) do |new_physical|
+            __se_index_partitions!(into: new_physical)
+            indexed_inside_apply = true
+          end
+          applied = true
+          puts('Step 4: Apply New Schema — done')
+        else
+          puts('Step 4: Apply New Schema — skip')
+        end
+
+        # Step 5: Indexation (when nothing was applied)
+        if applied && indexed_inside_apply
+          puts('Step 5: Indexation — skip (performed during schema apply)')
+        else
+          puts('Step 5: Indexation — processing')
+          __se_index_partitions!(into: nil)
+          puts('Step 5: Indexation — done')
+        end
+
+        # Step 6: Retention cleanup
+        if applied
+          puts('Step 6: Retention Cleanup — skip (handled by schema apply)')
+        else
+          puts('Step 6: Retention Cleanup — processing')
+          dropped = __se_retention_cleanup!(logical: logical, client: client)
+          puts("Step 6: Retention Cleanup — dropped=#{dropped.inspect}")
+        end
+      end
+
+      # -------------------------- Partial flow -------------------------
+      def __se_indexate_partial(partition:, client:)
+        partitions = Array(partition)
+        diff_res = SearchEngine::Schema.diff(self, client: client)
+        diff = diff_res[:diff] || {}
+
+        # Step 1: Presence
+        missing = __se_schema_missing?(diff)
+        puts("Step 1: Presence — processing → #{missing ? 'missing' : 'present'}")
+        if missing
+          puts('Partial: collection is not present. Quit early.')
+          return
+        end
+
+        # Step 2: Schema status
+        puts('Step 2: Check Schema Status — processing')
+        drift = __se_schema_drift?(diff)
+        if drift
+          puts('Partial: schema is not up-to-date. Quit early (run full indexation).')
+          return
+        end
+        puts('Step 2: Check Schema Status — in_sync')
+
+        # Step 3: Partial indexing
+        puts('Step 3: Partial Indexation — processing')
+        partitions.each do |p|
+          summary = SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: nil)
+          puts(
+            "  partition=#{p.inspect} → status=#{summary.status} docs=#{summary.docs_total} " \
+            "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}"
+          )
+        end
+        puts('Step 3: Partial Indexation — done')
+      end
+
+      # ----------------------------- Helpers ---------------------------
+      def __se_schema_missing?(diff)
+        opts = diff[:collection_options]
+        opts.is_a?(Hash) && opts[:live] == :missing
+      end
+
+      def __se_schema_drift?(diff)
+        added = Array(diff[:added_fields])
+        removed = Array(diff[:removed_fields])
+        changed = (diff[:changed_fields] || {}).to_h
+        coll_opts = (diff[:collection_options] || {}).to_h
+        added.any? || removed.any? || !changed.empty? || !coll_opts.empty?
+      end
+
+      def __se_index_partitions!(into:)
+        compiled = SearchEngine::Partitioner.for(self)
+        if compiled
+          compiled.partitions.each do |part|
+            summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
+            puts(
+              "  partition=#{part.inspect} → status=#{summary.status} docs=#{summary.docs_total} " \
+              "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}"
+            )
+          end
+        else
+          summary = SearchEngine::Indexer.rebuild_partition!(self, partition: nil, into: into)
+          puts(
+            "  single → status=#{summary.status} docs=#{summary.docs_total} " \
+            "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}"
+          )
+        end
+      end
+
+      def __se_retention_cleanup!(logical:, client:)
+        keep = begin
+          local = respond_to?(:schema_retention) ? (schema_retention || {}) : {}
+          lk = local[:keep_last]
+          lk.nil? ? SearchEngine.config.schema.retention.keep_last : Integer(lk)
+        rescue StandardError
+          SearchEngine.config.schema.retention.keep_last
+        end
+        keep = 0 if keep.nil? || keep.to_i.negative?
+
+        alias_target = client.resolve_alias(logical)
+        names = Array(client.list_collections).map { |c| (c[:name] || c['name']).to_s }
+        re = /^#{Regexp.escape(logical)}_\d{8}_\d{6}_\d{3}$/
+        physicals = names.select { |n| re.match?(n) }
+
+        ordered = physicals.sort_by do |n|
+          ts = __se_extract_timestamp(logical, n)
+          seq = __se_extract_sequence(n)
+          [-ts, -seq]
+        end
+
+        candidates = ordered.reject { |n| n == alias_target }
+        to_drop = candidates.drop(keep)
+        to_drop.each { |n| client.delete_collection(n) }
+        to_drop
+      end
+
+      def __se_extract_timestamp(logical, name)
+        base = name.to_s.delete_prefix("#{logical}_")
+        parts = base.split('_')
+        return 0 unless parts.size == 3
+
+        (parts[0] + parts[1]).to_i
+      end
+
+      def __se_extract_sequence(name)
+        name.to_s.split('_').last.to_i
+      end
+
       # Build a new instance from a Typesense document assigning only declared
       # attributes and capturing any extra keys in {#unknown_attributes}.
       #
