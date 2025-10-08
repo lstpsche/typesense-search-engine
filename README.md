@@ -1,4 +1,4 @@
-# Typesense Search Engine [![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
+# Search Engine for Typesense [![CI][ci-badge]][ci-url] [![Gem][gem-badge]][gem-url] [![Docs][docs-badge]][docs-url]
 
 > [!WARNING]
 > **⚠️ This project is under maintenance – work in progress. APIs and docs may change. ⚠️**
