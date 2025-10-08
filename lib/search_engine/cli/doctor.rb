@@ -14,7 +14,7 @@ module SearchEngine
     # @since M8
     # @see docs/cli.md#doctor
     module Doctor
-      WIKI_BASE = 'https://github.com/lstpsche/typesense-search-engine/wiki/'
+      WIKI_BASE = 'https://github.com/lstpsche/search-engine-for-typesense/wiki/'
 
       module_function
 

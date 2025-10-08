@@ -3,17 +3,20 @@
 > [!WARNING]
 > **⚠️ This project is under maintenance – work in progress. APIs and docs may change. ⚠️**
 
-Mountless Rails::Engine for Typesense. Expressive Relation/DSL with JOINs, grouping, presets/curation — with strong DX and observability.
+Mountless Rails::Engine for [Typesense](https://typesense.org). Expressive Relation/DSL with JOINs, grouping, presets/curation — with strong DX and observability.
+
+> [!NOTE]
+> This project is not affiliated with [Typesense](https://typesense.org) and is a wrapper for the [`typesense` gem](https://github.com/typesense/typesense-ruby).
 
 ## Quickstart
 
 ```ruby
 # Gemfile
-gem "typesense-search-engine"
+gem "search-engine-for-typesense"
 ```
 
 ```ruby
-# config/initializers/typesense_search_engine.rb
+# config/initializers/search_engine_for_typesense.rb
 SearchEngine.configure do |c|
   c.host = ENV.fetch("TYPESENSE_HOST", "localhost")
   c.port = 8108
@@ -35,7 +38,7 @@ end
 SearchEngine::Product.where(name: "milk").select(:id, :name).limit(5).to_a
 ```
 
-See Quickstart → [Quickstart](https://github.com/lstpsche/typesense-search-engine/wiki/Quickstart).
+See Quickstart → [Quickstart](https://github.com/lstpsche/search-engine-for-typesense/wiki/Quickstart).
 
 ### Host app SearchEngine models
 
@@ -103,20 +106,20 @@ rel.to_curl        # => single-line curl with redacted API key
 
 ## Documentation
 
-See the wiki → [Home](https://github.com/lstpsche/typesense-search-engine/wiki)
+See the wiki → [Home](https://github.com/lstpsche/search-engine-for-typesense/wiki)
 
 ## Example app
 
-See `examples/demo_shop` — demonstrates single/multi search, JOINs, grouping, presets/curation, and DX/observability. Supports offline mode via the stub client (see [Testing](https://github.com/lstpsche/typesense-search-engine/wiki/Testing)).
+See `examples/demo_shop` — demonstrates single/multi search, JOINs, grouping, presets/curation, and DX/observability. Supports offline mode via the stub client (see [Testing](https://github.com/lstpsche/search-engine-for-typesense/wiki/Testing)).
 
 ## Contributing
 
-See [Docs style guide](https://github.com/lstpsche/typesense-search-engine/wiki/contributing/docs_style). Follow YARDoc for public APIs, add backlinks on docs landing pages, and redact secrets in examples.
+See [Docs style guide](https://github.com/lstpsche/search-engine-for-typesense/wiki/contributing/docs_style). Follow YARDoc for public APIs, add backlinks on docs landing pages, and redact secrets in examples.
 
 <!-- Badge references (placeholders) -->
-[ci-badge]: https://img.shields.io/github/actions/workflow/status/lstpsche/typesense-search-engine/ci.yml?branch=main
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/lstpsche/search-engine-for-typesense/ci.yml?branch=main
 [ci-url]: #
-[gem-badge]: https://img.shields.io/gem/v/typesense-search-engine.svg?label=gem
-[gem-url]: https://rubygems.org/gems/typesense-search-engine
+[gem-badge]: https://img.shields.io/gem/v/search-engine-for-typesense.svg?label=gem
+[gem-url]: https://rubygems.org/gems/search-engine-for-typesense
 [docs-badge]: https://img.shields.io/badge/docs-index-blue
-[docs-url]: https://github.com/lstpsche/typesense-search-engine/wiki
+[docs-url]: https://github.com/lstpsche/search-engine-for-typesense/wiki

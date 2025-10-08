@@ -25,7 +25,7 @@ module SearchEngine
     initializer 'search_engine.zeitwerk_ignores', before: :set_autoload_paths do
       # Rails 6.1+ exposes a loader per engine via `loader`. Guard presence for safety.
       loader = respond_to?(:loader) ? self.loader : nil
-      shim = root.join('lib', 'typesense-search-engine.rb').to_s
+      shim = root.join('lib', 'search-engine-for-typesense.rb').to_s
       loader&.ignore(shim)
 
       # Also ensure Rails global autoloaders ignore the shim, since the engine

@@ -7,4 +7,4 @@ gem 'puma'
 gem 'rails', '>= 6.1'
 gem 'sqlite3'
 
-gem 'typesense-search-engine', path: '../..'
+gem 'search-engine-for-typesense', path: '../..'
