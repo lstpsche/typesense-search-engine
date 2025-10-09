@@ -145,11 +145,11 @@ module SearchEngine
         l = SearchEngine.instance_variable_get(:@_models_loader)
         next unless l
 
-        unless SearchEngine.instance_variable_defined?(:@_models_loader_setup)
+        if SearchEngine.instance_variable_defined?(:@_models_loader_setup)
+          l.reload if defined?(Rails) && Rails.env.development?
+        else
           l.setup
           SearchEngine.instance_variable_set(:@_models_loader_setup, true)
-        else
-          l.reload if defined?(Rails) && Rails.env.development?
         end
 
         l.eager_load if Rails.application.config.eager_load

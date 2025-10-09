@@ -199,9 +199,9 @@ namespace :search_engine do
           )
           # Aggregate a small sample of error messages for visibility when failed/partial
           error_samples = []
-          if summary.failed_total.to_i > 0
+          if summary.failed_total.to_i.positive?
             Array(summary.batches).each do |b|
-              samples = (b[:errors_sample] || b['errors_sample'])
+              samples = b[:errors_sample] || b['errors_sample']
               Array(samples).each do |msg|
                 error_samples << msg
                 break if error_samples.size >= 5
@@ -250,21 +250,26 @@ namespace :search_engine do
             if status != :ok
               failed_total = sum.respond_to?(:failed_total) ? sum.failed_total : sum[:failed_total]
               error_samples = if sum.respond_to?(:batches)
-                                 errs = []
-                                 Array(sum.batches).each do |b|
-                                   samples = (b[:errors_sample] || b['errors_sample'])
-                                   Array(samples).each do |msg|
-                                     errs << msg
-                                     break if errs.size >= 5
-                                   end
-                                   break if errs.size >= 5
-                                 end
-                                 errs.uniq
-                               else
-                                 Array(sum[:error_samples])
-                               end
-              if failed_total.to_i > 0
-                puts("Failures=#{failed_total}#{error_samples && !error_samples.empty? ? ' sample_errors=' + error_samples.join(' | ') : ''}")
+                                errs = []
+                                Array(sum.batches).each do |b|
+                                  samples = b[:errors_sample] || b['errors_sample']
+                                  Array(samples).each do |msg|
+                                    errs << msg
+                                    break if errs.size >= 5
+                                  end
+                                  break if errs.size >= 5
+                                end
+                                errs.uniq
+                              else
+                                Array(sum[:error_samples])
+                              end
+              if failed_total.to_i.positive?
+                sample_errors = if error_samples && !error_samples.empty?
+                                  " sample_errors=#{error_samples.join(' | ')}"
+                                else
+                                  ''
+                                end
+                puts("Failures=#{failed_total}#{sample_errors}")
               end
             end
           end
@@ -343,21 +348,22 @@ namespace :search_engine do
         if status != :ok
           failed_total = sum.respond_to?(:failed_total) ? sum.failed_total : sum[:failed_total]
           error_samples = if sum.respond_to?(:batches)
-                             errs = []
-                             Array(sum.batches).each do |b|
-                               samples = (b[:errors_sample] || b['errors_sample'])
-                               Array(samples).each do |msg|
-                                 errs << msg
-                                 break if errs.size >= 5
-                               end
-                               break if errs.size >= 5
-                             end
-                             errs.uniq
-                           else
-                             Array(sum[:error_samples])
-                           end
-          if failed_total.to_i > 0
-            puts("Failures=#{failed_total}#{error_samples && !error_samples.empty? ? ' sample_errors=' + error_samples.join(' | ') : ''}")
+                            errs = []
+                            Array(sum.batches).each do |b|
+                              samples = b[:errors_sample] || b['errors_sample']
+                              Array(samples).each do |msg|
+                                errs << msg
+                                break if errs.size >= 5
+                              end
+                              break if errs.size >= 5
+                            end
+                            errs.uniq
+                          else
+                            Array(sum[:error_samples])
+                          end
+          if failed_total.to_i.positive?
+            sample_errors = error_samples && !error_samples.empty? ? " sample_errors=#{error_samples.join(' | ')}" : ''
+            puts("Failures=#{failed_total}#{sample_errors}")
           end
         end
       end

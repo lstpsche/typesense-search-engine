@@ -122,19 +122,12 @@ module SearchEngine
       lines << header
 
       append_preset_explain_line(lines, params)
-
       append_curation_explain_lines(lines)
-
       append_boolean_knobs_explain_lines(lines)
-
       append_where_and_order_lines(lines, params)
-
       append_grouping_explain_lines(lines)
-
       append_selection_explain_lines(lines, params)
-
       add_effective_selection_tokens!(lines)
-
       add_pagination_line!(lines, params)
 
       out = lines.join("\n")

@@ -48,7 +48,7 @@ module SearchEngine
         fetch_size = options[:fetch_size]
         row_shape = options[:row_shape]
         stmt_timeout = options[:statement_timeout_ms]
-        SQLSource.new(sql: sql, binds: binds, fetch_size: fetch_size, row_shape: row_shape,
+        SqlSource.new(sql: sql, binds: binds, fetch_size: fetch_size, row_shape: row_shape,
                       statement_timeout_ms: stmt_timeout
         )
       when :lambda

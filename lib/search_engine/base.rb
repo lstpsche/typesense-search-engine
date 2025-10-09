@@ -65,24 +65,28 @@ module SearchEngine
       # @param type [Object] type descriptor (e.g., :string, :integer)
       # @param locale [String, nil] only applicable to :string and [:string]; when set,
       #   the raw value is passed to the Typesense field's `locale`
+      # @param optional [Boolean, nil] when set, the raw value is passed to the Typesense field's `optional`
+      # @param sort [Boolean, nil] when set, the raw value is passed to the Typesense field's `sort`
       # @param empty_filtering [Boolean, nil] only applicable to array types (e.g., [:string]).
       #   When true, the gem will add an internal hidden boolean field "<name>_empty" used to
       #   support `.where(name: [])` and `.where.not(name: [])` semantics. Hidden fields are
       #   not exposed via public APIs or inspect and are populated automatically by the mapper.
       # @return [void]
-      def attribute(name, type = :string, locale: nil, empty_filtering: nil)
+      def attribute(name, type = :string, locale: nil, optional: nil, sort: nil, empty_filtering: nil)
         n = name.to_sym
         if n == :id
           raise SearchEngine::Errors::InvalidField,
                 'The :id field is reserved; use `identify_by` to set the Typesense document id.'
         end
         (@attributes ||= {})[n] = type
-        # Validate and persist per-attribute options: locale and empty_filtering
-        if !locale.nil? || !empty_filtering.nil?
+        # Validate and persist per-attribute options: locale, optional, sort, empty_filtering
+        if [locale, optional, sort, empty_filtering].any? { |v| !v.nil? }
           @attribute_options ||= {}
           new_opts = (@attribute_options[n] || {}).dup
 
-          unless locale.nil?
+          if locale.nil?
+            new_opts.delete(:locale)
+          else
             is_string = type.to_s.downcase == 'string'
             is_string_array = type.is_a?(Array) && type.size == 1 && type.first.to_s.downcase == 'string'
             unless is_string || is_string_array
@@ -90,19 +94,37 @@ module SearchEngine
                     "`locale` is only applicable to :string and [:string] (got #{type.inspect})"
             end
             new_opts[:locale] = locale.to_s
-          else
-            new_opts.delete(:locale)
           end
 
-          unless empty_filtering.nil?
+          if optional.nil?
+            new_opts.delete(:optional)
+          else
+            unless [true, false].include?(optional)
+              raise SearchEgine::Errors::InvalidOption,
+                    "`optional` should be of boolean data type (currently is #{optional.class})"
+            end
+            new_opts[:optional] = optional
+          end
+
+          if sort.nil?
+            new_opts.delete(:sort)
+          else
+            unless [true, false].include?(sort)
+              raise SearchEgine::Errors::InvalidOption,
+                    "`sort` should be of boolean data type (currently is #{sort.class})"
+            end
+            new_opts[:sort] = sort
+          end
+
+          if empty_filtering.nil?
+            new_opts.delete(:empty_filtering)
+          else
             is_array_type = type.is_a?(Array) && type.size == 1
             unless is_array_type
               raise SearchEngine::Errors::InvalidOption,
                     "`empty_filtering` is only applicable to array types (e.g., [:string]); got #{type.inspect}"
             end
-            new_opts[:empty_filtering] = !!empty_filtering
-          else
-            new_opts.delete(:empty_filtering)
+            new_opts[:empty_filtering] = !!empty_filtering # rubocop:disable Style/DoubleNegation
           end
 
           if new_opts.empty?
@@ -490,6 +512,75 @@ module SearchEngine
         nil
       end
 
+      # Drop this model's Typesense collection.
+      #
+      # Resolves the alias for the logical collection name and drops the current
+      # physical target when present. If no alias exists, attempts to drop a
+      # collection with the logical name directly. Verbose progress is printed
+      # to STDOUT. No-op when the collection does not exist.
+      #
+      # @return [void]
+      def drop_collection!
+        client = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+        logical = respond_to?(:collection) ? collection.to_s : name.to_s
+
+        alias_target = client.resolve_alias(logical)
+        physical = if alias_target && !alias_target.to_s.strip.empty?
+                     alias_target.to_s
+                   else
+                     live = client.retrieve_collection_schema(logical)
+                     live ? logical : nil
+                   end
+
+        if physical.nil?
+          puts('Drop Collection — skip (not present)')
+          return
+        end
+
+        puts("Drop Collection — processing (logical=#{logical} physical=#{physical})")
+        client.delete_collection(physical)
+        puts('Drop Collection — done')
+        nil
+      end
+
+      # Recreate this model's Typesense collection (drop if present, then create).
+      #
+      # Resolves the alias for the logical collection name and drops the current
+      # physical target when present. Then creates a new collection using the
+      # compiled schema for this model with the logical collection name. Verbose
+      # progress is printed to STDOUT.
+      #
+      # Note: This method does not modify aliases; if an alias was pointing to
+      # a previously dropped physical collection, it will remain pointing to a
+      # non-existent target until updated elsewhere.
+      #
+      # @return [void]
+      def recreate_collection!
+        client = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+        logical = respond_to?(:collection) ? collection.to_s : name.to_s
+
+        alias_target = client.resolve_alias(logical)
+        physical = if alias_target && !alias_target.to_s.strip.empty?
+                     alias_target.to_s
+                   else
+                     live = client.retrieve_collection_schema(logical)
+                     live ? logical : nil
+                   end
+
+        if physical
+          puts("Recreate Collection — dropping existing (logical=#{logical} physical=#{physical})")
+          client.delete_collection(physical)
+        else
+          puts('Recreate Collection — no existing collection (skip drop)')
+        end
+
+        schema = SearchEngine::Schema.compile(self)
+        puts("Recreate Collection — creating collection with schema (logical=#{logical})")
+        client.create_collection(schema)
+        puts('Recreate Collection — done')
+        nil
+      end
+
       private
 
       # --------------------------- Full flow ---------------------------
@@ -587,9 +678,11 @@ module SearchEngine
         puts('Step 3: Partial Indexation — processing')
         partitions.each do |p|
           summary = SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: nil)
+          sample_err = __se_extract_sample_error(summary)
           puts(
             "  partition=#{p.inspect} → status=#{summary.status} docs=#{summary.docs_total} " \
-            "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}"
+            "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}" \
+            "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
           )
         end
         puts('Step 3: Partial Indexation — done')
@@ -609,21 +702,57 @@ module SearchEngine
         added.any? || removed.any? || !changed.empty? || !coll_opts.empty?
       end
 
+      def __se_extract_sample_error(summary)
+        failed = begin
+          summary.respond_to?(:failed_total) ? summary.failed_total.to_i : 0
+        rescue StandardError
+          0
+        end
+        return nil if failed <= 0
+
+        batches = begin
+          summary.respond_to?(:batches) ? summary.batches : nil
+        rescue StandardError
+          nil
+        end
+        return nil unless batches.is_a?(Array)
+
+        batches.each do |b|
+          next unless b.is_a?(Hash)
+
+          samples = b[:errors_sample] || b['errors_sample']
+          next if samples.nil?
+
+          Array(samples).each do |m|
+            s = m.to_s
+            return s unless s.strip.empty?
+          end
+        end
+        nil
+      end
+
       def __se_index_partitions!(into:)
         compiled = SearchEngine::Partitioner.for(self)
         if compiled
           compiled.partitions.each do |part|
             summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
+            sample_err = __se_extract_sample_error(summary)
             puts(
-              "  partition=#{part.inspect} → status=#{summary.status} docs=#{summary.docs_total} " \
-              "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}"
+              "  partition=#{part.inspect} → status=#{summary.status} " \
+              "docs=#{summary.docs_total} " \
+              "failed=#{summary.failed_total} " \
+              "batches=#{summary.batches_total} " \
+              "duration_ms=#{summary.duration_ms_total}" \
+              "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
           end
         else
           summary = SearchEngine::Indexer.rebuild_partition!(self, partition: nil, into: into)
+          sample_err = __se_extract_sample_error(summary)
           puts(
             "  single → status=#{summary.status} docs=#{summary.docs_total} " \
-            "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}"
+            "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}" \
+            "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
           )
         end
       end
@@ -902,7 +1031,10 @@ module SearchEngine
           pairs.unshift(['id', id_v])
         end
 
-        extras.each do |k, v|
+        passthrough, grouped, assoc_order = __se_group_join_fields_for_render(extras)
+
+        # Render pass-through unknowns with special handling for doc_updated_at
+        passthrough.each do |k, v|
           next if k.to_s == 'id' # already rendered first
 
           pairs <<
@@ -912,8 +1044,54 @@ module SearchEngine
               pairs << [k.to_s, v]
             end
         end
+
+        # Render grouped join fields as nested "$assoc => { field => value }"
+        assoc_order.each do |assoc|
+          pairs << [assoc.to_s, grouped[assoc]]
+        end
+      end
+      # Fallback: ensure doc_updated_at is displayed when available via accessor
+      # even if it wasn't declared and wasn't present in unknowns (e.g., selection omitted it).
+      begin
+        shown = pairs.any? { |(k, _)| k.to_s == 'doc_updated_at' }
+        unless shown
+          ts = doc_updated_at
+          pairs << ['doc_updated_at', ts] unless ts.nil?
+        end
+      rescue StandardError
+        # ignore display-only errors
       end
       pairs
+    end
+
+    # Group "$assoc.field" unknown attributes into a nested Hash under "$assoc" for rendering.
+    # Prefers existing shapes when "$assoc" key already exists in the payload (Hash/Array).
+    # Returns [passthrough(Map<key->val>), grouped(Map<assoc->Hash>), assoc_order(Array<String>)].
+    def __se_group_join_fields_for_render(extras)
+      grouped = {}
+      assoc_order = []
+      passthrough = {}
+
+      extras.each do |k, v|
+        key = k.to_s
+        if key.start_with?('$') && key.include?('.') && !v.is_a?(Hash) && !v.is_a?(Array)
+          assoc, field = key.split('.', 2)
+          # Respect existing nested shape if present
+          if extras.key?(assoc)
+            passthrough[key] = v
+          else
+            unless grouped.key?(assoc)
+              grouped[assoc] = {}
+              assoc_order << assoc
+            end
+            grouped[assoc][field] = v
+          end
+        else
+          passthrough[key] = v
+        end
+      end
+
+      [passthrough, grouped, assoc_order]
     end
 
     # Convert integer epoch seconds to a Time in the current zone for display.

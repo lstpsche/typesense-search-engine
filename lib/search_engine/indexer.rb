@@ -519,9 +519,7 @@ module SearchEngine
                   else
                     Time.now.to_i
                   end
-          if doc.is_a?(Hash)
-            doc[:doc_updated_at] = now_i
-          end
+          doc[:doc_updated_at] = now_i if doc.is_a?(Hash)
           buffer << JSON.generate(doc)
           buffer << "\n" if count < (docs.size - 1)
           count += 1

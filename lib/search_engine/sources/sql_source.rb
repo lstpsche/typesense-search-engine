@@ -7,7 +7,7 @@ module SearchEngine
     #
     # Yields arrays of rows in the chosen shape (:hash by default when low-overhead
     # is available). Always closes cursors/statements and releases connections.
-    class SQLSource
+    class SqlSource
       include Base
 
       # @param sql [String] SQL statement with optional bind placeholders
@@ -51,7 +51,7 @@ module SearchEngine
 
       def run_with_connection
         unless defined?(ActiveRecord::Base)
-          raise SearchEngine::Errors::InvalidParams, 'SQLSource requires ActiveRecord connection'
+          raise SearchEngine::Errors::InvalidParams, 'SqlSource requires ActiveRecord connection'
         end
 
         ActiveRecord::Base.connection_pool.with_connection do |ar_conn|
@@ -127,7 +127,7 @@ module SearchEngine
         started = monotonic_ms
         loop do
           chunked_sql = sql_with_limit(sql, @fetch_size, idx)
-          rows = ar_conn.exec_query(chunked_sql, 'SQLSource', params_for_ar(params)).to_a
+          rows = ar_conn.exec_query(chunked_sql, 'SqlSource', params_for_ar(params)).to_a
           break if rows.empty?
 
           duration = monotonic_ms - started
@@ -164,11 +164,11 @@ module SearchEngine
           binds = @binds.dup
         when Hash
           raise SearchEngine::Errors::InvalidParams,
-                'SQLSource with Hash binds is not supported; use positional binds (Array)'
+                'SqlSource with Hash binds is not supported; use positional binds (Array)'
         when nil
           # noop
         else
-          raise SearchEngine::Errors::InvalidParams, 'SQLSource binds must be an Array or nil'
+          raise SearchEngine::Errors::InvalidParams, 'SqlSource binds must be an Array or nil'
         end
 
         # Partition/cursor semantics are adapter/domain-specific; callers should incorporate placeholders.

@@ -51,16 +51,20 @@ module SearchEngine
         fields_array = []
         attributes_map.each do |attribute_name, type_descriptor|
           ts_type = typesense_type_for(type_descriptor)
-          fields_array << { name: attribute_name.to_s, type: ts_type }
+          opts = attribute_options[attribute_name.to_sym] || {}
 
-          # Hidden *_empty field for array attributes with empty_filtering enabled
+          # Insert compiled attribute schema field into result schema fields array
+          fields_array << {
+            name: attribute_name.to_s,
+            type: ts_type,
+            **{ locale: opts[:locale], sort: opts[:sort], optional: opts[:optional] }.compact_blank
+          }
+
+          # Hidden *_empty field for array attributes with empty_filtering enabled and for any field with optional enabled
           begin
-            opts = attribute_options[attribute_name.to_sym] || {}
-            if opts[:empty_filtering]
-              # Ensure it applies only to array types in schema as well
-              if type_descriptor.is_a?(Array) && type_descriptor.size == 1
-                fields_array << { name: "#{attribute_name}_empty", type: 'bool' }
-              end
+            # Ensure it applies only to array types in schema as well
+            if (opts[:empty_filtering] && type_descriptor.is_a?(Array) && type_descriptor.size == 1) || opts[:optional]
+              fields_array << { name: "#{attribute_name}_empty", type: 'bool' }
             end
           rescue StandardError
             # best-effort

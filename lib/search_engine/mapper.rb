@@ -244,8 +244,8 @@ module SearchEngine
         @__empty_filtering_targets__.each do |base_name|
           value = doc[base_name.to_sym]
           value = doc[base_name.to_s] if value.nil?
-          flag_name = (base_name.to_s + '_empty')
-          doc[flag_name.to_sym] = (value.nil? || (value.is_a?(Array) && value.empty?)) ? true : false
+          flag_name = "#{base_name}_empty"
+          doc[flag_name.to_sym] = value.nil? || (value.is_a?(Array) && value.empty?)
         end
       end
 
@@ -387,10 +387,9 @@ module SearchEngine
         targets = []
         opts.each do |fname, o|
           next unless o.is_a?(Hash) && o[:empty_filtering]
-          hidden = (fname.to_s + '_empty')
-          if @types_by_field.key?(hidden) || @required_keys.include?(hidden.to_sym)
-            targets << fname.to_s
-          end
+
+          hidden = "#{fname}_empty"
+          targets << fname.to_s if @types_by_field.key?(hidden) || @required_keys.include?(hidden.to_sym)
         end
         targets.freeze
       end
