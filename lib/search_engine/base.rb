@@ -512,6 +512,31 @@ module SearchEngine
         nil
       end
 
+      # Rebuild one or many partitions inline using the Indexer.
+      #
+      # Accepts an opaque partition key or an Array of keys, as defined by the
+      # collection's partitioning DSL. When an Array is provided, each partition
+      # is rebuilt sequentially and the method returns a list of summaries.
+      #
+      # @param partition [Object, Array<Object>, nil]
+      # @param into [String, nil] optional physical collection override
+      # @return [SearchEngine::Indexer::Summary, Array<SearchEngine::Indexer::Summary>]
+      # @example Single partition
+      #   SearchEngine::Product.rebuild_partition!(partition: 1031)
+      # @example Multiple partitions
+      #   SearchEngine::Product.rebuild_partition!(partition: [1030, 1031])
+      def rebuild_partition!(partition:, into: nil)
+        parts = if partition.nil? || (partition.respond_to?(:empty?) && partition.empty?)
+                  [nil]
+                else
+                  Array(partition)
+                end
+
+        return SearchEngine::Indexer.rebuild_partition!(self, partition: parts.first, into: into) if parts.size == 1
+
+        parts.map { |p| SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: into) }
+      end
+
       # Drop this model's Typesense collection.
       #
       # Resolves the alias for the logical collection name and drops the current
