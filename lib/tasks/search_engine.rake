@@ -233,46 +233,24 @@ namespace :search_engine do
         actions.each do |a|
           if a[:mode] == :active_job
             puts("Enqueued partition=#{a[:partition].inspect} to queue=#{a[:queue]} (job_id=#{a[:job_id]})")
-          else
-            sum = a[:indexer_summary]
-            # Support both Struct and Hash forms
-            status = sum.respond_to?(:status) ? sum.status : sum[:status]
-            docs_total = sum.respond_to?(:docs_total) ? sum.docs_total : sum[:docs_total]
-            batches_total = sum.respond_to?(:batches_total) ? sum.batches_total : sum[:batches_total]
-            duration_ms_total = sum.respond_to?(:duration_ms_total) ? sum.duration_ms_total : sum[:duration_ms_total]
-            puts(
-              "Imported partition=#{a[:partition].inspect} " \
-              "status=#{status} " \
-              "docs=#{docs_total} " \
-              "batches=#{batches_total} " \
-              "duration_ms=#{duration_ms_total}"
-            )
-            if status != :ok
-              failed_total = sum.respond_to?(:failed_total) ? sum.failed_total : sum[:failed_total]
-              error_samples = if sum.respond_to?(:batches)
-                                errs = []
-                                Array(sum.batches).each do |b|
-                                  samples = b[:errors_sample] || b['errors_sample']
-                                  Array(samples).each do |msg|
-                                    errs << msg
-                                    break if errs.size >= 5
-                                  end
-                                  break if errs.size >= 5
-                                end
-                                errs.uniq
-                              else
-                                Array(sum[:error_samples])
-                              end
-              if failed_total.to_i.positive?
-                sample_errors = if error_samples && !error_samples.empty?
-                                  " sample_errors=#{error_samples.join(' | ')}"
-                                else
-                                  ''
-                                end
-                puts("Failures=#{failed_total}#{sample_errors}")
-              end
-            end
+            next
           end
+
+          sum = a[:indexer_summary]
+          # Support both Struct and Hash forms
+          status = sum.respond_to?(:status) ? sum.status : sum[:status]
+          docs_total = sum.respond_to?(:docs_total) ? sum.docs_total : sum[:docs_total]
+          batches_total = sum.respond_to?(:batches_total) ? sum.batches_total : sum[:batches_total]
+          duration_ms_total = sum.respond_to?(:duration_ms_total) ? sum.duration_ms_total : sum[:duration_ms_total]
+          puts(
+            "Imported partition=#{a[:partition].inspect} " \
+            "status=#{status} " \
+            "docs=#{docs_total} " \
+            "batches=#{batches_total} " \
+            "duration_ms=#{duration_ms_total}"
+          )
+
+          print_failures_if_any(status, sum)
         end
       end
 
@@ -345,27 +323,7 @@ namespace :search_engine do
           "batches=#{batches_total} " \
           "duration_ms=#{duration_ms_total}"
         )
-        if status != :ok
-          failed_total = sum.respond_to?(:failed_total) ? sum.failed_total : sum[:failed_total]
-          error_samples = if sum.respond_to?(:batches)
-                            errs = []
-                            Array(sum.batches).each do |b|
-                              samples = b[:errors_sample] || b['errors_sample']
-                              Array(samples).each do |msg|
-                                errs << msg
-                                break if errs.size >= 5
-                              end
-                              break if errs.size >= 5
-                            end
-                            errs.uniq
-                          else
-                            Array(sum[:error_samples])
-                          end
-          if failed_total.to_i.positive?
-            sample_errors = error_samples && !error_samples.empty? ? " sample_errors=#{error_samples.join(' | ')}" : ''
-            puts("Failures=#{failed_total}#{sample_errors}")
-          end
-        end
+        print_failures_if_any(status, sum)
       end
 
       Kernel.exit(0)
@@ -434,6 +392,34 @@ namespace :search_engine do
   end
 
   # ------------------------- Helpers -------------------------
+  def print_failures_if_any(status, summary)
+    return if status == :ok
+
+    failed_total = summary.respond_to?(:failed_total) ? summary.failed_total : summary[:failed_total]
+    return unless failed_total.to_i.positive?
+
+    error_samples = build_error_samples_from_summary(summary)
+    sample_errors = error_samples && !error_samples.empty? ? " sample_errors=#{error_samples.join(' | ')}" : ''
+    puts("Failures=#{failed_total}#{sample_errors}")
+  end
+
+  def build_error_samples_from_summary(sum)
+    if sum.respond_to?(:batches)
+      errs = []
+      Array(sum.batches).each do |b|
+        samples = b[:errors_sample] || b['errors_sample']
+        Array(samples).each do |msg|
+          errs << msg
+          break if errs.size >= 5
+        end
+        break if errs.size >= 5
+      end
+      errs.uniq
+    else
+      Array(sum[:error_samples])
+    end
+  end
+
   def print_schema_usage
     puts <<~USAGE
       Usage:

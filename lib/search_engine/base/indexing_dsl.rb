@@ -64,7 +64,9 @@ module SearchEngine
           end
           self
         end
+      end
 
+      class_methods do
         # Compute the Typesense document id for a given source record using the configured
         # identity strategy (or the default +record.id.to_s+ when unset).
         # @param record [Object]

@@ -23,7 +23,9 @@ module SearchEngine
           end
           nil
         end
+      end
 
+      class_methods do
         # Rebuild one or many partitions inline using the Indexer.
         # @param partition [Object, Array<Object>, nil]
         # @param into [String, nil]
@@ -39,13 +41,17 @@ module SearchEngine
 
           parts.map { |p| SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: into) }
         end
+      end
 
+      class_methods do
         # Return the compiled Typesense schema for this collection model.
         # @return [Hash]
         def schema
           SearchEngine::Schema.compile(self)
         end
+      end
 
+      class_methods do
         # Retrieve the current live schema of the Typesense collection.
         # @return [Hash, nil]
         def current_schema
@@ -54,7 +60,9 @@ module SearchEngine
           physical = client.resolve_alias(logical) || logical
           client.retrieve_collection_schema(physical)
         end
+      end
 
+      class_methods do
         # Compute the diff between the model's compiled schema and the live schema.
         # @return [Hash]
         def schema_diff
@@ -62,7 +70,9 @@ module SearchEngine
           res = SearchEngine::Schema.diff(self, client: client)
           res[:diff]
         end
+      end
 
+      class_methods do
         # Drop this model's Typesense collection.
         # @return [void]
         def drop_collection!
@@ -87,7 +97,9 @@ module SearchEngine
           puts('Drop Collection — done')
           nil
         end
+      end
 
+      class_methods do
         # Recreate this model's Typesense collection (drop if present, then create).
         # @return [void]
         def recreate_collection!
@@ -115,23 +127,31 @@ module SearchEngine
           puts('Recreate Collection — done')
           nil
         end
+      end
 
-        private
-
+      class_methods do
         # --------------------------- Full flow ---------------------------
         def __se_indexate_full(client:)
           logical = respond_to?(:collection) ? collection.to_s : name.to_s
 
           # Step 1: Presence
-          diff_res = SearchEngine::Schema.diff(self, client: client)
-          diff = diff_res[:diff] || {}
+          diff = SearchEngine::Schema.diff(self, client: client)[:diff] || {}
           missing = __se_schema_missing?(diff)
           puts("Step 1: Presence — processing → #{missing ? 'missing' : 'present'}")
 
+          applied, indexed_inside_apply = __se_full_apply_if_missing(client, missing)
+          drift = __se_full_check_drift(diff, missing)
+          applied, indexed_inside_apply = __se_full_apply_if_drift(client, drift, applied, indexed_inside_apply)
+          __se_full_indexation(applied, indexed_inside_apply)
+          __se_full_retention(applied, logical, client)
+        end
+      end
+
+      class_methods do
+        # Step 2: Create + apply schema if missing
+        def __se_full_apply_if_missing(client, missing)
           applied = false
           indexed_inside_apply = false
-
-          # Step 2: Create + apply schema if missing
           if missing
             puts('Step 2: Create+Apply Schema — processing')
             SearchEngine::Schema.apply!(self, client: client) do |new_physical|
@@ -143,18 +163,27 @@ module SearchEngine
           else
             puts('Step 2: Create+Apply Schema — skip (already present)')
           end
+          [applied, indexed_inside_apply]
+        end
+      end
 
-          # Step 3: Check schema status (only when present initially)
-          drift = false
-          if !missing
+      class_methods do
+        # Step 3: Check schema status (only when present initially)
+        def __se_full_check_drift(diff, missing)
+          unless missing
             puts('Step 3: Check Schema Status — processing')
             drift = __se_schema_drift?(diff)
             puts("Step 3: Check Schema Status — #{drift ? 'drift' : 'in_sync'}")
-          else
-            puts('Step 3: Check Schema Status — skip (just created)')
+            return drift
           end
+          puts('Step 3: Check Schema Status — skip (just created)')
+          false
+        end
+      end
 
-          # Step 4: Apply new schema when drift detected
+      class_methods do
+        # Step 4: Apply new schema when drift detected
+        def __se_full_apply_if_drift(client, drift, applied, indexed_inside_apply)
           if drift
             puts('Step 4: Apply New Schema — processing')
             SearchEngine::Schema.apply!(self, client: client) do |new_physical|
@@ -166,8 +195,13 @@ module SearchEngine
           else
             puts('Step 4: Apply New Schema — skip')
           end
+          [applied, indexed_inside_apply]
+        end
+      end
 
-          # Step 5: Indexation (when nothing was applied)
+      class_methods do
+        # Step 5: Indexation (when nothing was applied)
+        def __se_full_indexation(applied, indexed_inside_apply)
           if applied && indexed_inside_apply
             puts('Step 5: Indexation — skip (performed during schema apply)')
           else
@@ -175,8 +209,12 @@ module SearchEngine
             __se_index_partitions!(into: nil)
             puts('Step 5: Indexation — done')
           end
+        end
+      end
 
-          # Step 6: Retention cleanup
+      class_methods do
+        # Step 6: Retention cleanup
+        def __se_full_retention(applied, logical, client)
           if applied
             puts('Step 6: Retention Cleanup — skip (handled by schema apply)')
           else
@@ -185,7 +223,9 @@ module SearchEngine
             puts("Step 6: Retention Cleanup — dropped=#{dropped.inspect}")
           end
         end
+      end
 
+      class_methods do
         # -------------------------- Partial flow -------------------------
         def __se_indexate_partial(partition:, client:)
           partitions = Array(partition)
@@ -216,13 +256,16 @@ module SearchEngine
             sample_err = __se_extract_sample_error(summary)
             puts(
               "  partition=#{p.inspect} → status=#{summary.status} docs=#{summary.docs_total} " \
-              "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}" \
+              "failed=#{summary.failed_total} batches=#{summary.batches_total} " \
+              "duration_ms=#{summary.duration_ms_total}" \
               "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
           end
           puts('Step 3: Partial Indexation — done')
         end
+      end
 
+      class_methods do
         # ----------------------------- Helpers ---------------------------
         def __se_schema_missing?(diff)
           opts = diff[:collection_options]
@@ -236,7 +279,9 @@ module SearchEngine
           coll_opts = (diff[:collection_options] || {}).to_h
           added.any? || removed.any? || !changed.empty? || !coll_opts.empty?
         end
+      end
 
+      class_methods do
         def __se_extract_sample_error(summary)
           failed = begin
             summary.respond_to?(:failed_total) ? summary.failed_total.to_i : 0
@@ -265,7 +310,9 @@ module SearchEngine
           end
           nil
         end
+      end
 
+      class_methods do
         def __se_index_partitions!(into:)
           compiled = SearchEngine::Partitioner.for(self)
           if compiled
@@ -286,11 +333,16 @@ module SearchEngine
             sample_err = __se_extract_sample_error(summary)
             puts(
               "  single → status=#{summary.status} docs=#{summary.docs_total} " \
-              "failed=#{summary.failed_total} batches=#{summary.batches_total} duration_ms=#{summary.duration_ms_total}" \
+              "failed=#{summary.failed_total} batches=#{summary.batches_total} " \
+              "duration_ms=#{summary.duration_ms_total}" \
               "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
           end
         end
+      end
+
+      class_methods do
+        private
 
         def __se_retention_cleanup!(logical:, client:)
           keep = begin
@@ -318,7 +370,9 @@ module SearchEngine
           to_drop.each { |n| client.delete_collection(n) }
           to_drop
         end
+      end
 
+      class_methods do
         def __se_extract_timestamp(logical, name)
           base = name.to_s.delete_prefix("#{logical}_")
           parts = base.split('_')

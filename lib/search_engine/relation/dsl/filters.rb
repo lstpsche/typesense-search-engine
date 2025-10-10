@@ -85,51 +85,7 @@ module SearchEngine
 
           items.each do |entry|
             if entry.is_a?(Hash)
-              entry.each do |k, v|
-                if v.is_a?(Hash)
-                  # Joined: { assoc => { field => value } }
-                  assoc = k.to_sym
-                  v.each do |inner_field, inner_value|
-                    field_sym = inner_field.to_sym
-                    if array_like?(inner_value)
-                      arr = Array(inner_value).flatten(1).compact
-                      if arr.empty?
-                        if joined_empty_filtering_enabled?(assoc, field_sym)
-                          lhs = "$#{assoc}.#{field_sym}_empty"
-                          out_nodes << SearchEngine::AST.raw("#{lhs}:=#{negated ? 'false' : 'true'}")
-                        else
-                          raise_empty_array_type!(field_sym)
-                        end
-                      else
-                        out_nodes << SearchEngine::DSL::Parser.parse(
-                          { assoc => { field_sym => inner_value } }, klass: @klass, joins: joins_list
-                        )
-                      end
-                    else
-                      out_nodes << SearchEngine::DSL::Parser.parse(
-                        { assoc => { field_sym => inner_value } }, klass: @klass, joins: joins_list
-                      )
-                    end
-                  end
-                else
-                  field = k.to_sym
-                  if array_like?(v) && Array(v).flatten(1).compact.empty?
-                    arr = Array(v).flatten(1).compact
-                    if arr.empty?
-                      if base_empty_filtering_enabled?(field)
-                        lhs = "#{field}_empty"
-                        out_nodes << SearchEngine::AST.raw("#{lhs}:=#{negated ? 'false' : 'true'}")
-                      else
-                        raise_empty_array_type!(field)
-                      end
-                    else
-                      out_nodes << SearchEngine::DSL::Parser.parse({ field => v }, klass: @klass, joins: joins_list)
-                    end
-                  else
-                    out_nodes << SearchEngine::DSL::Parser.parse({ field => v }, klass: @klass, joins: joins_list)
-                  end
-                end
-              end
+              process_hash_entry(entry, out_nodes, negated)
             else
               non_hash_items << entry
             end
@@ -142,6 +98,63 @@ module SearchEngine
           end
 
           out_nodes.flatten.compact
+        end
+
+        def process_hash_entry(entry, out_nodes, negated)
+          entry.each do |k, v|
+            if v.is_a?(Hash)
+              process_join_predicate(k, v, out_nodes, negated)
+            else
+              process_base_predicate(k, v, out_nodes, negated)
+            end
+          end
+        end
+
+        def process_join_predicate(assoc_key, values_hash, out_nodes, negated)
+          assoc = assoc_key.to_sym
+          values_hash.each do |inner_field, inner_value|
+            field_sym = inner_field.to_sym
+            if array_like?(inner_value)
+              arr = Array(inner_value).flatten(1).compact
+              if arr.empty?
+                if joined_empty_filtering_enabled?(assoc, field_sym)
+                  emit_empty_array_flag(out_nodes, "$#{assoc}.#{field_sym}_empty", negated)
+                else
+                  raise_empty_array_type!(field_sym)
+                end
+              else
+                out_nodes << SearchEngine::DSL::Parser.parse(
+                  { assoc => { field_sym => inner_value } }, klass: @klass, joins: joins_list
+                )
+              end
+            else
+              out_nodes << SearchEngine::DSL::Parser.parse(
+                { assoc => { field_sym => inner_value } }, klass: @klass, joins: joins_list
+              )
+            end
+          end
+        end
+
+        def process_base_predicate(field_key, value, out_nodes, negated)
+          field = field_key.to_sym
+          if array_like?(value)
+            arr = Array(value).flatten(1).compact
+            if arr.empty?
+              if base_empty_filtering_enabled?(field)
+                emit_empty_array_flag(out_nodes, "#{field}_empty", negated)
+              else
+                raise_empty_array_type!(field)
+              end
+            else
+              out_nodes << SearchEngine::DSL::Parser.parse({ field => value }, klass: @klass, joins: joins_list)
+            end
+          else
+            out_nodes << SearchEngine::DSL::Parser.parse({ field => value }, klass: @klass, joins: joins_list)
+          end
+        end
+
+        def emit_empty_array_flag(out_nodes, lhs, negated)
+          out_nodes << SearchEngine::AST.raw("#{lhs}:=#{negated ? 'false' : 'true'}")
         end
 
         def base_empty_filtering_enabled?(field_sym)

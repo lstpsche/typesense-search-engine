@@ -58,13 +58,17 @@ module SearchEngine
 
           nil
         end
+      end
 
+      class_methods do
         # Read-only view of join declarations for this class.
         # @return [Hash{Symbol=>Hash}]
         def joins_config
           (@joins_config || {}).dup.freeze
         end
+      end
 
+      class_methods do
         # Lookup a single join configuration by name.
         # @param name [#to_sym]
         # @return [Hash]

@@ -21,92 +21,145 @@ module SearchEngine
         # @return [Object] hydrated instance
         def from_document(doc)
           obj = new
-          declared = attributes # { Symbol => type }
-          declared_joins = begin
-            self.class.respond_to?(:joins_config) ? (self.class.joins_config || {}) : {}
+          declared = __se_declared_attributes
+          declared_joins = __se_declared_joins
+
+          hidden_local = __se_hidden_local_fields
+          hidden_join = __se_hidden_join_fields
+
+          unknown = __se_assign_declared_or_unknown(
+            obj,
+            doc || {},
+            declared: declared,
+            declared_joins: declared_joins,
+            hidden_local: hidden_local,
+            hidden_join: hidden_join
+          )
+
+          __se_apply_default_joins!(obj, declared_joins: declared_joins, declared: declared)
+          __se_freeze_unknown!(obj, unknown)
+          obj
+        end
+      end
+
+      class_methods do
+        # Fetch declared attributes; resilient to missing DSL
+        def __se_declared_attributes
+          attributes
+        rescue StandardError
+          {}
+        end
+
+        # Fetch join declarations; keep existing behavior (use self.class) to avoid logic change
+        def __se_declared_joins
+          if self.class.respond_to?(:joins_config)
+            self.class.joins_config || {}
+          else
+            {}
+          end
+        rescue StandardError
+          {}
+        end
+
+        private :__se_declared_attributes, :__se_declared_joins
+      end
+
+      class_methods do
+        # Build the list of hidden local fields (e.g., name_empty)
+        def __se_hidden_local_fields
+          attr_opts = begin
+            respond_to?(:attribute_options) ? attribute_options : {}
           rescue StandardError
             {}
           end
-          unknown = {}
 
-          # Build sets of hidden field names to strip from unknown attributes.
-          begin
-            attr_opts = respond_to?(:attribute_options) ? attribute_options : {}
-          rescue StandardError
-            attr_opts = {}
-          end
-          hidden_local = []
+          hidden = []
           attr_opts.each do |fname, opts|
             next unless opts.is_a?(Hash) && opts[:empty_filtering]
 
-            hidden_local << "#{fname}_empty"
+            hidden << "#{fname}_empty"
           end
+          hidden
+        end
 
-          # For joined associations, hide $assoc.<field>_empty when target collection enabled it.
-          hidden_join = []
-          begin
-            joins_cfg = self.class.respond_to?(:joins_config) ? self.class.joins_config : {}
-            joins_cfg.each do |assoc_name, cfg|
-              collection = cfg[:collection]
-              next if collection.nil? || collection.to_s.strip.empty?
+        private :__se_hidden_local_fields
+      end
 
-              begin
-                target_klass = SearchEngine.collection_for(collection)
-                next unless target_klass.respond_to?(:attribute_options)
-
-                opts = target_klass.attribute_options || {}
-                opts.each do |field_sym, o|
-                  next unless o.is_a?(Hash) && o[:empty_filtering]
-
-                  hidden_join << "$#{assoc_name}.#{field_sym}_empty"
-                end
-              rescue StandardError
-                # Best-effort; skip when registry/metadata unavailable
-              end
-            end
+      class_methods do
+        # Build the list of hidden join fields (e.g., $assoc.field_empty)
+        def __se_hidden_join_fields
+          hidden = []
+          joins_cfg = begin
+            self.class.respond_to?(:joins_config) ? self.class.joins_config : {}
           rescue StandardError
-            # ignore
+            {}
           end
 
-          (doc || {}).each do |k, v|
+          joins_cfg.each do |assoc_name, cfg|
+            collection = cfg[:collection]
+            next if collection.nil? || collection.to_s.strip.empty?
+
+            begin
+              target_klass = SearchEngine.collection_for(collection)
+              next unless target_klass.respond_to?(:attribute_options)
+
+              opts = target_klass.attribute_options || {}
+              opts.each do |field_sym, o|
+                next unless o.is_a?(Hash) && o[:empty_filtering]
+
+                hidden << "#$#{assoc_name}.#{field_sym}_empty".sub('#$', '$')
+              end
+            rescue StandardError
+              # Best-effort; skip when registry/metadata unavailable
+            end
+          end
+
+          hidden
+        rescue StandardError
+          []
+        end
+
+        private :__se_hidden_join_fields
+      end
+
+      class_methods do
+        # Assign declared and join attributes; collect unknowns (filtering hidden fields)
+        def __se_assign_declared_or_unknown(obj, doc, declared:, declared_joins:, hidden_local:, hidden_join:)
+          unknown = {}
+          doc.each do |k, v|
             key_str = k.to_s
             key_sym = key_str.to_sym
-            if declared.key?(key_sym)
-              obj.instance_variable_set("@#{key_sym}", v)
-            elsif declared_joins.key?(key_sym)
-              # Hydrate join attribute as first-class reader
+            if declared.key?(key_sym) || declared_joins.key?(key_sym)
               obj.instance_variable_set("@#{key_sym}", v)
             else
-              # Strip hidden fields from unknowns
-              next if hidden_local.include?(key_str)
-              next if hidden_join.include?(key_str)
+              next if hidden_local.include?(key_str) || hidden_join.include?(key_str)
 
               unknown[key_str] = v
-              # Ensure the canonical document id is accessible as an instance
-              # variable even when not declared via the DSL. Keep it in
-              # unknowns for pretty-print rendering and debugging.
               obj.instance_variable_set('@id', v) if key_str == 'id'
             end
           end
+          unknown
+        end
 
-          # Ensure default values for missing join attributes based on local_key type
+        # Ensure default values for missing join attributes based on local_key type
+        def __se_apply_default_joins!(obj, declared_joins:, declared:)
           declared_joins.each do |assoc_name, cfg|
             ivar = "@#{assoc_name}"
             next if obj.instance_variable_defined?(ivar)
 
             lk = cfg[:local_key]
             lk_type = declared[lk]
-            default_val = if lk_type.is_a?(Array) && lk_type.size == 1
-                            []
-                          else
-                            nil
-                          end
+            default_val = nil
+            default_val = [] if lk_type.is_a?(Array) && lk_type.size == 1
             obj.instance_variable_set(ivar, default_val)
           end
-
-          obj.instance_variable_set(:@__unknown_attributes__, unknown.freeze) unless unknown.empty?
-          obj
         end
+
+        def __se_freeze_unknown!(obj, unknown)
+          obj.instance_variable_set(:@__unknown_attributes__, unknown.freeze) unless unknown.empty?
+        end
+
+        private :__se_assign_declared_or_unknown, :__se_apply_default_joins!, :__se_freeze_unknown!
       end
 
       # Return a shallow copy of unknown attributes captured during hydration.
