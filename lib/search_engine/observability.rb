@@ -12,7 +12,7 @@ module SearchEngine
 
     # Whitelisted search parameter keys to include in payload excerpts.
     PARAM_WHITELIST = %i[
-      q query_by per_page page infix filter_by group_by group_limit group_missing_values
+      q query_by include_fields exclude_fields per_page page infix filter_by group_by group_limit group_missing_values
       facet_by max_facet_values facet_query
       num_typos drop_tokens_threshold prioritize_exact_match query_by_weights
     ].freeze

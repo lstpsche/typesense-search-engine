@@ -868,6 +868,11 @@ module SearchEngine
       def from_document(doc)
         obj = new
         declared = attributes # { Symbol => type }
+        declared_joins = begin
+          self.class.respond_to?(:joins_config) ? (self.class.joins_config || {}) : {}
+        rescue StandardError
+          {}
+        end
         unknown = {}
 
         # Build sets of hidden field names to strip from unknown attributes.
@@ -914,6 +919,9 @@ module SearchEngine
           key_sym = key_str.to_sym
           if declared.key?(key_sym)
             obj.instance_variable_set("@#{key_sym}", v)
+          elsif declared_joins.key?(key_sym)
+            # Hydrate join attribute as first-class reader
+            obj.instance_variable_set("@#{key_sym}", v)
           else
             # Strip hidden fields from unknowns
             next if hidden_local.include?(key_str)
@@ -921,6 +929,21 @@ module SearchEngine
 
             unknown[key_str] = v
           end
+        end
+
+        # Ensure default values for missing join attributes based on local_key type
+        declared_joins.each do |assoc_name, cfg|
+          ivar = "@#{assoc_name}"
+          next if obj.instance_variable_defined?(ivar)
+
+          lk = cfg[:local_key]
+          lk_type = declared[lk]
+          default_val = if lk_type.is_a?(Array) && lk_type.size == 1
+                          []
+                        else
+                          nil
+                        end
+          obj.instance_variable_set(ivar, default_val)
         end
 
         obj.instance_variable_set(:@__unknown_attributes__, unknown.freeze) unless unknown.empty?
@@ -1018,8 +1041,17 @@ module SearchEngine
       rescue StandardError
         object_id
       end
-      attrs = pairs.map { |(k, v)| "#{k}: #{v.inspect}" }.join(', ')
-      "#<#{self.class.name}:#{hex_id} #{attrs}>"
+      return "#<#{self.class.name}:#{hex_id}>" if pairs.empty?
+
+      lines = pairs.map do |(k, v)|
+        rendered = if v.is_a?(Array) || v.is_a?(Hash)
+                     __se_symbolize_for_inspect(v).inspect
+                   else
+                     v.inspect
+                   end
+        "#{k}: #{rendered}"
+      end
+      "#<#{self.class.name}:#{hex_id}\n  #{lines.join(",\n  ")}>"
     end
 
     # Pretty-print with attributes on separate lines for readability in consoles.
@@ -1034,21 +1066,25 @@ module SearchEngine
       end
       pairs = __attribute_pairs_for_render
       pp.group(2, "#<#{self.class.name}:#{hex_id} ", '>') do
-        pp.breakable ''
-        pairs.each_with_index do |(k, v), idx|
-          if v.is_a?(Array) || v.is_a?(Hash)
-            pp.text("#{k}:")
-            pp.nest(2) do
-              pp.breakable ''
+        if pairs.empty?
+          pp.breakable ''
+        else
+          pp.breakable ''
+          pairs.each_with_index do |(k, v), idx|
+            if v.is_a?(Array) || v.is_a?(Hash)
+              pp.text("#{k}:")
+              pp.nest(2) do
+                pp.breakable ' '
+                pp.pp(__se_symbolize_for_inspect(v))
+              end
+            else
+              pp.text("#{k}: ")
               pp.pp(v)
             end
-          else
-            pp.text("#{k}: ")
-            pp.pp(v)
-          end
-          if idx < pairs.length - 1
-            pp.text(',')
-            pp.breakable ''
+            if idx < pairs.length - 1
+              pp.text(',')
+              pp.breakable ' '
+            end
           end
         end
       end
@@ -1087,6 +1123,18 @@ module SearchEngine
                    end
         pairs << [name.to_s, rendered]
       end
+      # Render declared joined attributes that were present in the hydrated document
+      begin
+        join_names = (self.class.respond_to?(:joins_config) ? (self.class.joins_config || {}) : {}).keys.map(&:to_s)
+      rescue StandardError
+        join_names = []
+      end
+      join_names.each do |jname|
+        next unless instance_variable_defined?("@#{jname}")
+
+        value = instance_variable_get("@#{jname}")
+        pairs << [jname, value]
+      end
       __se_append_unknown_attribute_pairs(pairs, declared)
     end
 
@@ -1101,7 +1149,8 @@ module SearchEngine
       extras.each do |k, v|
         key = k.to_s
         if key.start_with?('$') && key.include?('.') && !v.is_a?(Hash) && !v.is_a?(Array)
-          assoc, field = key.split('.', 2)
+          assoc_key, field = key.split('.', 2)
+          assoc = assoc_key.delete_prefix('$')
           # Respect existing nested shape if present
           if extras.key?(assoc)
             passthrough[key] = v
@@ -1154,18 +1203,27 @@ module SearchEngine
       end
     end
 
-    # Render already nested structures for $assoc keys
+    # Render already nested structures for assoc keys (either "$assoc" or plain assoc)
     def __se_render_existing_nested_assoc_pairs!(pairs, extras, selected_nested)
+      declared_joins = begin
+        self.class.respond_to?(:joins_config) ? (self.class.joins_config || {}) : {}
+      rescue StandardError
+        {}
+      end
+      assoc_names = declared_joins.keys.map(&:to_s)
+
       extras.each do |k, v|
         key = k.to_s
-        next unless key.start_with?('$')
         next unless v.is_a?(Array) || v.is_a?(Hash)
 
-        already = pairs.any? { |(name, _)| name == key }
-        next if already
-        next if selected_nested.any? && !selected_nested.include?(key.delete_prefix('$'))
+        assoc = key.start_with?('$') ? key.delete_prefix('$') : key
+        next unless assoc_names.include?(assoc)
 
-        pairs << [key, __se_symbolize_for_inspect(v)]
+        already = pairs.any? { |(name, _)| name == assoc }
+        next if already
+        next if selected_nested.any? && !selected_nested.include?(assoc)
+
+        pairs << [assoc, __se_symbolize_for_inspect(v)]
       end
     end
 
@@ -1184,7 +1242,8 @@ module SearchEngine
         key = k.to_s
         next if key == 'id'
         next if key.start_with?('$')
-        next if v.is_a?(Array) || v.is_a?(Hash)
+        # Avoid duplicating assoc entries already rendered
+        next if pairs.any? { |(name, _)| name == key }
 
         rendered = key == 'doc_updated_at' && !v.nil? ? __se_coerce_doc_updated_at_for_display(v) : v
         pairs << [key, rendered]

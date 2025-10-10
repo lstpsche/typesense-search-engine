@@ -471,17 +471,8 @@ module SearchEngine
 
     # Remove internal-only keys from the HTTP payload
     def sanitize_body_params(params)
-      payload = params.dup
-      payload.delete(:_join)
-      payload.delete(:_selection)
-      payload.delete(:_preset_mode)
-      payload.delete(:_preset_pruned_keys)
-      payload.delete(:_preset_conflicts)
-      payload.delete(:_curation_conflict_type)
-      payload.delete(:_curation_conflict_count)
-      payload.delete(:_runtime_flags)
-      payload.delete(:_hits)
-      payload
+      # Delegate to centralized sanitizer to keep behavior consistent
+      Client::RequestBuilder.send(:sanitize_body_params, params)
     end
 
     # Build the search event payload including selection and preset segments
