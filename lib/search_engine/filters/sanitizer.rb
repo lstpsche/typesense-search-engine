@@ -50,6 +50,54 @@ module SearchEngine
         end
       end
 
+      # Quote a scalar Ruby value for Typesense filters with conditional quoting for strings.
+      #
+      # Rules (based on Typesense filter_by syntax):
+      # - Strings that match a safe token pattern (e.g., Active, ACTIVE_1, foo-bar) are emitted bare
+      # - Reserved words true/false/null remain bare only when actually booleans/nil; string forms are quoted
+      # - Strings with any other characters are double-quoted with escaping
+      # - Arrays are delegated to +quote+ to preserve element quoting rules
+      #
+      # @param value [Object]
+      # @return [String]
+      def quote_scalar_for_filter(value)
+        return quote(value) if value.is_a?(Array)
+
+        case value
+        when NilClass
+          'null'
+        when TrueClass
+          'true'
+        when FalseClass
+          'false'
+        when Numeric
+          value.to_s
+        when String, Symbol
+          str = value.to_s
+          lc = str.strip.downcase
+          # Avoid ambiguity with special literals when user passes them as strings
+          return %("#{escape_string(str)}") if %w[true false null].include?(lc)
+
+          if safe_bare_string?(str)
+            str
+          else
+            %("#{escape_string(str)}")
+          end
+        when Time
+          %("#{value.iso8601}")
+        when DateTime
+          %("#{value.iso8601}")
+        when Date
+          %("#{value.iso8601}")
+        else
+          if value.respond_to?(:to_time)
+            %("#{value.to_time.iso8601}")
+          else
+            %("#{escape_string(value.to_s)}")
+          end
+        end
+      end
+
       # Build normalized filter fragments from a Hash.
       # Scalars become "field:=<quoted>", arrays become "field:=<quoted_list>".
       #
@@ -64,7 +112,7 @@ module SearchEngine
           if array_like?(raw)
             "#{field}:=#{quote(Array(raw))}"
           else
-            "#{field}:=#{quote(raw)}"
+            "#{field}:=#{quote_scalar_for_filter(raw)}"
           end
         end
       end
@@ -87,7 +135,8 @@ module SearchEngine
         idx = -1
         template.gsub(/(?<!\\)\?/) do
           idx += 1
-          quote(args[idx])
+          val = args[idx]
+          val.is_a?(Array) ? quote(val) : quote_scalar_for_filter(val)
         end
       end
 
@@ -116,6 +165,19 @@ module SearchEngine
       # @return [String]
       def escape_string(str)
         str.gsub('\\', '\\\\').gsub('"', '\\"')
+      end
+
+      # Determine whether a string can be emitted bare without quotes in filter_by.
+      # Safe if it matches: starts with a letter or underscore; then letters/digits/underscore/hyphen.
+      # This avoids ambiguity with numbers/booleans/null and special characters.
+      def safe_bare_string?(str)
+        return false if str.nil? || str.empty?
+
+        # Disallow surrounding/backtick/dquote characters quickly
+        return false if str.include?('"') || str.include?('`') || str.include?(',') || str.include?(' ')
+
+        # Must start with a letter or underscore; subsequent chars may include digits or hyphens/underscores
+        !!(str =~ /^[A-Za-z_][A-Za-z0-9_-]*$/)
       end
 
       # @api private

@@ -261,7 +261,9 @@ module SearchEngine
       return if hash.nil? || hash.empty?
 
       known = attributes_map.keys.map(&:to_sym)
-      unknown = hash.keys.map(&:to_sym) - known
+      # Ignore association-style keys whose values are Hash (handled by DSL::Parser for joins)
+      candidate_keys = hash.reject { |_, v| v.is_a?(Hash) }.keys
+      unknown = candidate_keys.map(&:to_sym) - known
       return if unknown.empty?
 
       begin

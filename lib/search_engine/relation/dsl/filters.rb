@@ -204,8 +204,15 @@ module SearchEngine
             entry = list[i]
             case entry
             when Hash
+              # Validate only base keys here; assoc keys (values as Hash) are handled via AST/Parser
               validate_hash_keys!(entry, known_attrs)
-              fragments.concat(SearchEngine::Filters::Sanitizer.build_from_hash(entry, known_attrs))
+              # Build fragments from base scalar/array pairs only; skip assoc=>{...}
+              base_pairs = entry.reject { |_, v| v.is_a?(Hash) }
+              unless base_pairs.empty?
+                fragments.concat(
+                  SearchEngine::Filters::Sanitizer.build_from_hash(base_pairs, known_attrs)
+                )
+              end
               i += 1
             when String
               i = normalize_where_process_string!(fragments, entry, list, i)

@@ -115,7 +115,16 @@ module SearchEngine
     private_class_method :compile_or
 
     def compile_binary(field, op, value)
-      binary(field, op, quote(value))
+      rhs = quote(value)
+      fstr = field.to_s
+      if (m = fstr.match(/^\$(\w+)\.(.+)$/))
+        assoc = m[1]
+        inner = m[2]
+        # Render joined field as $assoc(inner OP value) per expected Typesense join filter syntax
+        "$#{assoc}(#{inner}#{op}#{rhs})"
+      else
+        binary(field, op, rhs)
+      end
     end
     private_class_method :compile_binary
 
@@ -145,7 +154,12 @@ module SearchEngine
     private_class_method :compile_boolean
 
     def quote(value)
-      SearchEngine::Filters::Sanitizer.quote(value)
+      # Use conditional scalar quoting for scalars; preserve array element quoting rules
+      if value.is_a?(Array)
+        SearchEngine::Filters::Sanitizer.quote(value)
+      else
+        SearchEngine::Filters::Sanitizer.quote_scalar_for_filter(value)
+      end
     end
     private_class_method :quote
 
