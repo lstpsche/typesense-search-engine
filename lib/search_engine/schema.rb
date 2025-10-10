@@ -27,7 +27,7 @@ module SearchEngine
       datetime: 'string'
     }.freeze
 
-    FIELD_COMPARE_KEYS = %i[type].freeze
+    FIELD_COMPARE_KEYS = %i[type reference].freeze
 
     class << self
       # Build a Typesense-compatible schema hash from a model class DSL.
@@ -48,6 +48,7 @@ module SearchEngine
 
         attributes_map = klass.respond_to?(:attributes) ? klass.attributes : {}
         attribute_options = klass.respond_to?(:attribute_options) ? (klass.attribute_options || {}) : {}
+        references_by_local_key = build_references_by_local_key(klass)
         fields_array = []
         attributes_map.each do |attribute_name, type_descriptor|
           ts_type = typesense_type_for(type_descriptor)
@@ -57,18 +58,16 @@ module SearchEngine
           fields_array << {
             name: attribute_name.to_s,
             type: ts_type,
-            **{ locale: opts[:locale], sort: opts[:sort], optional: opts[:optional] }.compact_blank
+            **({
+              locale: opts[:locale],
+              sort: opts[:sort],
+              optional: opts[:optional],
+              reference: references_by_local_key[attribute_name.to_sym]
+            }.compact_blank)
           }
 
           # Hidden *_empty field for array attributes with empty_filtering enabled and for any field with optional enabled
-          begin
-            # Ensure it applies only to array types in schema as well
-            if (opts[:empty_filtering] && type_descriptor.is_a?(Array) && type_descriptor.size == 1) || opts[:optional]
-              fields_array << { name: "#{attribute_name}_empty", type: 'bool' }
-            end
-          rescue StandardError
-            # best-effort
-          end
+          append_hidden_empty_field(fields_array, attribute_name, type_descriptor, opts)
         end
 
         # Ensure mandatory system field is present with enforced type.
@@ -374,7 +373,10 @@ module SearchEngine
         fields.each do |field|
           fname = (field[:name] || field['name']).to_s
           ftype = (field[:type] || field['type']).to_s
-          normalized_fields[fname] = { name: fname, type: normalize_type(ftype) }
+          fref = field[:reference] || field['reference']
+          entry = { name: fname, type: normalize_type(ftype) }
+          entry[:reference] = fref.to_s unless fref.nil? || fref.to_s.strip.empty?
+          normalized_fields[fname] = entry
         end
 
         {
@@ -542,6 +544,40 @@ module SearchEngine
         lines
       end
       private :format_collection_options
+
+      # Build a mapping of local attribute names to referenced collection names based on join declarations.
+      # @param klass [Class]
+      # @return [Hash{Symbol=>String}]
+      def build_references_by_local_key(klass)
+        refs = {}
+        return refs unless klass.respond_to?(:joins_config)
+
+        (klass.joins_config || {}).each_value do |cfg|
+          lk = cfg[:local_key]
+          coll = cfg[:collection]
+          fk = cfg[:foreign_key]
+          next if lk.nil?
+
+          coll_name = coll.to_s
+          fk_name = fk.to_s
+          next if coll_name.strip.empty? || fk_name.strip.empty?
+
+          key = lk.to_sym
+          refs[key] ||= "#{coll_name}.#{fk_name}"
+        end
+        refs
+      end
+
+      # Append hidden *_empty field for array attributes with empty_filtering enabled and for any field with optional enabled
+      def append_hidden_empty_field(fields_array, attribute_name, type_descriptor, opts)
+        return unless (
+          opts[:empty_filtering] &&
+          type_descriptor.is_a?(Array) &&
+          type_descriptor.size == 1
+        ) || opts[:optional]
+
+        fields_array << { name: "#{attribute_name}_empty", type: 'bool' }
+      end
     end
   end
 end
