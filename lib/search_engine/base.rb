@@ -537,6 +537,42 @@ module SearchEngine
         parts.map { |p| SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: into) }
       end
 
+      # Return the compiled Typesense schema for this collection model.
+      #
+      # Uses the model's declared attributes and options to build a deterministic
+      # Typesense-compatible schema hash. The result is deeply frozen.
+      #
+      # @return [Hash] compiled schema with symbol keys
+      def schema
+        SearchEngine::Schema.compile(self)
+      end
+
+      # Retrieve the current live schema of the Typesense collection.
+      #
+      # Resolves the logical collection name to the current physical collection
+      # via alias when present, then fetches the collection schema from Typesense.
+      # Returns nil when the collection is missing.
+      #
+      # @return [Hash, nil] live collection schema (symbolized) or nil when missing
+      def current_schema
+        client = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+        logical = respond_to?(:collection) ? collection.to_s : name.to_s
+        physical = client.resolve_alias(logical) || logical
+        client.retrieve_collection_schema(physical)
+      end
+
+      # Compute the diff between the model's compiled schema and the live schema in Typesense.
+      #
+      # The return value matches the structured diff hash produced by
+      # {SearchEngine::Schema.diff}, excluding the pretty-printed summary.
+      #
+      # @return [Hash] diff hash with keys: :collection, :added_fields, :removed_fields, :changed_fields, :collection_options
+      def schema_diff
+        client = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+        res = SearchEngine::Schema.diff(self, client: client)
+        res[:diff]
+      end
+
       # Drop this model's Typesense collection.
       #
       # Resolves the alias for the logical collection name and drops the current
