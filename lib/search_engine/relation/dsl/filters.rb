@@ -39,7 +39,7 @@ module SearchEngine
         end
 
         # Add filters to the relation.
-        # When called without arguments, returns a WhereChain for `.where.not(...)` style.
+        # When called without arguments, it's a no-op and returns the relation (idempotent).
         # @param args [Array<Object>] filter arguments
         # @return [SearchEngine::Relation, WhereChain]
         def where(*args)
@@ -50,6 +50,30 @@ module SearchEngine
           spawn do |s|
             s[:ast] = Array(s[:ast]) + Array(ast_nodes)
             s[:filters] = Array(s[:filters]) + fragments
+          end
+        end
+
+        # AR-style `.where.not(...)` support directly on the relation to keep
+        # `.where` with no args as a no-op (per project tests).
+        # @param args [Array<Object>]
+        # @return [SearchEngine::Relation]
+        def not(*args)
+          nodes = Array(build_ast_with_empty_array_rewrites(args, negated: true))
+
+          negated = nodes.map do |node|
+            case node
+            when SearchEngine::AST::Eq
+              SearchEngine::AST.not_eq(node.field, node.value)
+            when SearchEngine::AST::In
+              SearchEngine::AST.not_in(node.field, node.values)
+            else
+              node
+            end
+          end
+
+          spawn do |s|
+            s[:ast] = Array(s[:ast]) + negated
+            s[:filters] = Array(s[:filters])
           end
         end
 
@@ -74,7 +98,9 @@ module SearchEngine
 
         private
 
-        # Build AST nodes, rewriting empty-array predicates to hidden *_empty flags when enabled.
+        # Build AST nodes, rewriting:
+        # - empty-array predicates to hidden *_empty flags when enabled (existing behavior)
+        # - nil predicates to hidden *_blank flags when `optional` is enabled (new behavior)
         # Delegates other inputs to the DSL parser.
         def build_ast_with_empty_array_rewrites(args, negated: false)
           items = Array(args).flatten.compact
@@ -114,7 +140,9 @@ module SearchEngine
           assoc = assoc_key.to_sym
           values_hash.each do |inner_field, inner_value|
             field_sym = inner_field.to_sym
-            if array_like?(inner_value)
+            if inner_value.nil?
+              emit_nil_flags_for_join(out_nodes, assoc, field_sym, negated)
+            elsif array_like?(inner_value)
               arr = Array(inner_value).flatten(1).compact
               if arr.empty?
                 if joined_empty_filtering_enabled?(assoc, field_sym)
@@ -137,7 +165,9 @@ module SearchEngine
 
         def process_base_predicate(field_key, value, out_nodes, negated)
           field = field_key.to_sym
-          if array_like?(value)
+          if value.nil?
+            emit_nil_flags_for_base(out_nodes, field, negated)
+          elsif array_like?(value)
             arr = Array(value).flatten(1).compact
             if arr.empty?
               if base_empty_filtering_enabled?(field)
@@ -177,6 +207,77 @@ module SearchEngine
           o.is_a?(Hash) && o[:empty_filtering]
         rescue StandardError
           false
+        end
+
+        def base_optional_enabled?(field_sym)
+          opts = @klass.respond_to?(:attribute_options) ? (@klass.attribute_options || {}) : {}
+          o = opts[field_sym]
+          o.is_a?(Hash) && o[:optional]
+        rescue StandardError
+          false
+        end
+
+        def joined_optional_enabled?(assoc_sym, field_sym)
+          cfg = @klass.join_for(assoc_sym)
+          collection = cfg[:collection]
+          return false if collection.nil? || collection.to_s.strip.empty?
+
+          target_klass = SearchEngine.collection_for(collection)
+          return false unless target_klass.respond_to?(:attribute_options)
+
+          o = (target_klass.attribute_options || {})[field_sym]
+          o.is_a?(Hash) && o[:optional]
+        rescue StandardError
+          false
+        end
+
+        def emit_nil_flags_for_base(out_nodes, field_sym, negated)
+          has_empty = base_empty_filtering_enabled?(field_sym)
+          has_blank = base_optional_enabled?(field_sym)
+          fragment = nil
+          if has_empty && has_blank
+            fragment = if negated
+                         "(#{field_sym}_empty:=false && #{field_sym}_blank:=false)"
+                       else
+                         "(#{field_sym}_empty:=true || #{field_sym}_blank:=true)"
+                       end
+          elsif has_blank
+            fragment = "#{field_sym}_blank:=#{negated ? 'false' : 'true'}"
+          elsif has_empty
+            fragment = "#{field_sym}_empty:=#{negated ? 'false' : 'true'}"
+          end
+
+          out_nodes << if fragment
+                         SearchEngine::AST.raw(fragment)
+                       else
+                         SearchEngine::DSL::Parser.parse({ field_sym => nil }, klass: @klass, joins: joins_list)
+                       end
+        end
+
+        def emit_nil_flags_for_join(out_nodes, assoc_sym, field_sym, negated)
+          has_empty = joined_empty_filtering_enabled?(assoc_sym, field_sym)
+          has_blank = joined_optional_enabled?(assoc_sym, field_sym)
+          lhs_empty = "$#{assoc_sym}.#{field_sym}_empty"
+          lhs_blank = "$#{assoc_sym}.#{field_sym}_blank"
+          fragment = nil
+          if has_empty && has_blank
+            fragment = if negated
+                         "(#{lhs_empty}:=false && #{lhs_blank}:=false)"
+                       else
+                         "(#{lhs_empty}:=true || #{lhs_blank}:=true)"
+                       end
+          elsif has_blank
+            fragment = "#{lhs_blank}:=#{negated ? 'false' : 'true'}"
+          elsif has_empty
+            fragment = "#{lhs_empty}:=#{negated ? 'false' : 'true'}"
+          end
+
+          if fragment
+            out_nodes << SearchEngine::AST.raw(fragment)
+          else
+            parsed = { assoc_sym => { field_sym => nil } }
+            out_nodes << SearchEngine::DSL::Parser.parse(parsed, klass: @klass, joins: joins_list)
+          end
         end
 
         def array_like?(value)

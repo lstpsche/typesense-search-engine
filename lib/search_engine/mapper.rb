@@ -122,6 +122,7 @@ module SearchEngine
         @allowed_keys = @required_keys
         @options = default_options.merge(options || {})
         @__empty_filtering_targets__ = compute_empty_filtering_targets
+        @__optional_blank_targets__ = compute_optional_blank_targets
         freeze
       end
 
@@ -157,8 +158,9 @@ module SearchEngine
           # Overwrite any provided value
           hash[:doc_updated_at] = now_i
 
-          # Populate hidden empty flags for eligible array fields
+          # Populate hidden flags
           set_hidden_empty_flags!(hash)
+          set_hidden_blank_flags!(hash)
 
           update_stats_for_doc!(stats, hash)
           validate_and_coerce_types!(stats, hash)
@@ -246,6 +248,19 @@ module SearchEngine
           value = doc[base_name.to_s] if value.nil?
           flag_name = "#{base_name}_empty"
           doc[flag_name.to_sym] = value.nil? || (value.is_a?(Array) && value.empty?)
+        end
+      end
+
+      # Compute and set hidden *_blank flags based on optional fields.
+      # Adds the hidden flag only when the field is present in the schema (allowed_keys).
+      def set_hidden_blank_flags!(doc)
+        return if @__optional_blank_targets__.empty?
+
+        @__optional_blank_targets__.each do |base_name|
+          value = doc[base_name.to_sym]
+          value = doc[base_name.to_s] if value.nil?
+          flag_name = "#{base_name}_blank"
+          doc[flag_name.to_sym] = value.nil?
         end
       end
 
@@ -389,6 +404,24 @@ module SearchEngine
           next unless o.is_a?(Hash) && o[:empty_filtering]
 
           hidden = "#{fname}_empty"
+          targets << fname.to_s if @types_by_field.key?(hidden) || @required_keys.include?(hidden.to_sym)
+        end
+        targets.freeze
+      end
+
+      # Determine which declared attributes have optional enabled.
+      # Returns an Array of base field names as Strings, only when corresponding _blank is present in schema.
+      def compute_optional_blank_targets
+        begin
+          opts = @klass.respond_to?(:attribute_options) ? (@klass.attribute_options || {}) : {}
+        rescue StandardError
+          opts = {}
+        end
+        targets = []
+        opts.each do |fname, o|
+          next unless o.is_a?(Hash) && o[:optional]
+
+          hidden = "#{fname}_blank"
           targets << fname.to_s if @types_by_field.key?(hidden) || @required_keys.include?(hidden.to_sym)
         end
         targets.freeze

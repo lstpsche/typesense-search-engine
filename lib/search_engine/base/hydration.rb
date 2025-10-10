@@ -75,9 +75,10 @@ module SearchEngine
 
           hidden = []
           attr_opts.each do |fname, opts|
-            next unless opts.is_a?(Hash) && opts[:empty_filtering]
+            next unless opts.is_a?(Hash)
 
-            hidden << "#{fname}_empty"
+            hidden << "#{fname}_empty" if opts[:empty_filtering]
+            hidden << "#{fname}_blank" if opts[:optional]
           end
           hidden
         end
@@ -105,9 +106,10 @@ module SearchEngine
 
               opts = target_klass.attribute_options || {}
               opts.each do |field_sym, o|
-                next unless o.is_a?(Hash) && o[:empty_filtering]
+                next unless o.is_a?(Hash)
 
-                hidden << "#$#{assoc_name}.#{field_sym}_empty".sub('#$', '$')
+                hidden << "#$#{assoc_name}.#{field_sym}_empty".sub('#$', '$') if o[:empty_filtering]
+                hidden << "#$#{assoc_name}.#{field_sym}_blank".sub('#$', '$') if o[:optional]
               end
             rescue StandardError
               # Best-effort; skip when registry/metadata unavailable

@@ -66,7 +66,9 @@ module SearchEngine
             }.compact_blank)
           }
 
-          # Hidden *_empty field for array attributes with empty_filtering enabled and for any field with optional enabled
+          # Hidden flags:
+          # - <name>_empty for array attributes with empty_filtering enabled
+          # - <name>_blank for any attribute with optional enabled
           append_hidden_empty_field(fields_array, attribute_name, type_descriptor, opts)
         end
 
@@ -567,15 +569,17 @@ module SearchEngine
         refs
       end
 
-      # Append hidden *_empty field for array attributes with empty_filtering enabled and for any field with optional enabled
+      # Append hidden flags based on attribute options:
+      # - <name>_empty for array attributes with empty_filtering enabled
+      # - <name>_blank for any attribute with optional enabled
       def append_hidden_empty_field(fields_array, attribute_name, type_descriptor, opts)
-        return unless (
-          opts[:empty_filtering] &&
-          type_descriptor.is_a?(Array) &&
-          type_descriptor.size == 1
-        ) || opts[:optional]
+        add_empty = opts[:empty_filtering] && type_descriptor.is_a?(Array) && type_descriptor.size == 1
+        add_blank = opts[:optional]
 
-        fields_array << { name: "#{attribute_name}_empty", type: 'bool' }
+        return unless add_empty || add_blank
+
+        fields_array << { name: "#{attribute_name}_empty", type: 'bool' } if add_empty
+        fields_array << { name: "#{attribute_name}_blank", type: 'bool' } if add_blank
       end
     end
   end
