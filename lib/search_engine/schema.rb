@@ -27,7 +27,7 @@ module SearchEngine
       datetime: 'string'
     }.freeze
 
-    FIELD_COMPARE_KEYS = %i[type reference].freeze
+    FIELD_COMPARE_KEYS = %i[type reference locale sort optional infix].freeze
 
     class << self
       # Build a Typesense-compatible schema hash from a model class DSL.
@@ -62,8 +62,9 @@ module SearchEngine
               locale: opts[:locale],
               sort: opts[:sort],
               optional: opts[:optional],
+              infix: opts[:infix],
               reference: references_by_local_key[attribute_name.to_sym]
-            }.compact_blank)
+            }.compact)
           }
 
           # Hidden flags:
@@ -382,6 +383,11 @@ module SearchEngine
           fref = field[:reference] || field['reference']
           entry = { name: fname, type: normalize_type(ftype) }
           entry[:reference] = fref.to_s unless fref.nil? || fref.to_s.strip.empty?
+          # Preserve attribute-level flags from either compiled or live schemas.
+          %i[locale sort optional infix].each do |k|
+            val = field[k] || field[k.to_s]
+            entry[k] = val unless val.nil?
+          end
           normalized_fields[fname] = entry
         end
 
@@ -425,6 +431,9 @@ module SearchEngine
 
           field_changes = {}
           FIELD_COMPARE_KEYS.each do |key|
+            # Only compare attribute-level flags when declared in compiled schema.
+            next unless key == :type || key == :reference || compiled_field.key?(key)
+
             cval = compiled_field[key]
             lval = live_field[key]
             next if values_equal?(cval, lval)

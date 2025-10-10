@@ -71,12 +71,13 @@ module SearchEngine
         #   the raw value is passed to the Typesense field's `locale`
         # @param optional [Boolean, nil] when set, the raw value is passed to the Typesense field's `optional`
         # @param sort [Boolean, nil] when set, the raw value is passed to the Typesense field's `sort`
+        # @param infix [Boolean, nil] when set, the raw value is passed to the Typesense field's `infix`
         # @param empty_filtering [Boolean, nil] only applicable to array types (e.g., [:string]).
         #   When true, the gem will add an internal hidden boolean field "<name>_empty" used to
         #   support `.where(name: [])` and `.where.not(name: [])` semantics. Hidden fields are
         #   not exposed via public APIs or inspect and are populated automatically by the mapper.
         # @return [void]
-        def attribute(name, type = :string, locale: nil, optional: nil, sort: nil, empty_filtering: nil)
+        def attribute(name, type = :string, locale: nil, optional: nil, sort: nil, infix: nil, empty_filtering: nil)
           n = name.to_sym
           if n == :id
             raise SearchEngine::Errors::InvalidField,
@@ -85,11 +86,11 @@ module SearchEngine
 
           (@attributes ||= {})[n] = type
 
-          if [locale, optional, sort, empty_filtering].any? { |v| !v.nil? }
+          if [locale, optional, sort, infix, empty_filtering].any? { |v| !v.nil? }
             @attribute_options ||= {}
             new_opts = __se_build_attribute_options_for(
               n, type,
-              locale: locale, optional: optional, sort: sort, empty_filtering: empty_filtering
+              locale: locale, optional: optional, sort: sort, infix: infix, empty_filtering: empty_filtering
             )
 
             if new_opts.empty?
@@ -111,7 +112,10 @@ module SearchEngine
       class_methods do
         private
 
-        def __se_build_attribute_options_for(n, type, locale:, optional: nil, sort: nil, empty_filtering: nil)
+        def __se_build_attribute_options_for(
+          n, type, locale:,
+          optional: nil, sort: nil, infix: nil, empty_filtering: nil
+        )
           new_opts = (@attribute_options[n] || {}).dup
 
           # locale
@@ -132,6 +136,7 @@ module SearchEngine
             type,
             optional: optional,
             sort: sort,
+            infix: infix,
             empty_filtering: empty_filtering
           )
         end
@@ -140,7 +145,7 @@ module SearchEngine
       end
 
       class_methods do
-        # optional, sort, empty_filtering extracted to a separate block to
+        # optional, sort, infix, empty_filtering extracted to a separate block to
         # satisfy Metrics/BlockLength without changing semantics.
         def __se_ensure_boolean!(name, value)
           return if [true, false].include?(value)
@@ -149,7 +154,7 @@ module SearchEngine
                 "`#{name}` should be of boolean data type (currently is #{value.class})"
         end
 
-        def __se_apply_optional_sort_empty_filtering(new_opts, type, optional:, sort:, empty_filtering:)
+        def __se_apply_optional_sort_empty_filtering(new_opts, type, optional:, sort:, infix:, empty_filtering:)
           # optional
           if optional.nil?
             new_opts.delete(:optional)
@@ -164,6 +169,14 @@ module SearchEngine
           else
             __se_ensure_boolean!(:sort, sort)
             new_opts[:sort] = sort ? true : false
+          end
+
+          # infix
+          if infix.nil?
+            new_opts.delete(:infix)
+          else
+            __se_ensure_boolean!(:infix, infix)
+            new_opts[:infix] = infix ? true : false
           end
 
           # empty_filtering
