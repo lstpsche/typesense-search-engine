@@ -22,6 +22,8 @@ module SearchEngine
   # Predicate AST for compiler-agnostic query representation.
   #
   # Exposes ergonomic builders as module functions, returning immutable nodes.
+  #
+  # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Query-DSL`
   module AST
     module_function
 

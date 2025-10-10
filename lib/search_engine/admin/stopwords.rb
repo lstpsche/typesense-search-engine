@@ -6,6 +6,7 @@ module SearchEngine
     #
     # @since 0.1.0
     # @see docs/synonyms_stopwords.md#management
+    # @see `https://typesense.org/docs/latest/api/stopwords.html`
     module Stopwords
       class << self
         # Upsert a stopword set by ID.
@@ -17,6 +18,7 @@ module SearchEngine
         # @example
         #   SearchEngine::Admin::Stopwords.upsert!(collection: "products", id: "common", terms: %w[the and])
         # @see SearchEngine::Admin::Synonyms.upsert!
+        # @see `https://typesense.org/docs/latest/api/stopwords.html#upsert-a-stopwords`
         def upsert!(collection:, id:, terms:)
           c = normalize_collection!(collection)
           sid = normalize_id!(id)
@@ -33,6 +35,7 @@ module SearchEngine
         # @param collection [String]
         # @param id [String]
         # @return [Hash, nil] { id:, terms: [] } or nil when not found
+        # @see `https://typesense.org/docs/latest/api/stopwords.html#retrieve-a-stopword`
         def get(collection:, id:)
           c = normalize_collection!(collection)
           sid = normalize_id!(id)
@@ -49,6 +52,7 @@ module SearchEngine
         # List all stopword sets for a collection.
         # @param collection [String]
         # @return [Array<Hash>] list of { id:, terms: [] }
+        # @see `https://typesense.org/docs/latest/api/stopwords.html#list-all-stopwords-of-a-collection`
         def list(collection:)
           c = normalize_collection!(collection)
           res = client.stopwords_list(collection: c)
@@ -61,6 +65,7 @@ module SearchEngine
         # @param collection [String]
         # @param id [String]
         # @return [true]
+        # @see `https://typesense.org/docs/latest/api/stopwords.html#delete-a-stopword`
         def delete!(collection:, id:)
           c = normalize_collection!(collection)
           sid = normalize_id!(id)

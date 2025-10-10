@@ -39,6 +39,7 @@ module SearchEngine
       # Build a policy from a config-like Hash.
       # @param cfg [Hash]
       # @return [RetryPolicy]
+      # @see docs/indexer.md
       def self.from_config(cfg)
         c = cfg || {}
         new(

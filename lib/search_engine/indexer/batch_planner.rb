@@ -18,6 +18,8 @@ module SearchEngine
       # @param docs [Array<Hash>]
       # @param buffer [String] a reusable String buffer to encode into
       # @return [Array(Integer, Integer)] [docs_count, bytes_sent]
+      # @raise [SearchEngine::Errors::InvalidParams] when a document is not a Hash or missing :id
+      # @see docs/indexer.md
       def self.encode_jsonl!(docs, buffer)
         count = 0
         buffer.clear

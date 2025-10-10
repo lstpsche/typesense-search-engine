@@ -3,26 +3,40 @@
 module SearchEngine
   class Client
     # HttpAdapter is a minimal transport wrapper around the injected Typesense::Client.
-    # It has no Typesense domain knowledge beyond executing the provided request.
+    #
+    # Provides a very small surface to execute normalized requests produced by
+    # {SearchEngine::Client::RequestBuilder}, delegating to the official Typesense
+    # client without re-implementing low-level HTTP. It stays transport-only and
+    # does not parse or coerce responses beyond returning a simple Response struct.
+    #
+    # @see SearchEngine::Client::RequestBuilder
+    # @see `https://typesense.org/docs/latest/api/`
     class HttpAdapter
       Response = Struct.new(:status, :headers, :body, keyword_init: true)
 
       TYPESENSE_API_KEY_HEADER = 'X-TYPESENSE-API-KEY'
 
+      # Initialize with an injected Typesense client instance.
       # @param typesense_client [Object] an instance compatible with Typesense::Client
+      # @return [void]
       def initialize(typesense_client)
         @typesense = typesense_client
       end
 
-      # Execute a normalized request. Returns a normalized Response with raw body.
-      # Note: This adapter delegates to high-level Typesense client helpers where available
-      # to avoid re-implementing HTTP plumbing. It stays transport-only and does not parse.
+      # Execute a normalized request produced by {SearchEngine::Client::RequestBuilder}.
       #
-      # Supported shapes used by current client:
-      # - POST /collections/:c/documents/search with common_params URL opts
+      # Delegates to the upstream Typesense client where possible, returning a
+      # transport-level {Response}. This adapter does not perform parsing or
+      # symbolization and intentionally exposes the raw upstream value in
+      # {Response#body}.
       #
-      # @param request [SearchEngine::Client::RequestBuilder::Request]
-      # @return [Response]
+      # Supported forms (current usage):
+      # - POST `/collections/:collection/documents/search` (with `common_params`)
+      #
+      # @param request [SearchEngine::Client::RequestBuilder::Request] normalized request
+      # @return [Response] response wrapper with status, headers and raw body
+      # @raise [ArgumentError] when the request path is not supported by this adapter
+      # @see `https://typesense.org/docs/latest/api/documents.html#search-document`
       def perform(request)
         method = request.http_method.to_sym
         path = request.path.to_s

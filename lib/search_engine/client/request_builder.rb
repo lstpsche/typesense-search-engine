@@ -4,6 +4,14 @@ module SearchEngine
   class Client
     # RequestBuilder maps compiled params to concrete Typesense requests.
     # It has no network concerns; it only assembles the request object.
+    #
+    # Produces a normalized {Request} that can be executed by
+    # {SearchEngine::Client::HttpAdapter} or directly by the client methods.
+    # Sanitizes internal-only keys before encoding to ensure the payload is
+    # compatible with the Typesense API.
+    #
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Client`
+    # @see `https://typesense.org/docs/latest/api/`
     class RequestBuilder
       # Normalized request container used by the transport adapter.
       # @!attribute http_method [Symbol] one of :get, :post, :put, :delete
@@ -47,10 +55,12 @@ module SearchEngine
       ].freeze
 
       # Build a single-search request for a collection.
-      # @param collection [String]
-      # @param compiled_params [SearchEngine::CompiledParams]
-      # @param url_opts [Hash]
-      # @return [Request]
+      #
+      # @param collection [String] logical collection name (alias)
+      # @param compiled_params [SearchEngine::CompiledParams] sanitized, deterministic params
+      # @param url_opts [Hash] URL/common params such as cache controls
+      # @return [Request] normalized request ready for transport
+      # @see `https://typesense.org/docs/latest/api/documents.html#search-document`
       def self.build_search(collection:, compiled_params:, url_opts: {})
         name = collection.to_s
         body_hash = sanitize_body_params(compiled_params.to_h)
@@ -67,9 +77,10 @@ module SearchEngine
         )
       end
 
-      # Remove internal-only keys from the HTTP payload (copied from previous client behavior)
-      # @param params [Hash]
-      # @return [Hash]
+      # Remove internal-only keys from the HTTP payload (copied from previous client behavior).
+      #
+      # @param params [Hash] possibly containing internal keys
+      # @return [Hash] new Hash without internal-only keys
       def self.sanitize_body_params(params)
         payload = params.dup
         INTERNAL_ONLY_KEYS.each { |k| payload.delete(k) }

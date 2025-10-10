@@ -6,6 +6,7 @@ module SearchEngine
     #
     # @since 0.1.0
     # @see docs/synonyms_stopwords.md#management
+    # @see `https://typesense.org/docs/latest/api/synonyms.html`
     module Synonyms
       class << self
         # Upsert a synonym set by ID.
@@ -17,6 +18,7 @@ module SearchEngine
         # @example
         #   SearchEngine::Admin::Synonyms.upsert!(collection: "products", id: "colors", terms: %w[color colour])
         # @see SearchEngine::Admin::Stopwords.upsert!
+        # @see `https://typesense.org/docs/latest/api/synonyms.html#upsert-a-synonym`
         def upsert!(collection:, id:, terms:)
           c = normalize_collection!(collection)
           sid = normalize_id!(id)
@@ -33,6 +35,7 @@ module SearchEngine
         # @param collection [String]
         # @param id [String]
         # @return [Hash, nil] { id:, terms: [] } or nil when not found
+        # @see `https://typesense.org/docs/latest/api/synonyms.html#retrieve-a-synonym`
         def get(collection:, id:)
           c = normalize_collection!(collection)
           sid = normalize_id!(id)
@@ -49,6 +52,7 @@ module SearchEngine
         # List all synonym sets for a collection.
         # @param collection [String]
         # @return [Array<Hash>] list of { id:, terms: [] }
+        # @see `https://typesense.org/docs/latest/api/synonyms.html#list-all-synonyms-of-a-collection`
         def list(collection:)
           c = normalize_collection!(collection)
           res = client.synonyms_list(collection: c)
@@ -61,6 +65,7 @@ module SearchEngine
         # @param collection [String]
         # @param id [String]
         # @return [true]
+        # @see `https://typesense.org/docs/latest/api/synonyms.html#delete-a-synonym`
         def delete!(collection:, id:)
           c = normalize_collection!(collection)
           sid = normalize_id!(id)

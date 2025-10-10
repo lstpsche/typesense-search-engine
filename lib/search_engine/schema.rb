@@ -100,6 +100,8 @@ module SearchEngine
       # @param klass [Class] model class inheriting from {SearchEngine::Base}
       # @param client [SearchEngine::Client] optional client wrapper (for tests)
       # @return [Hash] { diff: Hash, pretty: String }
+      # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema-Indexer-E2E`
+      # @see `https://typesense.org/docs/latest/api/collections.html`
       def diff(klass, client: SearchEngine::Client.new)
         compiled = compile(klass)
         logical_name = compiled[:name]
@@ -171,6 +173,8 @@ module SearchEngine
       # @yieldparam physical_name [String] the newly created physical collection name
       # @return [Hash] { logical: String, new_physical: String, previous_physical: String, alias_target: String, dropped_physicals: Array<String> }
       # @raise [SearchEngine::Errors::Api, ArgumentError]
+      # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema#lifecycle`
+      # @see `https://typesense.org/docs/latest/api/collections.html`
       def apply!(klass, client: SearchEngine::Client.new)
         compiled = compile(klass)
         logical = compiled[:name]
@@ -234,6 +238,7 @@ module SearchEngine
       # @param client [SearchEngine::Client]
       # @return [Hash] { logical: String, new_target: String, previous_target: String }
       # @raise [ArgumentError] when no previous physical exists
+      # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema#retention`
       def rollback(klass, client: SearchEngine::Client.new)
         compiled = compile(klass)
         logical = compiled[:name]

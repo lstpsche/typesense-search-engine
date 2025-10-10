@@ -6,7 +6,13 @@ module SearchEngine
     # This module is pure/deterministic and avoids any network I/O.
     module Compiler
       # Compile immutable relation state and options into Typesense body params.
-      # @return [SearchEngine::CompiledParams]
+      #
+      # Pure function w.r.t. relation state; performs no I/O and emits
+      # redaction-aware instrumentation events for DX surfaces.
+      #
+      # @return [SearchEngine::CompiledParams] deterministic, deeply frozen params
+      # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Query-DSL`
+      # @see `https://typesense.org/docs/latest/api/documents.html#search-document`
       def to_typesense_params
         cfg = SearchEngine.config
         opts = @state[:options] || {}
@@ -73,7 +79,8 @@ module SearchEngine
 
       # Compile filter_by string from AST nodes or legacy fragments.
       # @param ast_nodes [Array<SearchEngine::AST::Node>]
-      # @return [String, nil]
+      # @return [String, nil] a Typesense filter string or nil when absent
+      # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Compiler`
       def compiled_filter_by(ast_nodes)
         unless ast_nodes.empty?
           compiled = SearchEngine::Compiler.compile(ast_nodes, klass: @klass)
@@ -90,7 +97,7 @@ module SearchEngine
 
       # Compile sort_by from normalized order entries.
       # @param orders [Array<String>]
-      # @return [String, nil]
+      # @return [String, nil] comma-separated sort tokens or nil
       def compiled_sort_by(orders)
         list = Array(orders)
         return nil if list.empty?

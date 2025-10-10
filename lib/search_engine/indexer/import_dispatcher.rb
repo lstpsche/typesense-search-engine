@@ -16,6 +16,18 @@ module SearchEngine
       # @return [Hash]
       def self.import_batch(client:, collection:, action:, jsonl:, docs_count:, bytes_sent:, batch_index:,
                             retry_policy:, dry_run: false)
+        # @param client [SearchEngine::Client]
+        # @param collection [String] physical collection name to import into
+        # @param action [Symbol, String] one of :upsert, :create, :update
+        # @param jsonl [String] JSONL body
+        # @param docs_count [Integer] number of docs encoded in jsonl
+        # @param bytes_sent [Integer] payload size in bytes
+        # @param batch_index [Integer, nil] batch sequence number
+        # @param retry_policy [SearchEngine::Indexer::RetryPolicy]
+        # @param dry_run [Boolean] when true, do not perform network call
+        # @return [Hash] stats payload: { index:, docs_count:, success_count:, failure_count:, attempts:, http_status:, duration_ms:, bytes_sent:, errors_sample: [] }
+        # @raise [SearchEngine::Errors::Api] when the underlying client raises an API error (propagated)
+        # @see docs/indexer.md
         if dry_run
           # Emit instrumentation parity without network
           http_status = 200

@@ -21,6 +21,7 @@ module SearchEngine
   #
   # @since M8
   # @see docs/observability.md#logging
+  # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Observability`
   module LoggingSubscriber
     class << self
       # Install the subscriber in a reloader-safe and idempotent way.

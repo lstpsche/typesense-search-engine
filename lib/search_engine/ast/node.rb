@@ -7,6 +7,8 @@ module SearchEngine
     # Provides value semantics, immutability helpers, uniform traversal via
     # #children and #each_child, and compact debug output.
     # Subclasses must implement #type and override readers as needed.
+    #
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Query-DSL`
     class Node
       # Maximum preview length for inspect payloads
       INSPECT_PREVIEW_LIMIT = 80

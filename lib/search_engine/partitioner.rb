@@ -25,7 +25,9 @@ module SearchEngine
       end
 
       # Enumerate partition keys. Validates the return value shape.
-      # @return [Enumerable]
+      # @return [Enumerable] list/Enumerable of opaque partition tokens
+      # @raise [SearchEngine::Errors::InvalidParams] when the block does not return an Enumerable
+      # @see docs/indexer.md#partitioning
       def partitions
         return [] unless @partitions_proc
 
@@ -40,7 +42,10 @@ module SearchEngine
 
       # Return an Enumerator for batches for the given partition, validating element shape.
       # @param partition [Object]
-      # @return [Enumerable]
+      # @return [Enumerable<Array>] enumerator yielding Arrays of records
+      # @raise [ArgumentError] when partition_fetch is not defined
+      # @raise [SearchEngine::Errors::InvalidParams] when the block returns a non-enumerable or yields non-arrays
+      # @see docs/indexer.md#partitioning
       def partition_fetch_enum(partition)
         raise ArgumentError, 'partition_fetch not defined' unless @partition_fetch_proc
 
@@ -78,6 +83,7 @@ module SearchEngine
       # Resolve a compiled partitioner for a model class, or nil if directives are absent.
       # @param klass [Class]
       # @return [SearchEngine::Partitioner::Compiled, nil]
+      # @see docs/indexer.md#partitioning
       def for(klass)
         dsl = mapper_dsl_for(klass)
         return nil unless dsl

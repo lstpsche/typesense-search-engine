@@ -37,6 +37,7 @@ module SearchEngine
     # @param into [String, nil] target collection; defaults to resolver or the logical collection alias
     # @return [Summary]
     # @raise [SearchEngine::Errors::InvalidParams]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Indexer#partitioned-indexing`
     def self.rebuild_partition!(klass, partition:, into: nil)
       raise Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
       unless klass.ancestors.include?(SearchEngine::Base)
@@ -88,6 +89,7 @@ module SearchEngine
     # @param dry_run [Boolean]
     # @return [Hash]
     # @raise [SearchEngine::Errors::InvalidParams]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Indexer#stale-deletes`
     def self.delete_stale!(klass, partition: nil, into: nil, dry_run: false)
       validate_stale_args!(klass)
 
@@ -143,6 +145,8 @@ module SearchEngine
     # @param action [Symbol] :upsert (default), :create, or :update
     # @return [Summary]
     # @raise [SearchEngine::Errors::InvalidParams]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Indexer`
+    # @see `https://typesense.org/docs/latest/api/documents.html#import-documents`
     def self.import!(klass, into:, enum:, batch_size: nil, action: :upsert)
       raise Errors::InvalidParams, 'klass must be a Class' unless klass.is_a?(Class)
       unless into.is_a?(String) && !into.strip.empty?

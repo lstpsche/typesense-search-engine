@@ -9,6 +9,7 @@ module SearchEngine
         # Select a subset of fields for Typesense `include_fields`.
         # @param fields [Array<Symbol,String,Hash,Array>]
         # @return [SearchEngine::Relation]
+        # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Field-Selection`
         def select(*fields)
           normalized = normalize_select_input(fields)
           spawn do |s|
@@ -48,6 +49,7 @@ module SearchEngine
         # Exclude a subset of fields from the final selection.
         # @param fields [Array<Symbol,String,Hash,Array>]
         # @return [SearchEngine::Relation]
+        # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Field-Selection`
         def exclude(*fields)
           normalized = normalize_select_input(fields, context: 'excluding fields')
           spawn do |s|
@@ -80,6 +82,7 @@ module SearchEngine
         # Replace the selected fields list (Typesense `include_fields`).
         # @param fields [Array<#to_sym,#to_s>]
         # @return [SearchEngine::Relation]
+        # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Field-Selection`
         def reselect(*fields)
           normalized = normalize_select_input(fields)
 

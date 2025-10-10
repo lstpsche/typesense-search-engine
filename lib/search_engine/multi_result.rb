@@ -34,6 +34,7 @@ module SearchEngine
     # @param raw_results [Array<Hash>] ordered raw result items (one per label)
     # @param klasses [Array<Class>, Hash{(String,Symbol)=>Class}, nil] optional model classes
     # @raise [ArgumentError] when sizes mismatch, labels invalid/duplicate, or inputs malformed
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Multi-search-Guide`
     def initialize(labels:, raw_results:, klasses: nil)
       @labels = canonicalize_labels(labels)
       @map = {}

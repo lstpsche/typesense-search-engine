@@ -25,6 +25,8 @@ module SearchEngine
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
     # @return [SearchEngine::Result] Wrapped response with hydrated hits
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Client`
+    # @see `https://typesense.org/docs/latest/api/documents.html#search-document`
     def search(collection:, params:, url_opts: {})
       params_obj = SearchEngine::CompiledParams.from(params)
       validate_single!(collection, params_obj.to_h)
@@ -85,6 +87,8 @@ module SearchEngine
     # @param logical_name [String]
     # @return [String, nil] physical collection name when alias exists; nil when alias not found
     # @raise [SearchEngine::Errors::*] on network or API errors other than 404
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema`
+    # @see `https://typesense.org/docs/latest/api/aliases.html`
     def resolve_alias(logical_name)
       name = logical_name.to_s
       ts = typesense
@@ -109,6 +113,8 @@ module SearchEngine
     # @param collection_name [String]
     # @return [Hash, nil] schema hash when found; nil when collection not found (404)
     # @raise [SearchEngine::Errors::*] on other network or API errors
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema`
+    # @see `https://typesense.org/docs/latest/api/collections.html`
     def retrieve_collection_schema(collection_name)
       name = collection_name.to_s
       ts = typesense
@@ -132,6 +138,8 @@ module SearchEngine
     # @param alias_name [String]
     # @param physical_name [String]
     # @return [Hash]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema#lifecycle`
+    # @see `https://typesense.org/docs/latest/api/aliases.html#upsert-an-alias`
     def upsert_alias(alias_name, physical_name)
       a = alias_name.to_s
       p = physical_name.to_s
@@ -153,6 +161,8 @@ module SearchEngine
     # Create a new physical collection with the given schema.
     # @param schema [Hash] Typesense schema body
     # @return [Hash] created collection schema
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema#lifecycle`
+    # @see `https://typesense.org/docs/latest/api/collections.html#create-a-collection`
     def create_collection(schema)
       ts = typesense
       start = current_monotonic_ms
@@ -171,6 +181,8 @@ module SearchEngine
     # Delete a physical collection by name.
     # @param name [String]
     # @return [Hash] Typesense delete response
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema#lifecycle`
+    # @see `https://typesense.org/docs/latest/api/collections.html#delete-a-collection`
     def delete_collection(name)
       n = name.to_s
       ts = typesense
@@ -193,6 +205,8 @@ module SearchEngine
 
     # List all collections.
     # @return [Array<Hash>] list of collection metadata
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Schema`
+    # @see `https://typesense.org/docs/latest/api/collections.html#list-all-collections`
     def list_collections
       ts = typesense
       start = current_monotonic_ms
@@ -209,6 +223,8 @@ module SearchEngine
 
     # Perform a server health check.
     # @return [Hash] Typesense health response (symbolized where applicable)
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Troubleshooting`
+    # @see `https://typesense.org/docs/latest/api/cluster-operations.html#health`
     def health
       ts = typesense
       start = current_monotonic_ms
@@ -230,6 +246,8 @@ module SearchEngine
     # @param id [String]
     # @param terms [Array<String>]
     # @return [Hash]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/synonyms.html#upsert-a-synonym`
     def synonyms_upsert(collection:, id:, terms:)
       c = collection.to_s
       s = id.to_s
@@ -247,6 +265,8 @@ module SearchEngine
     end
 
     # @return [Array<Hash>]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/synonyms.html#list-all-synonyms-of-a-collection`
     def synonyms_list(collection:)
       c = collection.to_s
       ts = typesense
@@ -261,6 +281,8 @@ module SearchEngine
     end
 
     # @return [Hash, nil]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/synonyms.html#retrieve-a-synonym`
     def synonyms_get(collection:, id:)
       c = collection.to_s
       s = id.to_s
@@ -280,6 +302,8 @@ module SearchEngine
     end
 
     # @return [Hash]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/synonyms.html#delete-a-synonym`
     def synonyms_delete(collection:, id:)
       c = collection.to_s
       s = id.to_s
@@ -300,6 +324,8 @@ module SearchEngine
     # @param id [String]
     # @param terms [Array<String>]
     # @return [Hash]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/stopwords.html#upsert-a-stopwords`
     def stopwords_upsert(collection:, id:, terms:)
       c = collection.to_s
       s = id.to_s
@@ -317,6 +343,8 @@ module SearchEngine
     end
 
     # @return [Array<Hash>]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/stopwords.html#list-all-stopwords-of-a-collection`
     def stopwords_list(collection:)
       c = collection.to_s
       ts = typesense
@@ -331,6 +359,8 @@ module SearchEngine
     end
 
     # @return [Hash, nil]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/stopwords.html#retrieve-a-stopword`
     def stopwords_get(collection:, id:)
       c = collection.to_s
       s = id.to_s
@@ -350,6 +380,8 @@ module SearchEngine
     end
 
     # @return [Hash]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Synonyms-Stopwords`
+    # @see `https://typesense.org/docs/latest/api/stopwords.html#delete-a-stopword`
     def stopwords_delete(collection:, id:)
       c = collection.to_s
       s = id.to_s
@@ -373,6 +405,8 @@ module SearchEngine
     # @param action [Symbol, String] one of :upsert, :create, :update (default: :upsert)
     # @return [Object] upstream return (String of JSONL statuses or Array of Hashes depending on gem version)
     # @raise [SearchEngine::Errors::*]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Indexer`
+    # @see `https://typesense.org/docs/latest/api/documents.html#import-documents`
     def import_documents(collection:, jsonl:, action: :upsert)
       unless collection.is_a?(String) && !collection.strip.empty?
         raise Errors::InvalidParams, 'collection must be a non-empty String'
@@ -397,6 +431,8 @@ module SearchEngine
     # @param filter_by [String] Typesense filter string
     # @param timeout_ms [Integer, nil] optional read timeout override in ms
     # @return [Hash] response from Typesense client (symbolized)
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Indexer#stale-deletes`
+    # @see `https://typesense.org/docs/latest/api/documents.html#delete-documents-by-query`
     def delete_documents_by_filter(collection:, filter_by:, timeout_ms: nil)
       unless collection.is_a?(String) && !collection.strip.empty?
         raise Errors::InvalidParams, 'collection must be a non-empty String'
@@ -423,6 +459,8 @@ module SearchEngine
     # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
     # @return [Hash] Raw Typesense multi-search response with key 'results'
     # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Multi-search-Guide`
+    # @see `https://typesense.org/docs/latest/api/#multi-search`
     def multi_search(searches:, url_opts: {})
       validate_multi!(searches)
 

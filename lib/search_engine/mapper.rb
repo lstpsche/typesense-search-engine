@@ -11,6 +11,11 @@ module SearchEngine
   # - {SearchEngine::Mapper::Compiled#map_batch!(rows, batch_index:)} -> [Array<Hash>, Hash]
   module Mapper
     # Simple DSL holder used by Base#index to capture source and map block.
+    #
+    # Describes where data is fetched from and how records are transformed into
+    # Typesense documents. Compiled by {SearchEngine::Mapper.for}.
+    #
+    # @see docs/indexer.md
     class Dsl
       # @return [Hash, nil] original source definition captured from DSL
       attr_reader :source_def
@@ -34,6 +39,8 @@ module SearchEngine
       # @param options [Hash]
       # @yield for :lambda sources
       # @return [void]
+      # @raise [ArgumentError] when type is nil/blank
+      # @see docs/indexer.md
       def source(type, **options, &block)
         @source_def = { type: type.to_sym, options: options, block: block }
         nil
@@ -44,6 +51,8 @@ module SearchEngine
       # @yieldparam record [Object]
       # @yieldreturn [Hash, #to_h, #as_json] a document-like object
       # @return [void]
+      # @raise [ArgumentError] when no block is given
+      # @see docs/indexer.md
       def map(&block)
         raise ArgumentError, 'map requires a block' unless block
 
@@ -54,6 +63,8 @@ module SearchEngine
       # Partitioning: declare how to enumerate partitions for full rebuilds.
       # @yieldreturn [Enumerable] a list/Enumerable of opaque partition keys
       # @return [void]
+      # @raise [ArgumentError] when no block is given
+      # @see docs/indexer.md#partitioning
       def partitions(&block)
         raise ArgumentError, 'partitions requires a block' unless block
 
@@ -66,6 +77,8 @@ module SearchEngine
       # @yieldparam partition [Object]
       # @yieldreturn [Enumerable<Array>] yields Arrays of records per batch
       # @return [void]
+      # @raise [ArgumentError] when no block is given
+      # @see docs/indexer.md#partitioning
       def partition_fetch(&block)
         raise ArgumentError, 'partition_fetch requires a block' unless block
 
@@ -77,6 +90,8 @@ module SearchEngine
       # The block receives the partition key.
       # @yieldparam partition [Object]
       # @return [void]
+      # @raise [ArgumentError] when no block is given
+      # @see docs/indexer.md#partitioning
       def before_partition(&block)
         raise ArgumentError, 'before_partition requires a block' unless block
 
@@ -88,6 +103,8 @@ module SearchEngine
       # The block receives the partition key.
       # @yieldparam partition [Object]
       # @return [void]
+      # @raise [ArgumentError] when no block is given
+      # @see docs/indexer.md#partitioning
       def after_partition(&block)
         raise ArgumentError, 'after_partition requires a block' unless block
 
@@ -97,6 +114,7 @@ module SearchEngine
 
       # Freeze internal state for immutability and return a definition Hash.
       # @return [Hash]
+      # @see docs/indexer.md
       def to_definition
         {
           source: @source_def,
@@ -110,6 +128,11 @@ module SearchEngine
     end
 
     # Immutable compiled mapper for a specific collection class.
+    #
+    # Validates mapped documents against the compiled schema, sets hidden flags
+    # for array/optional fields and emits instrumentation.
+    #
+    # @see docs/indexer.md
     class Compiled
       attr_reader :klass
 
@@ -127,10 +150,12 @@ module SearchEngine
       end
 
       # Map and validate a batch of rows.
-      # @param rows [Array]
+      # @param rows [Array<Object>] source records to map
       # @param batch_index [Integer, nil] optional index for instrumentation
-      # @return [Array(Hash), Hash] [documents, report]
-      # @raise [SearchEngine::Errors::InvalidParams] on missing required fields
+      # @return [Array<Array<Hash>, Hash>] [documents, report]
+      # @raise [SearchEngine::Errors::InvalidParams] on missing required fields or invalid document shape
+      # @raise [SearchEngine::Errors::InvalidField] when strict_unknown_keys is enabled and extras are present
+      # @see docs/indexer.md#troubleshooting
       def map_batch!(rows, batch_index: nil)
         start_ms = monotonic_ms
         docs = []

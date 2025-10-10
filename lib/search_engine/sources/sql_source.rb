@@ -2,42 +2,47 @@
 
 module SearchEngine
   module Sources
-    # SQL-backed source adapter that streams rows using server-side cursors (PG)
-    # or streaming result modes where available.
+    # Stream rows from SQL using ActiveRecord connection, with PG cursor support when available.
     #
-    # Yields arrays of rows in the chosen shape (:hash by default when low-overhead
-    # is available). Always closes cursors/statements and releases connections.
+    # Supports large result sets via server-side cursors on PostgreSQL connections and falls
+    # back to paginated SELECT for other adapters. Yields arrays of rows in batches.
+    #
+    # @example
+    #   src = SearchEngine::Sources::SqlSource.new(sql: "SELECT id, name FROM users", fetch_size: 2000)
+    #   src.each_batch { |rows| ... }
+    #
+    # @note Emits "search_engine.source.batch_fetched" and "search_engine.source.error".
+    # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Indexer`
     class SqlSource
       include Base
 
-      # @param sql [String] SQL statement with optional bind placeholders
-      # @param binds [Array, Hash, nil] bind values for placeholders (adapter-specific)
-      # @param fetch_size [Integer, nil] override chunk size (defaults from config)
-      # @param row_shape [Symbol, nil] :hash or :auto
-      # @param statement_timeout_ms [Integer, nil] per-statement timeout override
+      # @param sql [String] SQL statement to execute
+      # @param binds [Array, Hash, nil] optional parameters for the SQL
+      # @param fetch_size [Integer, nil] batch size hint
+      # @param row_shape [Symbol, nil] :hash, :array or :auto (PG only)
+      # @param statement_timeout_ms [Integer, nil] optional statement timeout (PG only)
       def initialize(sql:, binds: nil, fetch_size: nil, row_shape: nil, statement_timeout_ms: nil)
         @sql = sql.to_s
         @binds = binds
         cfg = SearchEngine.config.sources.sql
         @fetch_size = (fetch_size || cfg.fetch_size).to_i
-        @row_shape = (row_shape || cfg.row_shape).to_sym
-        @statement_timeout_ms = statement_timeout_ms || cfg.statement_timeout_ms
+        @row_shape = row_shape || :auto
+        @statement_timeout_ms = statement_timeout_ms
       end
 
-      # Iterate over batches of rows.
-      #
+      # Iterate over batches produced by the SQL query.
       # @param partition [Object, nil]
       # @param cursor [Object, nil]
-      # @yieldparam rows [Array<Hash, Object>] array of rows
-      # @return [Enumerator] when no block is given
+      # @yieldparam rows [Array<Hash>, Array<Array>]
+      # @return [Enumerator]
       def each_batch(partition: nil, cursor: nil, &block)
         return enum_for(:each_batch, partition: partition, cursor: cursor) unless block_given?
 
-        run_with_connection do |conn|
-          if postgres_connection?(conn)
-            stream_postgres(conn, partition: partition, cursor: cursor, &block)
+        run_with_connection do
+          if postgres_connection?(ActiveRecord::Base.connection.raw_connection)
+            stream_postgres(ActiveRecord::Base.connection.raw_connection, partition: partition, cursor: cursor, &block)
           else
-            stream_generic(conn, partition: partition, cursor: cursor, &block)
+            stream_generic(nil, partition: partition, cursor: cursor, &block)
           end
         end
       rescue StandardError => error
