@@ -250,6 +250,7 @@ module SearchEngine
         select include_fields exclude reselect
         limit_hits validate_hits!
         first last take pluck exists? count
+        raw
       ].each { |method| delegate method, to: :all }
 
       # Define collection-level indexing configuration and mapping.

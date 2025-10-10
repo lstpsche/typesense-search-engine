@@ -44,6 +44,13 @@ module SearchEngine
         SearchEngine::Hydration::Materializers.take(self, n)
       end
 
+      # Return raw Typesense response for this relation.
+      # Executes the query (memoized) and returns Result#raw.
+      # @return [Hash]
+      def raw
+        SearchEngine::Hydration::Materializers.execute(self).raw
+      end
+
       # Convenience for plucking :id values.
       # @return [Array<Object>]
       def ids
