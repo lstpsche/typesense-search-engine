@@ -417,6 +417,31 @@ module SearchEngine
       symbolize_keys_deep(result)
     end
 
+    # Execute a multi-search across multiple collections.
+    #
+    # @param searches [Array<Hash>] per-entry request bodies produced by Multi#to_payloads
+    # @param url_opts [Hash] URL/common knobs (use_cache, cache_ttl)
+    # @return [Hash] Raw Typesense multi-search response with key 'results'
+    # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
+    def multi_search(searches:, url_opts: {})
+      validate_multi!(searches)
+
+      cache_params = derive_cache_opts(url_opts)
+      ts = typesense
+      start = current_monotonic_ms
+      path = '/multi_search'
+
+      # Sanitize each body from internal-only keys deterministically
+      bodies = Array(searches).map { |s| RequestBuilder.send(:sanitize_body_params, s) }
+
+      result = with_exception_mapping(:post, path, cache_params, start) do
+        ts.multi_search.perform({ searches: bodies }, common_params: cache_params)
+      end
+
+      instrument(:post, path, current_monotonic_ms - start, cache_params)
+      symbolize_keys_deep(result)
+    end
+
     private
 
     attr_reader :config

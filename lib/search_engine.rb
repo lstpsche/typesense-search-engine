@@ -169,8 +169,7 @@ module SearchEngine
         }
         begin
           SearchEngine::Instrumentation.instrument('search_engine.multi_search', se_payload) do |ctx|
-            client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
-            raw = client_obj.multi_search(searches: payloads, url_opts: url_opts)
+            raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
             ctx[:http_status] = 200
           rescue Errors::Api => error
             ctx[:http_status] = error.status
@@ -181,8 +180,7 @@ module SearchEngine
         end
       else
         begin
-          client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
-          raw = client_obj.multi_search(searches: payloads, url_opts: url_opts)
+          raw = SearchEngine::Client.new.multi_search(searches: payloads, url_opts: url_opts)
         rescue Errors::Api => error
           raise augment_multi_api_error(error, labels)
         end

@@ -7,13 +7,13 @@ require 'search_engine/client'
 class MultiTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_multi'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
   class Brand < SearchEngine::Base
     collection 'brands_multi'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 

@@ -5,7 +5,7 @@ require 'test_helper'
 class RelationASTMigrationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_relation_migration'
-    attribute :id, :integer
+    identify_by :id
     attribute :active, :boolean
     attribute :price, :float
     attribute :brand_id, :integer

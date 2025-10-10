@@ -6,7 +6,7 @@ require 'test_helper'
 class ReproHitsLimitChainersTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_repro_hits_limit'
-    attribute :id, :integer
+    identify_by :id
   end
 
   def test_documented_hits_limit_chainers_exist

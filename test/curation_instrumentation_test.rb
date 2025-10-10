@@ -8,7 +8,7 @@ require 'search_engine/notifications/compact_logger'
 class CurationInstrumentationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_curation_instr'
-    attribute :id, :string
+    identify_by :id
   end
 
   def teardown

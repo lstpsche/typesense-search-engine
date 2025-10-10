@@ -5,7 +5,7 @@ require 'test_helper'
 class RelationIncludeFieldsNestedTest < Minitest::Test
   class Book < SearchEngine::Base
     collection 'books_nested_select'
-    attribute :id, :integer
+    identify_by :id
     attribute :title, :string
     attribute :author_id, :integer
 

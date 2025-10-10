@@ -5,13 +5,13 @@ require 'test_helper'
 class MultiResultTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_mr'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
   class Brand < SearchEngine::Base
     collection 'brands_mr'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 

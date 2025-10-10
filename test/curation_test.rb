@@ -5,7 +5,7 @@ require 'test_helper'
 class CurationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_curation'
-    attribute :id, :string
+    identify_by :id
   end
 
   def test_pin_and_hide_chainers_are_immutable_and_preserve_semantics
@@ -43,5 +43,11 @@ class CurationTest < Minitest::Test
 
     r_2 = r.clear_curation
     assert_nil r_2.instance_variable_get(:@state)[:curation]
+  end
+
+  def test_curate_methods
+    rel = Product.all.curate(filter_curated_hits: true)
+    params = rel.to_typesense_params
+    assert_equal({ filter_curated_hits: true }, params[:_curation])
   end
 end

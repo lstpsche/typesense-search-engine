@@ -6,7 +6,7 @@ require 'test_helper'
 class ReproStrictMissingSelectionTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_repro_strict_missing'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
@@ -39,5 +39,13 @@ class ReproStrictMissingSelectionTest < Minitest::Test
 
     # Expect MissingField once strictness is propagated to Result
     assert_raises(SearchEngine::Errors::MissingField) { rel.to_a }
+  end
+
+  def test_missing_strict_selection
+    rel = Product.all
+    error = assert_raises(SearchEngine::Errors::UnknownField) do
+      rel.select(:id, :unknown)
+    end
+    assert_match(/UnknownField/i, error.message)
   end
 end

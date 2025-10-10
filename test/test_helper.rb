@@ -28,14 +28,14 @@ end
 module SearchEngine
   class Author < SearchEngine::Base
     collection 'authors'
-    attribute :id, :integer
+    identify_by :id
     attribute :first_name, :string
     attribute :last_name, :string
   end
 
   class Brand < SearchEngine::Base
     collection 'brands'
-    attribute :id, :integer
+    identify_by :id
     attribute :internal_score, :float
   end
 end

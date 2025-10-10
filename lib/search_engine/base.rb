@@ -376,8 +376,8 @@ module SearchEngine
         lk = local_key.to_sym
         fk = foreign_key.to_sym
 
-        # Validate local_key against declared attributes when available
-        if instance_variable_defined?(:@attributes) && !(@attributes || {}).key?(lk)
+        # Validate local_key against declared attributes when available (allow :id implicitly)
+        if instance_variable_defined?(:@attributes) && lk != :id && !(@attributes || {}).key?(lk)
           raise SearchEngine::Errors::InvalidField,
                 "Unknown local_key :#{lk} for #{self}. Declare 'attribute :#{lk}, :integer' first."
         end
@@ -1068,62 +1068,26 @@ module SearchEngine
       end
       pairs = []
 
-      # Render id first if declared
-      if declared.key?(:id)
+      # Render id first if declared and present in the hydrated document
+      if declared.key?(:id) && instance_variable_defined?('@id')
         id_val = instance_variable_get('@id')
         pairs << ['id', id_val]
       end
 
+      # Render only declared attributes that were present in the hydrated document
       declared.each_key do |name|
         next if name.to_s == 'id'
+        next unless instance_variable_defined?("@#{name}")
 
         value = instance_variable_get("@#{name}")
-        pairs << if name.to_s == 'doc_updated_at' && !value.nil?
-                   [name.to_s, __se_coerce_doc_updated_at_for_display(value)]
-                 else
-                   [name.to_s, value]
-                 end
+        rendered = if name.to_s == 'doc_updated_at' && !value.nil?
+                     __se_coerce_doc_updated_at_for_display(value)
+                   else
+                     value
+                   end
+        pairs << [name.to_s, rendered]
       end
-
-      extras = unknown_attributes
-      unless extras.empty?
-        # If id wasn't declared but present in unknowns (e.g., no attribute declared), render it first
-        if !declared.key?(:id) && (extras.key?('id') || extras.key?(:id))
-          id_v = extras['id'] || extras[:id]
-          pairs.unshift(['id', id_v])
-        end
-
-        passthrough, grouped, assoc_order = __se_group_join_fields_for_render(extras)
-
-        # Render pass-through unknowns with special handling for doc_updated_at
-        passthrough.each do |k, v|
-          next if k.to_s == 'id' # already rendered first
-
-          pairs <<
-            if k.to_s == 'doc_updated_at' && !v.nil?
-              [k.to_s, __se_coerce_doc_updated_at_for_display(v)]
-            else
-              pairs << [k.to_s, v]
-            end
-        end
-
-        # Render grouped join fields as nested "$assoc => { field => value }"
-        assoc_order.each do |assoc|
-          pairs << [assoc.to_s, grouped[assoc]]
-        end
-      end
-      # Fallback: ensure doc_updated_at is displayed when available via accessor
-      # even if it wasn't declared and wasn't present in unknowns (e.g., selection omitted it).
-      begin
-        shown = pairs.any? { |(k, _)| k.to_s == 'doc_updated_at' }
-        unless shown
-          ts = doc_updated_at
-          pairs << ['doc_updated_at', ts] unless ts.nil?
-        end
-      rescue StandardError
-        # ignore display-only errors
-      end
-      pairs
+      __se_append_unknown_attribute_pairs(pairs, declared)
     end
 
     # Group "$assoc.field" unknown attributes into a nested Hash under "$assoc" for rendering.
@@ -1156,6 +1120,77 @@ module SearchEngine
       [passthrough, grouped, assoc_order]
     end
 
+    # Append unknown attributes, grouping join fields and preserving nested shapes.
+    def __se_append_unknown_attribute_pairs(pairs, declared)
+      extras = unknown_attributes
+      return pairs if extras.empty?
+
+      __se_maybe_render_unknown_id_first!(pairs, declared, extras)
+
+      selected_nested = __se_selected_nested_assocs_for_render
+      __se_render_existing_nested_assoc_pairs!(pairs, extras, selected_nested)
+
+      passthrough, grouped, assoc_order = __se_group_join_fields_for_render(extras)
+      __se_render_grouped_scalar_assoc_pairs!(pairs, assoc_order, grouped)
+      __se_render_passthrough_unknowns!(pairs, passthrough)
+      pairs
+    end
+
+    # Ensure id appears first when not declared but present in unknowns
+    def __se_maybe_render_unknown_id_first!(pairs, declared, extras)
+      return if declared.key?(:id)
+
+      id_v = extras['id'] || extras[:id]
+      pairs.unshift(['id', id_v]) unless id_v.nil?
+    end
+
+    # Return selection context for nested assocs used during render
+    # @return [Array<String>]
+    def __se_selected_nested_assocs_for_render
+      if instance_variable_defined?(:@__se_selected_nested_assocs__)
+        Array(instance_variable_get(:@__se_selected_nested_assocs__)).map(&:to_s)
+      else
+        []
+      end
+    end
+
+    # Render already nested structures for $assoc keys
+    def __se_render_existing_nested_assoc_pairs!(pairs, extras, selected_nested)
+      extras.each do |k, v|
+        key = k.to_s
+        next unless key.start_with?('$')
+        next unless v.is_a?(Array) || v.is_a?(Hash)
+
+        already = pairs.any? { |(name, _)| name == key }
+        next if already
+        next if selected_nested.any? && !selected_nested.include?(key.delete_prefix('$'))
+
+        pairs << [key, __se_symbolize_for_inspect(v)]
+      end
+    end
+
+    # Render grouped scalar $assoc.field maps under assoc as an array-of-hashes
+    def __se_render_grouped_scalar_assoc_pairs!(pairs, assoc_order, grouped)
+      assoc_order.each do |assoc|
+        next if pairs.any? { |(name, _)| name == assoc }
+
+        pairs << [assoc.to_s, [__se_symbolize_for_inspect(grouped[assoc])]]
+      end
+    end
+
+    # Render remaining passthrough unknowns with special handling for doc_updated_at
+    def __se_render_passthrough_unknowns!(pairs, passthrough)
+      passthrough.each do |k, v|
+        key = k.to_s
+        next if key == 'id'
+        next if key.start_with?('$')
+        next if v.is_a?(Array) || v.is_a?(Hash)
+
+        rendered = key == 'doc_updated_at' && !v.nil? ? __se_coerce_doc_updated_at_for_display(v) : v
+        pairs << [key, rendered]
+      end
+    end
+
     # Convert integer epoch seconds to a Time in the current zone for display.
     # Falls back gracefully when value is not an Integer.
     def __se_coerce_doc_updated_at_for_display(value)
@@ -1173,6 +1208,21 @@ module SearchEngine
       end
     rescue StandardError
       value
+    end
+
+    # Symbolize keys for inspect to avoid symbol bloat (deep).
+    def __se_symbolize_for_inspect(value)
+      case value
+      when Array
+        value.map { |element| __se_symbolize_for_inspect(element) }
+      when Hash
+        value.each_with_object({}) do |(k, v), acc|
+          key = k.is_a?(String) || k.is_a?(Symbol) ? k.to_sym : k
+          acc[key] = __se_symbolize_for_inspect(v)
+        end
+      else
+        value
+      end
     end
   end
 end

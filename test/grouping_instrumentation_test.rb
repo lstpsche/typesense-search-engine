@@ -5,7 +5,7 @@ require 'test_helper'
 class GroupingInstrumentationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_grouping_instrumentation'
-    attribute :id, :integer
+    identify_by :id
     attribute :brand_id, :integer
   end
 

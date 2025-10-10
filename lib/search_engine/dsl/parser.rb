@@ -266,9 +266,10 @@ module SearchEngine
 
       def safe_attributes_map(klass)
         if klass.respond_to?(:attributes)
-          klass.attributes || {}
+          base = klass.attributes || {}
+          base.key?(:id) ? base : base.merge(id: :integer)
         else
-          {}
+          { id: :integer }
         end
       end
 

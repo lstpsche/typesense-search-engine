@@ -356,18 +356,19 @@ module SearchEngine
     def hydrate(doc)
       keys = doc.is_a?(Hash) ? doc.keys.map(&:to_s) : []
       enforce_strict_missing_if_needed!(keys)
+      filtered = filter_doc_by_selection(doc)
       if @klass
         if @klass.respond_to?(:from_document)
-          @klass.from_document(doc)
+          @klass.from_document(filtered)
         else
           @klass.new.tap do |obj|
-            doc.each do |key, value|
+            filtered.each do |key, value|
               obj.instance_variable_set(ivar_name(key), value)
             end
           end
         end
       else
-        OpenStruct.new(doc)
+        OpenStruct.new(filtered)
       end
     end
 
@@ -572,6 +573,37 @@ module SearchEngine
       result
     rescue StandardError
       {}
+    end
+
+    # Keep only selected base fields and selected nested associations
+    # according to @selection_ctx. When no selection is present, return doc as-is.
+    def filter_doc_by_selection(doc)
+      return doc unless doc.is_a?(Hash)
+
+      ctx = @selection_ctx || {}
+      base = Array(ctx[:base]).map(&:to_s)
+      nested = (ctx[:nested] || {}).keys.map(&:to_s)
+      # Nothing to filter
+      return doc if base.empty? && nested.empty?
+
+      filtered = {}
+      doc.each do |k, v|
+        key = k.to_s
+        if key.start_with?('$')
+          # Scalar $assoc.field entries: include only when assoc was selected
+          assoc = key.split('.', 2).first.delete_prefix('$')
+          filtered[k] = v if nested.include?(assoc)
+        elsif nested.include?(key)
+          # Nested association arrays/objects (promotions) — include when selected
+          filtered[key] = v
+        elsif base.include?(key)
+          # Selected base fields
+          filtered[key] = v
+        end
+      end
+      filtered
+    rescue StandardError
+      doc
     end
 
     class << self

@@ -5,7 +5,7 @@ require 'test_helper'
 class PluckSelectionTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_pluck_sel'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :price, :float
   end

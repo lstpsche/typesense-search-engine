@@ -5,7 +5,7 @@ require 'test_helper'
 class RelationWhereASTTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_relation'
-    attribute :id, :integer
+    identify_by :id
     attribute :active, :boolean
     attribute :price, :float
     attribute :brand_id, :integer

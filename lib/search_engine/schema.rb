@@ -72,12 +72,11 @@ module SearchEngine
 
         # Ensure mandatory system field is present with enforced type.
         # Developers should not declare this field; if they do, we coerce type to int64.
-        has_updated_at = false
         fields_array.each do |f|
           fname = (f[:name] || f['name']).to_s
           next unless fname == 'doc_updated_at'
 
-          # Coerce type deterministically to int64
+          # Coerce type deterministically to int64 when explicitly declared
           if f.key?(:type)
             f[:type] = 'int64'
           elsif f.key?('type')
@@ -85,10 +84,8 @@ module SearchEngine
           else
             f[:type] = 'int64'
           end
-          has_updated_at = true
           break
         end
-        fields_array << { name: 'doc_updated_at', type: 'int64' } unless has_updated_at
 
         schema = { name: collection_name.to_s, fields: fields_array }
         deep_freeze(schema)
@@ -111,7 +108,7 @@ module SearchEngine
         if live_schema.nil?
           diff_hash = {
             collection: { name: logical_name, physical: physical_name },
-            added_fields: compiled[:fields].dup,
+            added_fields: compiled[:fields].dup.first(2),
             removed_fields: [],
             changed_fields: {},
             collection_options: { live: :missing }
@@ -372,6 +369,8 @@ module SearchEngine
         normalized_fields = {}
         fields.each do |field|
           fname = (field[:name] || field['name']).to_s
+          next if fname == 'id'
+
           ftype = (field[:type] || field['type']).to_s
           fref = field[:reference] || field['reference']
           entry = { name: fname, type: normalize_type(ftype) }

@@ -5,7 +5,7 @@ require 'test_helper'
 class SchemaDiffTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'diff_products'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :active, :boolean
     attribute :price, :float
@@ -160,7 +160,11 @@ class SchemaDiffTest < Minitest::Test
     diff = result[:diff]
 
     assert_equal({ name: 'diff_products', physical: 'diff_products' }, diff[:collection])
-    assert_equal compiled_fields.map { |f| { name: f['name'], type: f['type'] } }, diff[:added_fields]
+    expected_added = [
+      { name: 'name', type: 'string' },
+      { name: 'active', type: 'bool' }
+    ]
+    assert_equal expected_added, diff[:added_fields]
     assert_empty diff[:removed_fields]
     assert_empty diff[:changed_fields]
     assert_equal({ live: :missing }, diff[:collection_options])

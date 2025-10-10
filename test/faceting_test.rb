@@ -5,7 +5,7 @@ require 'test_helper'
 class FacetingTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_facet'
-    attribute :id, :integer
+    identify_by :id
     attribute :brand_id, :integer
     attribute :category, :string
     attribute :price, :float

@@ -5,7 +5,7 @@ require 'test_helper'
 class RelationExplainTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_relation_explain'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :active, :boolean
     attribute :brand_id, :integer

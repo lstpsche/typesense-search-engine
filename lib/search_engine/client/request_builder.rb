@@ -43,6 +43,7 @@ module SearchEngine
         _curation_conflict_count
         _runtime_flags
         _hits
+        _curation
       ].freeze
 
       # Build a single-search request for a collection.

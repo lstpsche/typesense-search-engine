@@ -110,6 +110,7 @@ module SearchEngine
         return unless target_klass.respond_to?(:attributes)
 
         known = Array(target_klass.attributes).map { |k, _| k.to_s }
+        known |= ['id'] # allow id implicitly on joined collections
         return if known.empty?
 
         fname = field.to_s

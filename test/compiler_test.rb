@@ -5,7 +5,7 @@ require 'test_helper'
 class CompilerTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_compiler'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :active, :boolean
     attribute :price, :float

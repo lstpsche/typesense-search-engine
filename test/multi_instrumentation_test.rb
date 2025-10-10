@@ -8,13 +8,13 @@ require 'search_engine/notifications/compact_logger'
 class MultiInstrumentationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_multi_instr'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
   class Brand < SearchEngine::Base
     collection 'brands_multi_instr'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 

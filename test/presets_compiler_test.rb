@@ -5,7 +5,7 @@ require 'test_helper'
 class PresetsCompilerTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_presets'
-    attribute :id, :integer
+    identify_by :id
     attribute :active, :bool
     attribute :updated_at, :integer
   end

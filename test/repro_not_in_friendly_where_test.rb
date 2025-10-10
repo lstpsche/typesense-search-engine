@@ -6,7 +6,7 @@ require 'test_helper'
 class ReproNotInFriendlyWhereTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_repro_not_in'
-    attribute :id, :integer
+    identify_by :id
   end
 
   def test_explain_maps_not_in_token

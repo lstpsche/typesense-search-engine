@@ -372,25 +372,6 @@ module SearchEngine
         include_str = compile_include_fields_string
         exclude_str = compile_exclude_fields_string
 
-        # Ensure system field is visible in console/DX when selection is present.
-        # If include_fields is used at all, we guarantee doc_updated_at is included
-        # and never excluded (developers can still ignore it in their UI).
-        unless include_str.to_s.strip.empty?
-          tokens = include_str.split(',').map(&:strip).reject(&:empty?)
-          unless tokens.include?('doc_updated_at')
-            tokens << 'doc_updated_at'
-            include_str = tokens.join(',')
-          end
-
-          unless exclude_str.to_s.strip.empty?
-            x_tokens = exclude_str.split(',').map(&:strip).reject(&:empty?)
-            if x_tokens.include?('doc_updated_at')
-              x_tokens.delete('doc_updated_at')
-              exclude_str = x_tokens.join(',')
-            end
-          end
-        end
-
         params[:include_fields] = include_str unless include_str.to_s.strip.empty?
         params[:exclude_fields] = exclude_str unless exclude_str.to_s.strip.empty?
 
@@ -470,6 +451,8 @@ module SearchEngine
         params[:hidden_hits] = hidden.join(',') if hidden.any?
         params[:override_tags] = tags.join(',') if tags.any?
         params[:filter_curated_hits] = fch unless fch.nil?
+        # Expose a compact curation meta segment for callers (not sent over HTTP)
+        params[:_curation] = { filter_curated_hits: fch } if cur.key?(:filter_curated_hits)
 
         instrument_curation_compile(pinned, hidden, tags, cur)
       end

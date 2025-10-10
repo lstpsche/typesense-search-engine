@@ -43,7 +43,7 @@ module SearchEngine
         # @param args [Array<Object>] filter arguments
         # @return [SearchEngine::Relation, WhereChain]
         def where(*args)
-          return WhereChain.new(self) if args.nil? || args.empty?
+          return self if args.nil? || args.empty?
 
           ast_nodes = build_ast_with_empty_array_rewrites(args, negated: false)
           fragments = normalize_where(args)

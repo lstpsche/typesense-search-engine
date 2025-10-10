@@ -5,7 +5,7 @@ require 'test_helper'
 class ParserTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :active, :boolean
     attribute :price, :float

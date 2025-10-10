@@ -6,7 +6,7 @@ require 'test_helper'
 class ReproJoinsCompileDurationTest < Minitest::Test
   class Book < SearchEngine::Base
     collection 'books_repro_joins'
-    attribute :id, :integer
+    identify_by :id
     attribute :author_id, :integer
     # Minimal join registry to allow .joins(:authors)
     join :authors, collection: 'authors', local_key: :author_id, foreign_key: :id

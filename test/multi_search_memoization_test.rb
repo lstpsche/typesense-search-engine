@@ -5,15 +5,24 @@ require 'search_engine/multi'
 require 'search_engine/client'
 
 class MultiSearchMemoizationTest < Minitest::Test
+  def setup
+    @orig_client = SearchEngine.config.client
+    SearchEngine.configure { |c| c.client = SearchEngine::Client.new(typesense_client: Object.new) }
+  end
+
+  def teardown
+    SearchEngine.configure { |c| c.client = @orig_client }
+  end
+
   class Product < SearchEngine::Base
     collection 'products_memo'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
   class Brand < SearchEngine::Base
     collection 'brands_memo'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 

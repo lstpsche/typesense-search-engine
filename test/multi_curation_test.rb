@@ -7,13 +7,13 @@ require 'search_engine/client'
 class MultiCurationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_multi_curation'
-    attribute :id, :string
+    identify_by :id
     attribute :name, :string
   end
 
   class Brand < SearchEngine::Base
     collection 'brands_multi_curation'
-    attribute :id, :string
+    identify_by :id
     attribute :name, :string
   end
 

@@ -6,15 +6,13 @@ require 'test_helper'
 class PropertySelectionIdempotenceTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_property_selection'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
-  def test_select_idempotence
-    skip
-
-    r_1 = Product.all.select(:id).select(:id)
-    r_2 = Product.all.select(:id)
-    assert_equal r_2.to_typesense_params[:include_fields], r_1.to_typesense_params[:include_fields]
+  def test_multiple_selections_idempotent
+    r = Product.all.select(:id, :name).select(:name)
+    params = r.to_typesense_params
+    assert_equal 'id,name', params[:include_fields]
   end
 end

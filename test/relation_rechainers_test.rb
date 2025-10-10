@@ -5,7 +5,7 @@ require 'test_helper'
 class RelationRechainersTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_rechainers'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :active, :boolean
     attribute :price, :float

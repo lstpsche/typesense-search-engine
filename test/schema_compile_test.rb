@@ -5,7 +5,7 @@ require 'test_helper'
 class SchemaCompileTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'schema_products'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
     attribute :active, :boolean
     attribute :price, :float
@@ -17,7 +17,6 @@ class SchemaCompileTest < Minitest::Test
 
     assert_equal 'schema_products', schema[:name]
     assert_equal [
-      { name: 'id', type: 'int64' },
       { name: 'name', type: 'string' },
       { name: 'active', type: 'bool' },
       { name: 'price', type: 'float' },

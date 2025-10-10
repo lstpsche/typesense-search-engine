@@ -6,7 +6,7 @@ require 'active_support/notifications'
 class SelectionInstrumentationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_selection_instr'
-    attribute :id, :string
+    identify_by :id
     attribute :author_id, :integer
     join :authors, collection: 'authors', local_key: :author_id, foreign_key: :id
   end

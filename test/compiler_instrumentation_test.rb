@@ -5,7 +5,7 @@ require 'test_helper'
 class CompilerInstrumentationTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_compiler_instrumentation'
-    attribute :id, :integer
+    identify_by :id
     attribute :active, :boolean
   end
 

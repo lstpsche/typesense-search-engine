@@ -5,15 +5,22 @@ require 'test_helper'
 class RelationFieldSelectionTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_field_selection'
-    attribute :id, :integer
+    identify_by :id
+    attribute :author_id, :integer
     attribute :name, :string
     attribute :active, :boolean
+    attribute :price, :float
+    attribute :brand_id, :integer
+    attribute :legacy, :string
+
+    join :authors, collection: 'authors', local_key: :author_id, foreign_key: :id
+    join :brands,  collection: 'brands',  local_key: :brand_id,  foreign_key: :id
   end
 
   module ::SearchEngine
     class Book < SearchEngine::Base
       collection 'books_field_selection'
-      attribute :id, :integer
+      identify_by :id
       attribute :title, :string
       attribute :author_id, :integer
       attribute :brand_id, :integer

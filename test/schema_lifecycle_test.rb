@@ -5,7 +5,7 @@ require 'test_helper'
 class SchemaLifecycleTest < Minitest::Test
   class Product < SearchEngine::Base
     collection 'products_lifecycle'
-    attribute :id, :integer
+    identify_by :id
     attribute :name, :string
   end
 
