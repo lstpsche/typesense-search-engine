@@ -161,7 +161,7 @@ module SearchEngine
             applied = true
             puts('Step 2: Create+Apply Schema — done')
           else
-            puts('Step 2: Create+Apply Schema — skip (already present)')
+            puts('Step 2: Create+Apply Schema — skip (collection present)')
           end
           [applied, indexed_inside_apply]
         end
