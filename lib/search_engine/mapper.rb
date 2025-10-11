@@ -380,6 +380,10 @@ module SearchEngine
 
       # Compute required keys as all schema fields minus attributes marked optional in the model DSL.
       # Hidden flags like <name>_blank remain required; they are populated automatically by the mapper.
+      #
+      # Nested fields (dotted names like "retail_prices.current_price") are excluded from
+      # presence checks by default, since nested object/object[] subfields may be sparsely
+      # populated. Typesense accepts documents missing nested subfields.
       def compute_required_keys
         begin
           opts = @klass.respond_to?(:attribute_options) ? (@klass.attribute_options || {}) : {}
@@ -387,7 +391,10 @@ module SearchEngine
           opts = {}
         end
 
-        required = @schema_fields.map(&:to_sym).to_set
+        # Start with all schema fields and drop dotted nested field names from required set
+        base_fields = @schema_fields.map(&:to_sym)
+        base_fields.reject! { |fname| fname.to_s.include?('.') }
+        required = base_fields.to_set
         opts.each do |fname, o|
           next unless o.is_a?(Hash) && o[:optional]
 

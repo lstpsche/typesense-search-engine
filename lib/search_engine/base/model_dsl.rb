@@ -101,8 +101,10 @@ module SearchEngine
         #   When true, the gem will add an internal hidden boolean field "<name>_empty" used to
         #   support `.where(name: [])` and `.where.not(name: [])` semantics. Hidden fields are
         #   not exposed via public APIs or inspect and are populated automatically by the mapper.
+        # @param nested [Hash, nil] optional nested subfields for :object/[:object] attributes
         # @return [void]
-        def attribute(name, type = :string, locale: nil, optional: nil, sort: nil, infix: nil, empty_filtering: nil)
+        def attribute(name, type = :string, locale: nil, optional: nil, sort: nil, infix: nil, empty_filtering: nil,
+                      nested: nil)
           n = name.to_sym
           if n == :id
             raise SearchEngine::Errors::InvalidField,
@@ -131,13 +133,97 @@ module SearchEngine
           # Define an instance reader for the attribute unless one already exists and
           # only when the name is a valid Ruby identifier (skip dotted or invalid names).
           attr_reader n if valid_attribute_reader_name?(n) && !method_defined?(n)
+
+          # Expand nested subfields for object/object[] attributes when nested: is provided.
+          if !nested.nil? && !(nested.respond_to?(:empty?) && nested.empty?)
+            unless nested.is_a?(Hash)
+              raise SearchEngine::Errors::InvalidOption,
+                    '`nested` must be a Hash of field_name => type'
+            end
+
+            is_object = type.to_s.downcase == 'object'
+            is_object_array = type.is_a?(Array) && type.size == 1 && type.first.to_s.downcase == 'object'
+            unless is_object || is_object_array
+              raise SearchEngine::Errors::InvalidOption,
+                    "`nested:` is only valid for :object or [:object] attributes (got #{type.inspect})"
+            end
+
+            nested.each do |child_name, child_type|
+              effective = __se_compute_nested_type_descriptor(child_type, array: is_object_array)
+              attribute("#{n}.#{child_name}".to_sym, effective)
+            end
+          end
           nil
         end
       end
 
       class_methods do
-        private
+        # Declare nested fields under a base object/object[] attribute.
+        #
+        # Usage:
+        #   attribute :retail_prices, [:object]
+        #   nested :retail_prices,
+        #     current_price: :float,
+        #     price_type: :string
+        #
+        # When the base is :object, nested field types are scalar (e.g., :float -> "float").
+        # When the base is [:object], nested field types are array (e.g., :float -> "float[]").
+        #
+        # @param base [Symbol, String] base field name that must be declared as :object or [:object]
+        # @param fields [Hash{Symbol=>Object}] map of nested field name => type descriptor
+        # @return [void]
+        # @raise [SearchEngine::Errors::InvalidOption] when base is not declared as object/object[]
+        def nested(base, **fields)
+          base_sym = base.to_sym
+          attrs = @attributes || {}
+          base_type = attrs[base_sym]
 
+          is_object = base_type.to_s.downcase == 'object'
+          is_object_array = base_type.is_a?(Array) && base_type.size == 1 && base_type.first.to_s.downcase == 'object'
+
+          unless is_object || is_object_array
+            raise SearchEngine::Errors::InvalidOption,
+                  "`nested` requires base attribute #{base_sym.inspect} to be declared as :object or [:object] " \
+                  "(got #{base_type.inspect})"
+          end
+
+          fields.each do |name, type_descriptor|
+            effective_type = __se_compute_nested_type_descriptor(type_descriptor, array: is_object_array)
+            # Dotted attribute name is intentional and supported by the schema compiler.
+            attribute("#{base_sym}.#{name}".to_sym, effective_type)
+          end
+
+          nil
+        end
+
+        # Normalize a nested type descriptor to scalar or array form depending on the parent multiplicity.
+        # Accepts Symbols (e.g., :float), Arrays (e.g., [:float]), or Strings (e.g., "float", "float[]").
+        def __se_compute_nested_type_descriptor(type_descriptor, array:)
+          # Already an array type in DSL form ([:float])
+          if type_descriptor.is_a?(Array) && type_descriptor.size == 1
+            return type_descriptor if array
+
+            return type_descriptor.first
+          end
+
+          # String forms like "float[]" or canonical names
+          if type_descriptor.is_a?(String)
+            s = type_descriptor.strip
+            if s.end_with?('[]')
+              inner = s[0..-3]
+              return array ? [inner.to_sym] : inner.to_sym
+            end
+            return array ? [s.to_sym] : s.to_sym
+          end
+
+          # Symbol or other single token
+          array ? [type_descriptor] : type_descriptor
+        end
+      end
+
+      class_methods do
+        # Validate whether an attribute name is a valid Ruby reader method name
+        # (skip dotted names and other invalid identifiers).
         def valid_attribute_reader_name?(name)
           s = name.to_s
           return false if s.empty?
