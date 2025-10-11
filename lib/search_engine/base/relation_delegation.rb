@@ -25,6 +25,7 @@ module SearchEngine
           select include_fields exclude reselect
           limit_hits validate_hits!
           first last take pluck exists? count
+          delete_all
           raw
         ].each { |method| delegate method, to: :all }
       end

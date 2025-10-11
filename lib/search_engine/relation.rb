@@ -16,12 +16,14 @@ module SearchEngine
     require 'search_engine/relation/options'
     require 'search_engine/relation/dsl'
     require 'search_engine/relation/compiler'
+    require 'search_engine/relation/deletion'
     require 'search_engine/relation/materializers'
 
     include State
     include Options
     include DSL
     include Compiler
+    include Deletion
     include Materializers
 
     # Convenience conversion to compiled body params as a plain Hash.
