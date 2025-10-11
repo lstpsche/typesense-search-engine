@@ -92,68 +92,95 @@ module SearchEngine
         #
         # @param name [#to_sym]
         # @param type [Object] type descriptor (e.g., :string, :integer)
-        # @param locale [String, nil] only applicable to :string and [:string]; when set,
-        #   the raw value is passed to the Typesense field's `locale`
-        # @param optional [Boolean, nil] when set, the raw value is passed to the Typesense field's `optional`
-        # @param sort [Boolean, nil] when set, the raw value is passed to the Typesense field's `sort`
-        # @param infix [Boolean, nil] when set, the raw value is passed to the Typesense field's `infix`
-        # @param empty_filtering [Boolean, nil] only applicable to array types (e.g., [:string]).
-        #   When true, the gem will add an internal hidden boolean field "<name>_empty" used to
-        #   support `.where(name: [])` and `.where.not(name: [])` semantics. Hidden fields are
-        #   not exposed via public APIs or inspect and are populated automatically by the mapper.
-        # @param nested [Hash, nil] optional nested subfields for :object/[:object] attributes
+        # @param locale [String, nil]
+        # @param optional [Boolean, nil]
+        # @param sort [Boolean, nil]
+        # @param infix [Boolean, nil]
+        # @param empty_filtering [Boolean, nil]
+        # @param nested [Hash, nil]
         # @return [void]
         def attribute(name, type = :string, locale: nil, optional: nil, sort: nil, infix: nil, empty_filtering: nil,
                       nested: nil)
           n = name.to_sym
-          if n == :id
-            raise SearchEngine::Errors::InvalidField,
-                  'The :id field is reserved; use `identify_by` to set the Typesense document id.'
-          end
+          __se_validate_attribute_name!(n)
+          __se_assign_attribute!(n, type)
+          __se_update_attribute_options!(n, type, locale: locale, optional: optional, sort: sort, infix: infix,
+                                         empty_filtering: empty_filtering
+          )
+          __se_define_reader_if_needed!(n)
+          __se_expand_nested_fields!(n, type, nested)
+          nil
+        end
+      end
 
-          (@attributes ||= {})[n] = type
+      class_methods do
+        # Validate reserved names and raise when invalid.
+        def __se_validate_attribute_name!(name_sym)
+          return unless name_sym == :id
 
-          if [locale, optional, sort, infix, empty_filtering].any? { |v| !v.nil? }
+          raise SearchEngine::Errors::InvalidField,
+                'The :id field is reserved; use `identify_by` to set the Typesense document id.'
+        end
+      end
+
+      class_methods do
+        # Assign base attribute type.
+        def __se_assign_attribute!(name_sym, type)
+          (@attributes ||= {})[name_sym] = type
+        end
+      end
+
+      class_methods do
+        # Update per-attribute options from keyword arguments.
+        def __se_update_attribute_options!(name_sym, type, locale:, optional:, sort:, infix:, empty_filtering:)
+          has_opts = [locale, optional, sort, infix, empty_filtering].any? { |v| !v.nil? }
+          if has_opts
             @attribute_options ||= {}
             new_opts = __se_build_attribute_options_for(
-              n, type,
+              name_sym, type,
               locale: locale, optional: optional, sort: sort, infix: infix, empty_filtering: empty_filtering
             )
 
             if new_opts.empty?
               @attribute_options = @attribute_options.dup
-              @attribute_options.delete(n)
+              @attribute_options.delete(name_sym)
             else
-              @attribute_options[n] = new_opts
+              @attribute_options[name_sym] = new_opts
             end
-          elsif instance_variable_defined?(:@attribute_options) && (@attribute_options || {}).key?(n)
+          elsif instance_variable_defined?(:@attribute_options) && (@attribute_options || {}).key?(name_sym)
             # When re-declared without options, keep prior options as-is (idempotent)
           end
+        end
+      end
 
-          # Define an instance reader for the attribute unless one already exists and
-          # only when the name is a valid Ruby identifier (skip dotted or invalid names).
-          attr_reader n if valid_attribute_reader_name?(n) && !method_defined?(n)
+      class_methods do
+        # Define an instance reader for the attribute when safe to do so.
+        def __se_define_reader_if_needed!(name_sym)
+          attr_reader name_sym if valid_attribute_reader_name?(name_sym) && !method_defined?(name_sym)
+        end
+      end
 
-          # Expand nested subfields for object/object[] attributes when nested: is provided.
-          if !nested.nil? && !(nested.respond_to?(:empty?) && nested.empty?)
-            unless nested.is_a?(Hash)
-              raise SearchEngine::Errors::InvalidOption,
-                    '`nested` must be a Hash of field_name => type'
-            end
+      class_methods do
+        # Expand nested subfields for object/object[] attributes when nested: is provided.
+        def __se_expand_nested_fields!(name_sym, type, nested)
+          return if nested.nil? || (nested.respond_to?(:empty?) && nested.empty?)
 
-            is_object = type.to_s.downcase == 'object'
-            is_object_array = type.is_a?(Array) && type.size == 1 && type.first.to_s.downcase == 'object'
-            unless is_object || is_object_array
-              raise SearchEngine::Errors::InvalidOption,
-                    "`nested:` is only valid for :object or [:object] attributes (got #{type.inspect})"
-            end
-
-            nested.each do |child_name, child_type|
-              effective = __se_compute_nested_type_descriptor(child_type, array: is_object_array)
-              attribute("#{n}.#{child_name}".to_sym, effective)
-            end
+          unless nested.is_a?(Hash)
+            raise SearchEngine::Errors::InvalidOption,
+                  '`nested` must be a Hash of field_name => type'
           end
-          nil
+
+          is_object = type.to_s.downcase == 'object'
+          is_object_array = type.is_a?(Array) && type.size == 1 && type.first.to_s.downcase == 'object'
+          unless is_object || is_object_array
+            raise SearchEngine::Errors::InvalidOption,
+                  "`nested:` is only valid for :object or [:object] attributes (got #{type.inspect})"
+          end
+
+          nested.each do |child_name, child_type|
+            effective = __se_compute_nested_type_descriptor(child_type, array: is_object_array)
+            attribute("#{name_sym}.#{child_name}".to_sym, effective)
+          end
         end
       end
 

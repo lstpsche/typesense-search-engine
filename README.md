@@ -39,7 +39,7 @@ end
 SearchEngine::Product.where(name: "milk").select(:id, :name).limit(5).to_a
 ```
 
-See Quickstart → [Quickstart](https://github.com/lstpsche/search-engine-for-typesense/wiki/Quickstart).
+See [Quickstart](https://github.com/lstpsche/search-engine-for-typesense/wiki/Quickstart).
 
 ### Host app SearchEngine models
 
@@ -107,7 +107,7 @@ rel.to_curl        # => single-line curl with redacted API key
 
 ## Documentation
 
-See the wiki → [Home](https://github.com/lstpsche/search-engine-for-typesense/wiki)
+See the [Wiki](https://github.com/lstpsche/search-engine-for-typesense/wiki)
 
 ## Example app
 

@@ -11,9 +11,10 @@ module SearchEngine
   class Partitioner
     # Immutable compiled holder
     class Compiled
-      attr_reader :klass, :partitions_proc, :partition_fetch_proc, :before_hook_proc, :after_hook_proc
+      attr_reader :klass, :partitions_proc, :partition_fetch_proc, :before_hook_proc, :after_hook_proc, :max_parallel
 
-      def initialize(klass:, partitions_proc:, partition_fetch_proc:, before_hook_proc:, after_hook_proc:)
+      def initialize(klass:, partitions_proc:, partition_fetch_proc:, before_hook_proc:, after_hook_proc:,
+                     max_parallel: 1)
         @klass = klass
         @partitions_proc = partitions_proc
         @partition_fetch_proc = partition_fetch_proc
@@ -21,6 +22,12 @@ module SearchEngine
         validate_hook_arity!(after_hook_proc, name: 'after_partition') if after_hook_proc
         @before_hook_proc = before_hook_proc
         @after_hook_proc = after_hook_proc
+        mp = begin
+          Integer(max_parallel)
+        rescue StandardError
+          1
+        end
+        @max_parallel = mp.positive? ? mp : 1
         freeze
       end
 
@@ -106,7 +113,8 @@ module SearchEngine
           partitions_proc: dsl[:partitions],
           partition_fetch_proc: dsl[:partition_fetch],
           before_hook_proc: dsl[:before_partition],
-          after_hook_proc: dsl[:after_partition]
+          after_hook_proc: dsl[:after_partition],
+          max_parallel: dsl[:partition_max_parallel]
         )
       end
 

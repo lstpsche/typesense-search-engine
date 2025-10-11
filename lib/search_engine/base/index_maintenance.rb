@@ -316,18 +316,11 @@ module SearchEngine
         def __se_index_partitions!(into:)
           compiled = SearchEngine::Partitioner.for(self)
           if compiled
-            compiled.partitions.each do |part|
-              summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
-              sample_err = __se_extract_sample_error(summary)
-              puts(
-                "  partition=#{part.inspect} → status=#{summary.status} " \
-                "docs=#{summary.docs_total} " \
-                "failed=#{summary.failed_total} " \
-                "batches=#{summary.batches_total} " \
-                "duration_ms=#{summary.duration_ms_total}" \
-                "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
-              )
-            end
+            parts = Array(compiled.partitions)
+            max_p = compiled.max_parallel.to_i
+            return __se_index_partitions_seq!(parts, into) if max_p <= 1 || parts.size <= 1
+
+            __se_index_partitions_parallel!(parts, into, max_p)
           else
             summary = SearchEngine::Indexer.rebuild_partition!(self, partition: nil, into: into)
             sample_err = __se_extract_sample_error(summary)
@@ -338,6 +331,77 @@ module SearchEngine
               "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
           end
+        end
+      end
+
+      class_methods do
+        # Sequential processing of partition list
+        def __se_index_partitions_seq!(parts, into)
+          parts.each do |part|
+            summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
+            sample_err = __se_extract_sample_error(summary)
+            puts(
+              "  partition=#{part.inspect} → status=#{summary.status} " \
+              "docs=#{summary.docs_total} " \
+              "failed=#{summary.failed_total} " \
+              "batches=#{summary.batches_total} " \
+              "duration_ms=#{summary.duration_ms_total}" \
+              "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
+            )
+          end
+        end
+      end
+
+      class_methods do
+        # Parallel processing via bounded thread pool
+        def __se_index_partitions_parallel!(parts, into, max_p)
+          require 'concurrent-ruby'
+          pool = Concurrent::FixedThreadPool.new(max_p)
+          ctx = SearchEngine::Instrumentation.context
+          mtx = Mutex.new
+          begin
+            parts.each do |part|
+              pool.post do
+                SearchEngine::Instrumentation.with_context(ctx) do
+                  summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
+                  sample_err = __se_extract_sample_error(summary)
+                  mtx.synchronize do
+                    puts(
+                      "  partition=#{part.inspect} → status=#{summary.status} " \
+                      "docs=#{summary.docs_total} " \
+                      "failed=#{summary.failed_total} " \
+                      "batches=#{summary.batches_total} " \
+                      "duration_ms=#{summary.duration_ms_total}" \
+                      "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
+                    )
+                  end
+                end
+              rescue StandardError => error
+                mtx.synchronize do
+                  warn("  partition=#{part.inspect} → error=#{error.class}: #{error.message.to_s[0, 200]}")
+                end
+              end
+            end
+          ensure
+            pool.shutdown
+            # Wait up to 1 hour, then force-kill and wait a bit more to ensure cleanup
+            pool.wait_for_termination(3600) || pool.kill
+            pool.wait_for_termination(60)
+          end
+        end
+      end
+
+      class_methods do
+        # Single non-partitioned pass helper
+        def __se_index_single!(into)
+          summary = SearchEngine::Indexer.rebuild_partition!(self, partition: nil, into: into)
+          sample_err = __se_extract_sample_error(summary)
+          puts(
+            "  single → status=#{summary.status} docs=#{summary.docs_total} " \
+            "failed=#{summary.failed_total} batches=#{summary.batches_total} " \
+            "duration_ms=#{summary.duration_ms_total}" \
+            "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
+          )
         end
       end
 

@@ -76,7 +76,8 @@ module SearchEngine
       # @param hash [Hash] remaining keyword arguments treated as filter hash
       # @return [Integer] number of deleted documents
       def delete_by(filter_or_str = nil, into: nil, partition: nil, timeout_ms: nil, filter_by: nil, **hash)
-        effective_partition = partition || instance_variable_get(:@__current_partition__)
+        effective_partition = partition || Thread.current[:__se_current_partition__] ||
+                              instance_variable_get(:@__current_partition__)
         SearchEngine::Deletion.delete_by(
           klass: @klass,
           filter: filter_or_str || filter_by,
@@ -96,6 +97,21 @@ module SearchEngine
         raise ArgumentError, 'partitions requires a block' unless block
 
         @partitions_proc = block
+        nil
+      end
+
+      # Configure maximum parallel threads for partitioned indexation.
+      # Applies only when partitioning is used and only to full indexation.
+      # @param max_parallel [Integer]
+      # @return [void]
+      # @raise [SearchEngine::Errors::InvalidOption] when n is not a positive Integer
+      def partition_max_parallel(max_parallel)
+        unless max_parallel.is_a?(Integer) && max_parallel.positive?
+          raise SearchEngine::Errors::InvalidOption,
+                'partition_max_parallel must be a positive Integer (> 0)'
+        end
+
+        @partition_max_parallel = max_parallel
         nil
       end
 
@@ -125,12 +141,15 @@ module SearchEngine
         # Wrap to expose current partition on the DSL instance for helpers
         @before_partition_proc = lambda do |partition|
           instance_variable_set(:@__current_partition__, partition)
+          prev = Thread.current[:__se_current_partition__]
+          Thread.current[:__se_current_partition__] = partition
           if block.arity == 1
             yield(partition)
           else
             instance_exec(partition, &block)
           end
         ensure
+          Thread.current[:__se_current_partition__] = prev
           remove_instance_variable(:@__current_partition__) if instance_variable_defined?(:@__current_partition__)
         end
         nil
@@ -147,12 +166,15 @@ module SearchEngine
 
         @after_partition_proc = lambda do |partition|
           instance_variable_set(:@__current_partition__, partition)
+          prev = Thread.current[:__se_current_partition__]
+          Thread.current[:__se_current_partition__] = partition
           if block.arity == 1
             yield(partition)
           else
             instance_exec(partition, &block)
           end
         ensure
+          Thread.current[:__se_current_partition__] = prev
           remove_instance_variable(:@__current_partition__) if instance_variable_defined?(:@__current_partition__)
         end
         nil
@@ -168,7 +190,8 @@ module SearchEngine
           partitions: @partitions_proc,
           partition_fetch: @partition_fetch_proc,
           before_partition: @before_partition_proc,
-          after_partition: @after_partition_proc
+          after_partition: @after_partition_proc,
+          partition_max_parallel: @partition_max_parallel
         }.freeze
       end
     end

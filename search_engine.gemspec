@@ -22,6 +22,7 @@ Gem::Specification.new do |spec|
   spec.files = Dir['{lib,app}/**/*', 'README.md', 'LICENSE.txt', 'docs/**/*']
   spec.require_paths = ['lib']
 
+  spec.add_dependency 'concurrent-ruby', '>= 1.2'
   spec.add_dependency 'rails', '>= 6.1'
   spec.add_dependency 'typesense', '>= 4.1.0'
 end
