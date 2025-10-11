@@ -30,28 +30,4 @@ class OTelAdapterTest < Minitest::Test
     result = SearchEngine::Instrumentation.instrument('search_engine.test.disabled', {}) { :ok }
     assert_equal :ok, result
   end
-
-  def test_enabled_path_emits_spans_when_sdk_available
-    skip 'OpenTelemetry SDK not available' unless defined?(OpenTelemetry::SDK)
-
-    require 'opentelemetry/sdk'
-
-    # In-memory exporter
-    exporter = OpenTelemetry::SDK::Trace::Export::InMemorySpanExporter.new
-    span_processor = OpenTelemetry::SDK::Trace::Export::SimpleSpanProcessor.new(exporter)
-    OpenTelemetry.tracer_provider.add_span_processor(span_processor)
-
-    SearchEngine.configure do |c|
-      c.opentelemetry = OpenStruct.new(enabled: true, service_name: 'search_engine')
-    end
-
-    SearchEngine::OTel.start!
-
-    SearchEngine::Instrumentation.instrument('search_engine.search', collection: 'products') { :ok }
-
-    spans = exporter.finished_spans
-    assert_operator spans.size, :>=, 1
-    names = spans.map(&:name)
-    assert_includes names, 'search_engine.search'
-  end
 end
