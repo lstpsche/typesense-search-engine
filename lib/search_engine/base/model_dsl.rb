@@ -128,14 +128,23 @@ module SearchEngine
             # When re-declared without options, keep prior options as-is (idempotent)
           end
 
-          # Define an instance reader for the attribute unless one already exists (idempotent)
-          attr_reader n unless method_defined?(n)
+          # Define an instance reader for the attribute unless one already exists and
+          # only when the name is a valid Ruby identifier (skip dotted or invalid names).
+          attr_reader n if valid_attribute_reader_name?(n) && !method_defined?(n)
           nil
         end
       end
 
       class_methods do
         private
+
+        def valid_attribute_reader_name?(name)
+          s = name.to_s
+          return false if s.empty?
+          return false unless s.match?(/\A[a-zA-Z_]\w*\z/)
+
+          true
+        end
 
         def __se_build_attribute_options_for(
           n, type, locale:,

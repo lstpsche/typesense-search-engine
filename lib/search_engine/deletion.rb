@@ -61,6 +61,17 @@ module SearchEngine
     def resolve_into(klass:, partition:, into:)
       return into if into && !into.to_s.strip.empty?
 
+      # Prefer a context-provided target collection when present (e.g., inside
+      # indexer apply/partial runs). This ensures that delete_by calls inside
+      # before/after hooks target the correct physical collection, avoiding 404s
+      # during the initial apply before the alias exists.
+      begin
+        ctx_into = SearchEngine::Instrumentation.context[:into]
+        return ctx_into if ctx_into && !ctx_into.to_s.strip.empty?
+      rescue StandardError
+        # fall through to default resolution
+      end
+
       resolver = begin
         SearchEngine.config.partitioning&.default_into_resolver
       rescue StandardError

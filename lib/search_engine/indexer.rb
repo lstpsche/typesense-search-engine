@@ -62,19 +62,22 @@ module SearchEngine
       dispatch_ctx = SearchEngine::Instrumentation.context
       instrument_partition_start(klass, target_into, pfields, dispatch_ctx)
 
-      run_before_hook_if_present(before_hook, partition)
-
       docs_enum = build_docs_enum(rows_enum, mapper)
 
-      summary = import!(
-        klass,
-        into: target_into,
-        enum: docs_enum,
-        batch_size: nil,
-        action: :upsert
-      )
+      summary = nil
+      SearchEngine::Instrumentation.with_context(into: target_into) do
+        run_before_hook_if_present(before_hook, partition, klass)
 
-      run_after_hook_if_present(after_hook, partition)
+        summary = import!(
+          klass,
+          into: target_into,
+          enum: docs_enum,
+          batch_size: nil,
+          action: :upsert
+        )
+
+        run_after_hook_if_present(after_hook, partition)
+      end
 
       instrument_partition_finish(klass, target_into, pfields, summary, started_at)
 
@@ -691,8 +694,18 @@ module SearchEngine
         false
       end
 
-      def run_before_hook_if_present(before_hook, partition)
+      def run_before_hook_if_present(before_hook, partition, klass)
         return unless before_hook
+
+        # Guard: skip executing before_partition when the logical collection (alias or
+        # same-named physical) is missing. This avoids 404s during the initial schema
+        # apply before the alias swap has occurred.
+        present = begin
+          klass.respond_to?(:current_schema) && klass.current_schema
+        rescue StandardError
+          false
+        end
+        return unless present
 
         run_hook_with_timeout(
           before_hook,

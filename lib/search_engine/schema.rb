@@ -54,6 +54,11 @@ module SearchEngine
         fields_array = []
         needs_nested_fields = false
         attributes_map.each do |attribute_name, type_descriptor|
+          # Validate unsupported or unsafe type descriptors early
+          if type_descriptor.to_s.downcase == 'auto'
+            raise SearchEngine::Errors::InvalidOption,
+                  "Unsupported attribute type :auto for #{attribute_name}. Use a concrete type or :object/[:object]."
+          end
           ts_type = typesense_type_for(type_descriptor)
           opts = attribute_options[attribute_name.to_sym] || {}
           needs_nested_fields ||= %w[object object[]].include?(ts_type)
