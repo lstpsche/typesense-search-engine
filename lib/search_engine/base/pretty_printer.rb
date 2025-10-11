@@ -94,9 +94,18 @@ module SearchEngine
         # Render only declared attributes that were present in the hydrated document
         declared.each_key do |name|
           next if name.to_s == 'id'
-          next unless instance_variable_defined?("@#{name}")
 
-          value = instance_variable_get("@#{name}")
+          begin
+            next unless self.class.respond_to?(:valid_attribute_reader_name?) &&
+                        self.class.valid_attribute_reader_name?(name)
+          rescue StandardError
+            next if name.to_s.include?('.')
+          end
+
+          var = "@#{name}"
+          next unless instance_variable_defined?(var)
+
+          value = instance_variable_get(var)
           rendered = if name.to_s == 'doc_updated_at' && !value.nil?
                        __se_coerce_doc_updated_at_for_display(value)
                      else
@@ -111,9 +120,13 @@ module SearchEngine
           join_names = []
         end
         join_names.each do |jname|
-          next unless instance_variable_defined?("@#{jname}")
+          var = "@#{jname}"
+          next unless instance_variable_defined?(var)
 
-          value = instance_variable_get("@#{jname}")
+          value = instance_variable_get(var)
+          # Hide joins that were not selected/hydrated (nil or empty collections)
+          next if value.nil? || (value.respond_to?(:empty?) && value.empty?)
+
           pairs << [jname, value]
         end
         __se_append_unknown_attribute_pairs(pairs, declared)

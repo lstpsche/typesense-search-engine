@@ -52,8 +52,8 @@ module SearchEngine
 
         # Fetch join declarations; keep existing behavior (use self.class) to avoid logic change
         def __se_declared_joins
-          if self.class.respond_to?(:joins_config)
-            self.class.joins_config || {}
+          if respond_to?(:joins_config)
+            joins_config || {}
           else
             {}
           end
@@ -91,7 +91,7 @@ module SearchEngine
         def __se_hidden_join_fields
           hidden = []
           joins_cfg = begin
-            self.class.respond_to?(:joins_config) ? self.class.joins_config : {}
+            respond_to?(:joins_config) ? joins_config : {}
           rescue StandardError
             {}
           end
@@ -217,7 +217,16 @@ module SearchEngine
         out = {}
 
         declared.each_key do |name|
-          val = instance_variable_get("@#{name}")
+          # Skip non-base (dotted) attribute names when reading ivars
+          begin
+            next unless self.class.respond_to?(:valid_attribute_reader_name?) &&
+                        self.class.valid_attribute_reader_name?(name)
+          rescue StandardError
+            next if name.to_s.include?('.')
+          end
+
+          var = "@#{name}"
+          val = instance_variable_get(var)
           out[name] =
             if name.to_s == 'doc_updated_at' && !val.nil?
               __se_coerce_doc_updated_at_for_display(val)
