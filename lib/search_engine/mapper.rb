@@ -60,6 +60,33 @@ module SearchEngine
         nil
       end
 
+      # Delete documents by filter before/after a partition import or ad-hoc.
+      # Accepts either a raw Typesense filter string or a hash which will be
+      # converted to a filter string using the Filters::Sanitizer.
+      #
+      # Examples:
+      #   delete_by filter_by: "store_id:=#{store_id}"
+      #   delete_by store_id: store_id
+      #
+      # @param filter_or_str [String, nil]
+      # @param filter_by [String, nil]
+      # @param into [String, nil]
+      # @param partition [Object, nil]
+      # @param timeout_ms [Integer, nil]
+      # @param hash [Hash] remaining keyword arguments treated as filter hash
+      # @return [Integer] number of deleted documents
+      def delete_by(filter_or_str = nil, into: nil, partition: nil, timeout_ms: nil, filter_by: nil, **hash)
+        effective_partition = partition || instance_variable_get(:@__current_partition__)
+        SearchEngine::Deletion.delete_by(
+          klass: @klass,
+          filter: filter_or_str || filter_by,
+          hash: (hash.empty? ? nil : hash),
+          into: into,
+          partition: effective_partition,
+          timeout_ms: timeout_ms
+        )
+      end
+
       # Partitioning: declare how to enumerate partitions for full rebuilds.
       # @yieldreturn [Enumerable] a list/Enumerable of opaque partition keys
       # @return [void]
@@ -95,7 +122,17 @@ module SearchEngine
       def before_partition(&block)
         raise ArgumentError, 'before_partition requires a block' unless block
 
-        @before_partition_proc = block
+        # Wrap to expose current partition on the DSL instance for helpers
+        @before_partition_proc = lambda do |partition|
+          instance_variable_set(:@__current_partition__, partition)
+          if block.arity == 1
+            yield(partition)
+          else
+            instance_exec(partition, &block)
+          end
+        ensure
+          remove_instance_variable(:@__current_partition__) if instance_variable_defined?(:@__current_partition__)
+        end
         nil
       end
 
@@ -108,7 +145,16 @@ module SearchEngine
       def after_partition(&block)
         raise ArgumentError, 'after_partition requires a block' unless block
 
-        @after_partition_proc = block
+        @after_partition_proc = lambda do |partition|
+          instance_variable_set(:@__current_partition__, partition)
+          if block.arity == 1
+            yield(partition)
+          else
+            instance_exec(partition, &block)
+          end
+        ensure
+          remove_instance_variable(:@__current_partition__) if instance_variable_defined?(:@__current_partition__)
+        end
         nil
       end
 

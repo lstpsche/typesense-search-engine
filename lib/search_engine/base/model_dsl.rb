@@ -30,6 +30,31 @@ module SearchEngine
       end
 
       class_methods do
+        # Delete documents by filter for this collection's physical index.
+        # Accepts either a Typesense filter string (via first arg or :filter_by)
+        # or a hash of field=>value which will be converted to a filter string.
+        # Supports optional partition to cooperate with default_into_resolver.
+        #
+        # @param filter_or_str [String, nil]
+        # @param filter_by [String, nil]
+        # @param into [String, nil]
+        # @param partition [Object, nil]
+        # @param timeout_ms [Integer, nil]
+        # @param hash [Hash]
+        # @return [Integer] number of deleted documents
+        def delete_by(filter_or_str = nil, into: nil, partition: nil, timeout_ms: nil, filter_by: nil, **hash)
+          SearchEngine::Deletion.delete_by(
+            klass: self,
+            filter: filter_or_str || filter_by,
+            hash: (hash.empty? ? nil : hash),
+            into: into,
+            partition: partition,
+            timeout_ms: timeout_ms
+          )
+        end
+      end
+
+      class_methods do
         # Set or get the per-collection default query_by fields.
         #
         # Accepts a String (comma-separated), a Symbol, or an Array of Strings/Symbols.
