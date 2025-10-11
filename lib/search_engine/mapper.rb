@@ -187,8 +187,9 @@ module SearchEngine
         @map_proc = map_proc
         @schema_fields = schema_fields.freeze # Array of field names (String)
         @types_by_field = types_by_field.freeze # { "field" => "int64" }
-        @required_keys = @schema_fields.map(&:to_sym).to_set.freeze
-        @allowed_keys = @required_keys
+        # Allow all schema fields; treat required as schema fields minus optional attributes
+        @allowed_keys = @schema_fields.map(&:to_sym).to_set.freeze
+        @required_keys = compute_required_keys
         @options = default_options.merge(options || {})
         @__empty_filtering_targets__ = compute_empty_filtering_targets
         @__optional_blank_targets__ = compute_optional_blank_targets
@@ -375,6 +376,24 @@ module SearchEngine
           nil_id: stats[:nil_id],
           duration_ms: duration.round(1)
         }
+      end
+
+      # Compute required keys as all schema fields minus attributes marked optional in the model DSL.
+      # Hidden flags like <name>_blank remain required; they are populated automatically by the mapper.
+      def compute_required_keys
+        begin
+          opts = @klass.respond_to?(:attribute_options) ? (@klass.attribute_options || {}) : {}
+        rescue StandardError
+          opts = {}
+        end
+
+        required = @schema_fields.map(&:to_sym).to_set
+        opts.each do |fname, o|
+          next unless o.is_a?(Hash) && o[:optional]
+
+          required.delete(fname.to_sym)
+        end
+        required.freeze
       end
 
       def normalize_document(obj)
