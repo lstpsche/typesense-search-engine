@@ -39,6 +39,8 @@ module SearchEngine
       # @param klass [Class] model class inheriting from {SearchEngine::Base}
       # @return [Hash] frozen schema hash with symbol keys
       # @raise [ArgumentError] if the class has no collection name defined
+      # @note Automatically sets `enable_nested_fields: true` at collection level when
+      #   any attribute is declared with type `:object` or `[:object]`.
       def compile(klass)
         collection_name = klass.respond_to?(:collection) ? klass.collection : nil
         if collection_name.nil? || collection_name.to_s.strip.empty?
@@ -50,9 +52,11 @@ module SearchEngine
         attribute_options = klass.respond_to?(:attribute_options) ? (klass.attribute_options || {}) : {}
         references_by_local_key = build_references_by_local_key(klass)
         fields_array = []
+        needs_nested_fields = false
         attributes_map.each do |attribute_name, type_descriptor|
           ts_type = typesense_type_for(type_descriptor)
           opts = attribute_options[attribute_name.to_sym] || {}
+          needs_nested_fields ||= %w[object object[]].include?(ts_type)
 
           # Insert compiled attribute schema field into result schema fields array
           fields_array << {
@@ -90,7 +94,11 @@ module SearchEngine
           break
         end
 
+        # NOTE: when object/object[] fields are present, the collection requires
+        # Typesense's nested fields mode. We auto-enable it at collection level.
         schema = { name: collection_name.to_s, fields: fields_array }
+        # Auto-enable nested fields at collection level when object/object[] types are present
+        schema[:enable_nested_fields] = true if needs_nested_fields
         deep_freeze(schema)
       end
 
@@ -185,6 +193,7 @@ module SearchEngine
 
         new_physical = generate_physical_name(logical, client: client)
         create_schema = { name: new_physical, fields: compiled[:fields].map(&:dup) }
+        create_schema[:enable_nested_fields] = true if compiled[:enable_nested_fields]
         client.create_collection(create_schema)
 
         if block_given?
@@ -396,7 +405,8 @@ module SearchEngine
           fields: normalized_fields,
           default_sorting_field: schema[:default_sorting_field] || schema['default_sorting_field'],
           token_separators: schema[:token_separators] || schema['token_separators'],
-          symbols_to_index: schema[:symbols_to_index] || schema['symbols_to_index']
+          symbols_to_index: schema[:symbols_to_index] || schema['symbols_to_index'],
+          enable_nested_fields: schema[:enable_nested_fields] || schema['enable_nested_fields']
         }
       end
 
@@ -450,7 +460,7 @@ module SearchEngine
       def diff_collection_options(compiled, live)
         # Compare only keys present in compiled to avoid noisy diffs when DSL
         # does not declare collection-level options.
-        keys = %i[default_sorting_field token_separators symbols_to_index]
+        keys = %i[default_sorting_field token_separators symbols_to_index enable_nested_fields]
         differences = {}
         keys.each do |key|
           cval = compiled[key]
