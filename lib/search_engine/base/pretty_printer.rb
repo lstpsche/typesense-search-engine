@@ -78,20 +78,34 @@ module SearchEngine
       # - Followed by unknown attributes (when present)
       # @return [Array<[String, Object]>]
       def __attribute_pairs_for_render
-        declared = begin
-          self.class.respond_to?(:attributes) ? self.class.attributes : {}
-        rescue StandardError
-          {}
-        end
+        declared = __se_declared_attributes
         pairs = []
 
-        # Render id first if declared and present in the hydrated document
-        if declared.key?(:id) && instance_variable_defined?('@id')
-          id_val = instance_variable_get('@id')
-          pairs << ['id', id_val]
-        end
+        __se_append_declared_id!(pairs, declared)
+        __se_render_present_declared_attributes!(pairs, declared)
 
-        # Render only declared attributes that were present in the hydrated document
+        join_names = __se_declared_join_names
+        __se_render_present_declared_joins!(pairs, join_names)
+
+        __se_append_unknown_attribute_pairs(pairs, declared)
+      end
+
+      # Return declared attribute map with resilience to missing APIs.
+      def __se_declared_attributes
+        self.class.respond_to?(:attributes) ? (self.class.attributes || {}) : {}
+      rescue StandardError
+        {}
+      end
+
+      # Render id first if declared and present in the hydrated document
+      def __se_append_declared_id!(pairs, declared)
+        return unless declared.key?(:id) && instance_variable_defined?('@id')
+
+        pairs << ['id', instance_variable_get('@id')]
+      end
+
+      # Render only declared attributes that were present in the hydrated document
+      def __se_render_present_declared_attributes!(pairs, declared)
         declared.each_key do |name|
           next if name.to_s == 'id'
 
@@ -102,34 +116,38 @@ module SearchEngine
             next if name.to_s.include?('.')
           end
 
-          var = "@#{name}"
-          next unless instance_variable_defined?(var)
+          ivar_name = "@#{name}"
+          next unless instance_variable_defined?(ivar_name)
 
-          value = instance_variable_get(var)
-          rendered = if name.to_s == 'doc_updated_at' && !value.nil?
-                       __se_coerce_doc_updated_at_for_display(value)
-                     else
-                       value
-                     end
-          pairs << [name.to_s, rendered]
+          raw_value = instance_variable_get(ivar_name)
+          value_for_render = if name.to_s == 'doc_updated_at' && !raw_value.nil?
+                               __se_coerce_doc_updated_at_for_display(raw_value)
+                             else
+                               raw_value
+                             end
+          pairs << [name.to_s, value_for_render]
         end
-        # Render declared joined attributes that were present in the hydrated document
-        begin
-          join_names = (self.class.respond_to?(:joins_config) ? (self.class.joins_config || {}) : {}).keys.map(&:to_s)
-        rescue StandardError
-          join_names = []
-        end
-        join_names.each do |jname|
-          var = "@#{jname}"
-          next unless instance_variable_defined?(var)
+      end
 
-          value = instance_variable_get(var)
-          # Hide joins that were not selected/hydrated (nil or empty collections)
+      # Collect declared join names as strings.
+      def __se_declared_join_names
+        joins = self.class.respond_to?(:joins_config) ? (self.class.joins_config || {}) : {}
+        joins.keys.map(&:to_s)
+      rescue StandardError
+        []
+      end
+
+      # Render declared joined attributes that were present in the hydrated document
+      def __se_render_present_declared_joins!(pairs, join_names)
+        join_names.each do |join_name|
+          ivar_name = "@#{join_name}"
+          next unless instance_variable_defined?(ivar_name)
+
+          value = instance_variable_get(ivar_name)
           next if value.nil? || (value.respond_to?(:empty?) && value.empty?)
 
-          pairs << [jname, value]
+          pairs << [join_name, value]
         end
-        __se_append_unknown_attribute_pairs(pairs, declared)
       end
 
       # Group "$assoc.field" unknown attributes into a nested Hash under "$assoc" for rendering.
