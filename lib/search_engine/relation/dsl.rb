@@ -289,6 +289,17 @@ module SearchEngine
         end
       end
 
+      # Set the query string (Typesense `q`) for this relation.
+      # @param query [Object] coerced via #to_s
+      # @return [SearchEngine::Relation]
+      def search(query)
+        spawn do |s|
+          opts = (s[:options] || {}).dup
+          opts[:q] = query.to_s
+          s[:options] = opts
+        end
+      end
+
       # Shallow-merge options into the relation.
       # @param opts [Hash]
       # @return [SearchEngine::Relation]
