@@ -35,6 +35,7 @@ require 'search_engine/hydration/selection_context'
 require 'search_engine/hydration/materializers'
 require 'search_engine/compiled_params'
 require 'search_engine/deletion'
+require 'search_engine/update'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.

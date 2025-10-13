@@ -485,6 +485,65 @@ module SearchEngine
       instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
+    # Partially update a single document by id.
+    #
+    # @param collection [String] physical collection name
+    # @param id [String, #to_s] document id
+    # @param fields [Hash] partial fields to update
+    # @param timeout_ms [Integer, nil] optional read timeout override in ms
+    # @return [Hash] response from Typesense client (symbolized)
+    # @see `https://typesense.org/docs/latest/api/documents.html#update-a-document`
+    def update_document(collection:, id:, fields:, timeout_ms: nil)
+      unless collection.is_a?(String) && !collection.strip.empty?
+        raise Errors::InvalidParams, 'collection must be a non-empty String'
+      end
+
+      s = id.to_s
+      raise Errors::InvalidParams, 'id must be a non-empty String' if s.strip.empty?
+
+      raise Errors::InvalidParams, 'fields must be a Hash' unless fields.is_a?(Hash)
+
+      ts = timeout_ms&.to_i&.positive? ? build_typesense_client_with_read_timeout(timeout_ms.to_i / 1000.0) : typesense
+      start = current_monotonic_ms
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + collection.to_s +
+             Client::RequestBuilder::DOCUMENTS_SUFFIX + "/#{s}"
+
+      result = with_exception_mapping(:patch, path, {}, start) do
+        ts.collections[collection].documents[s].update(fields)
+      end
+      instrument(:patch, path, current_monotonic_ms - start, {})
+      symbolize_keys_deep(result)
+    end
+
+    # Partially update documents that match a filter.
+    #
+    # @param collection [String] physical collection name
+    # @param filter_by [String] Typesense filter string
+    # @param fields [Hash] partial fields to update
+    # @param timeout_ms [Integer, nil] optional read timeout override in ms
+    # @return [Hash] response from Typesense client (symbolized)
+    # @see `https://typesense.org/docs/latest/api/documents.html#update-documents-by-query`
+    def update_documents_by_filter(collection:, filter_by:, fields:, timeout_ms: nil)
+      unless collection.is_a?(String) && !collection.strip.empty?
+        raise Errors::InvalidParams, 'collection must be a non-empty String'
+      end
+      unless filter_by.is_a?(String) && !filter_by.strip.empty?
+        raise Errors::InvalidParams, 'filter_by must be a non-empty String'
+      end
+      raise Errors::InvalidParams, 'fields must be a Hash' unless fields.is_a?(Hash)
+
+      ts = timeout_ms&.to_i&.positive? ? build_typesense_client_with_read_timeout(timeout_ms.to_i / 1000.0) : typesense
+      start = current_monotonic_ms
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + collection.to_s + Client::RequestBuilder::DOCUMENTS_SUFFIX
+
+      result = with_exception_mapping(:patch, path, {}, start) do
+        ts.collections[collection].documents.update(fields, filter_by: filter_by)
+      end
+
+      instrument(:patch, path, current_monotonic_ms - start, {})
+      symbolize_keys_deep(result)
+    end
+
     # Create a single document in a collection.
     #
     # @param collection [String] physical collection name
