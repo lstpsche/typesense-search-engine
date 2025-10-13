@@ -300,6 +300,19 @@ module SearchEngine
         end
       end
 
+      # Control per-call cache usage (URL-level knob).
+      # Accepts booleans and common string/integer forms; nil unsets the option.
+      # @param value [Boolean, String, Integer, nil]
+      # @return [SearchEngine::Relation]
+      def cache(value)
+        v = value.nil? ? nil : coerce_boolean_strict(value, :use_cache)
+        spawn do |s|
+          opts = (s[:options] || {}).dup
+          opts[:use_cache] = v
+          s[:options] = opts
+        end
+      end
+
       # Join association names to include in server-side join compilation.
       # @param assocs [Array<#to_sym,#to_s>]
       # @return [SearchEngine::Relation]

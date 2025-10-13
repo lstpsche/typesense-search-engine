@@ -20,7 +20,7 @@ module SearchEngine
           where rewhere order preset ranking prefix
           pin hide curate clear_curation
           facet_by facet_query group_by unscope
-          limit offset page per_page per options
+          limit offset page per_page per options cache
           joins use_synonyms use_stopwords
           select include_fields exclude reselect
           limit_hits validate_hits!
