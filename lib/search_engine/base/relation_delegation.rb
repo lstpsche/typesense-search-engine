@@ -24,7 +24,7 @@ module SearchEngine
           joins use_synonyms use_stopwords
           select include_fields exclude reselect
           limit_hits validate_hits!
-          first last take pluck exists? count
+          first last take pluck exists? count find_by
           delete_all
           raw
         ].each { |method| delegate method, to: :all }

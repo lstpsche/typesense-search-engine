@@ -51,6 +51,20 @@ module SearchEngine
         SearchEngine::Hydration::Materializers.execute(self).raw
       end
 
+      # Find the first matching record using where-like inputs.
+      # Accepts the same arguments as `.where` (Hash, String, Array, Symbol),
+      # applies them if provided, then limits to a single result and returns it.
+      #
+      # @param args [Array<Object>] where-compatible arguments
+      # @return [Object, nil]
+      # @example
+      #   SearchEngine::Product.find_by(article_code: 12312, store_id: 1031)
+      #   SearchEngine::Product.where(active: true).find_by('price:>100')
+      def find_by(*args)
+        relation = args.nil? || args.empty? ? self : where(*args)
+        relation.per(1).page(1).first
+      end
+
       # Convenience for plucking :id values.
       # @return [Array<Object>]
       def ids
