@@ -174,6 +174,46 @@ module SearchEngine
       end
       module_function :fetch_found_only
 
+      # Retrieve and hydrate all matching records by paging via multi-search.
+      # Uses maximum per_page=250 to minimize requests and chunks batches under multi_search_limit.
+      # @param relation [SearchEngine::Relation]
+      # @return [Array<Object>]
+      def all!(relation)
+        total = count(relation)
+        return [] if total.to_i <= 0
+
+        per = 250
+        pages = (total.to_f / per).ceil
+
+        # Fast path for a single page
+        return relation.page(1).per(per).to_a if pages <= 1
+
+        limit = begin
+          SearchEngine.config.multi_search_limit.to_i
+        rescue StandardError
+          50
+        end
+        limit = 1 if limit <= 0
+
+        page_numbers = (1..pages).to_a
+        out = []
+
+        page_numbers.each_slice(limit) do |batch|
+          mr = SearchEngine.multi_search_result do |m|
+            batch.each do |p|
+              m.add("p#{p}", relation.page(p).per(per))
+            end
+          end
+
+          batch.each do |p|
+            res = mr["p#{p}"]
+            out.concat(Array(res&.to_a))
+          end
+        end
+
+        out
+      end
+
       def coerce_pluck_field_names(fields)
         Array(fields).flatten.compact.map(&:to_s).map(&:strip).reject(&:empty?)
       end

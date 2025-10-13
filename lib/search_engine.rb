@@ -117,8 +117,9 @@ module SearchEngine
         end
       end
 
-      # Typesense returns a Hash with key 'results' => [ { ... }, ... ]
-      list = Array(raw && raw['results'])
+      # Typesense client returns symbolized keys; be resilient to both forms.
+      # Expect: { results: [ { ... }, ... ] }
+      list = Array(raw && (raw[:results] || raw['results']))
       pairs = build_label_result_pairs(list, labels, builder)
 
       SearchEngine::Multi::ResultSet.new(pairs)
@@ -188,7 +189,7 @@ module SearchEngine
         end
       end
 
-      list = Array(raw && raw['results'])
+      list = Array(raw && (raw[:results] || raw['results']))
       SearchEngine::MultiResult.new(labels: labels, raw_results: list, klasses: builder.klasses)
     end
 

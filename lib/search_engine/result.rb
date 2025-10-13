@@ -68,8 +68,8 @@ module SearchEngine
       require 'ostruct'
 
       @raw   = raw || {}
-      @found = @raw['found']
-      @out_of = @raw['out_of']
+      @found = @raw['found'] || @raw[:found]
+      @out_of = @raw['out_of'] || @raw[:out_of]
       # raw facet_counts preserved in @raw; parsed via #facets helper
       @klass  = klass
       @selection_ctx = selection if selection
@@ -87,7 +87,7 @@ module SearchEngine
         @hits = first_hits.freeze
         instrument_group_parse(groups_built)
       else
-        entries = Array(@raw['hits']).map { |h| symbolize_hit(h) }
+        entries = Array(@raw['hits'] || @raw[:hits]).map { |h| symbolize_hit(h) }
         hydrated = []
         entries.each do |entry|
           next unless entry[:document]

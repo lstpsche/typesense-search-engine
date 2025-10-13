@@ -71,6 +71,14 @@ module SearchEngine
         SearchEngine::Hydration::Materializers.ids(self)
       end
 
+      # Fetch and hydrate all matching records across all pages.
+      # Performs a count first, then retrieves pages in batches via multi-search.
+      # Warning: This can be memory and time intensive.
+      # @return [Array<Object>]
+      def all!
+        SearchEngine::Hydration::Materializers.all!(self)
+      end
+
       # Pluck one or multiple fields.
       # @param fields [Array<#to_sym,#to_s>]
       # @return [Array<Object>, Array<Array<Object>>]
