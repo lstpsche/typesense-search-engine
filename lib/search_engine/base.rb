@@ -4,6 +4,7 @@ require_relative 'base/display_coercions'
 require_relative 'base/hydration'
 require_relative 'base/index_maintenance'
 require_relative 'base/indexing_dsl'
+require_relative 'base/creation'
 require_relative 'base/joins'
 require_relative 'base/model_dsl'
 require_relative 'base/presets'
@@ -28,5 +29,6 @@ module SearchEngine
     include SearchEngine::Base::Presets
     include SearchEngine::Base::IndexMaintenance
     include SearchEngine::Base::Deletion
+    include SearchEngine::Base::Creation
   end
 end

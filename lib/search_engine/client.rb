@@ -485,6 +485,31 @@ module SearchEngine
       instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
     end
 
+    # Create a single document in a collection.
+    #
+    # @param collection [String] physical collection name
+    # @param document [Hash] Typesense document body
+    # @return [Hash] created document as returned by Typesense (symbolized)
+    # @raise [SearchEngine::Errors::InvalidParams, SearchEngine::Errors::*]
+    # @see `https://typesense.org/docs/latest/api/documents.html#create-a-document`
+    def create_document(collection:, document:)
+      unless collection.is_a?(String) && !collection.strip.empty?
+        raise Errors::InvalidParams, 'collection must be a non-empty String'
+      end
+      raise Errors::InvalidParams, 'document must be a Hash' unless document.is_a?(Hash)
+
+      ts = typesense
+      start = current_monotonic_ms
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + collection.to_s + Client::RequestBuilder::DOCUMENTS_SUFFIX
+
+      result = with_exception_mapping(:post, path, {}, start) do
+        ts.collections[collection].documents.create(document)
+      end
+
+      instrument(:post, path, current_monotonic_ms - start, {})
+      symbolize_keys_deep(result)
+    end
+
     # Execute a multi-search across multiple collections.
     #
     # @param searches [Array<Hash>] per-entry request bodies produced by Multi#to_payloads
