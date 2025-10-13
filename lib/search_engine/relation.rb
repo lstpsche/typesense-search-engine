@@ -188,6 +188,24 @@ module SearchEngine
       hl.frozen? ? hl : hl.dup.freeze
     end
 
+    # Handle unknown methods by delegating to the materialized Array.
+    # Allows callers to use enumerable helpers directly on Relation.
+    #
+    # @param method_name [Symbol]
+    # @param args [Array<Object>]
+    # @return [Object]
+    # @raise [NoMethodError] when the delegated Array doesn't support the method
+    def method_missing(method_name, *args, &block)
+      arr = to_a
+      arr.public_send(method_name, *args, &block)
+    rescue NoMethodError => error
+      # Only convert when the error came from the delegation target `arr` and
+      # for the same method; otherwise preserve original exceptions.
+      return super if error.respond_to?(:receiver) && error.receiver.equal?(arr) && error.name == method_name
+
+      raise
+    end
+
     protected
 
     # Spawn a new relation with a deep-duplicated mutable state.

@@ -238,6 +238,16 @@ module SearchEngine
         raw_unknowns = instance_variable_get(:@__unknown_attributes__)
         unknowns = raw_unknowns ? raw_unknowns.dup : {}
 
+        # Ensure :id is present when available (source may be an ivar or unknowns)
+        unless out.key?(:id)
+          raw_id = if instance_variable_defined?(:@id)
+                     instance_variable_get(:@id)
+                   else
+                     unknowns['id'] || unknowns[:id]
+                   end
+          out[:id] = raw_id unless raw_id.nil?
+        end
+
         unless out.key?(:doc_updated_at)
           raw_val = unknowns['doc_updated_at']
           raw_val = unknowns[:doc_updated_at] if raw_val.nil?
@@ -250,6 +260,50 @@ module SearchEngine
 
         out[:unknown_attributes] = unknowns unless unknowns.empty?
         out
+      end
+
+      # Return the Typesense document id if available.
+      #
+      # @return [Object, nil]
+      def id
+        value = instance_variable_defined?(:@id) ? instance_variable_get(:@id) : nil
+        return value unless value.nil?
+
+        raw = instance_variable_get(:@__unknown_attributes__)
+        return nil unless raw
+
+        raw['id'] || raw[:id]
+      rescue StandardError
+        nil
+      end
+
+      # Attribute lookup by key with indifferent access semantics.
+      # Supports symbol or string keys and falls back to unknown attributes.
+      #
+      # @param key [#to_s, #to_sym]
+      # @return [Object, nil]
+      def [](key)
+        attrs = attributes
+        return attrs.with_indifferent_access[key] if attrs.respond_to?(:with_indifferent_access)
+
+        return nil if key.nil?
+
+        # Fast path: exact match
+        value = attrs[key]
+        return value unless value.nil?
+
+        # Symbol/string coercions without depending on ActiveSupport
+        if key.respond_to?(:to_sym)
+          sym = key.to_sym
+          return attrs[sym] if attrs.key?(sym)
+        end
+
+        if key.respond_to?(:to_s)
+          str = key.to_s
+          return attrs[str] if attrs.key?(str)
+        end
+
+        nil
       end
     end
   end
