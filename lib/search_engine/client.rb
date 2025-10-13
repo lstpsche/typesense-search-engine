@@ -453,6 +453,38 @@ module SearchEngine
       symbolize_keys_deep(result)
     end
 
+    # Delete a single document by id from a collection.
+    #
+    # @param collection [String] physical collection name
+    # @param id [String, #to_s] document id
+    # @param timeout_ms [Integer, nil] optional read timeout override in ms
+    # @return [Hash, nil] response from Typesense client (symbolized) or nil when 404
+    # @see `https://typesense.org/docs/latest/api/documents.html#delete-a-document`
+    def delete_document(collection:, id:, timeout_ms: nil)
+      unless collection.is_a?(String) && !collection.strip.empty?
+        raise Errors::InvalidParams, 'collection must be a non-empty String'
+      end
+
+      s = id.to_s
+      raise Errors::InvalidParams, 'id must be a non-empty String' if s.strip.empty?
+
+      ts = timeout_ms&.to_i&.positive? ? build_typesense_client_with_read_timeout(timeout_ms.to_i / 1000.0) : typesense
+      start = current_monotonic_ms
+      path = Client::RequestBuilder::COLLECTIONS_PREFIX + collection.to_s +
+             Client::RequestBuilder::DOCUMENTS_SUFFIX + "/#{s}"
+
+      result = with_exception_mapping(:delete, path, {}, start) do
+        ts.collections[collection].documents[s].delete
+      end
+      symbolize_keys_deep(result)
+    rescue Errors::Api => error
+      return nil if error.status.to_i == 404
+
+      raise
+    ensure
+      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+    end
+
     # Execute a multi-search across multiple collections.
     #
     # @param searches [Array<Hash>] per-entry request bodies produced by Multi#to_payloads
