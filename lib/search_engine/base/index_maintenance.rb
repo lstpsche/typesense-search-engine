@@ -14,6 +14,8 @@ module SearchEngine
         # @param client [SearchEngine::Client, nil]
         # @return [void]
         def indexate(partition: nil, client: nil)
+          logical = respond_to?(:collection) ? collection.to_s : name.to_s
+          puts("indexating collection #{logical}")
           client_obj = client || (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
 
           if partition.nil?
@@ -22,6 +24,15 @@ module SearchEngine
             __se_indexate_partial(partition: partition, client: client_obj)
           end
           nil
+        end
+      end
+
+      class_methods do
+        # Drop the collection and then run full indexation.
+        # @return [void]
+        def reindexate!
+          drop_collection!
+          indexate
         end
       end
 
@@ -92,9 +103,12 @@ module SearchEngine
             return
           end
 
+          # New required lifecycle log wrappers
+          puts("dropping collection #{logical}")
           puts("Drop Collection — processing (logical=#{logical} physical=#{physical})")
           client.delete_collection(physical)
           puts('Drop Collection — done')
+          puts("dropped collection #{logical}")
           nil
         end
       end
