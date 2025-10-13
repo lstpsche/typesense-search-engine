@@ -28,6 +28,14 @@ module SearchEngine
           delete_all update_all
           raw
         ].each { |method| delegate method, to: :all }
+
+        # Find a record by its document id (model-level only).
+        # Equivalent to `find_by(id: id)`.
+        # @param id [#to_s] Document id
+        # @return [Object, nil]
+        def find(id)
+          find_by(id: id)
+        end
       end
     end
   end
