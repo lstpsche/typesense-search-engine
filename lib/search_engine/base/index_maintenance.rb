@@ -15,7 +15,8 @@ module SearchEngine
         # @return [void]
         def indexate(partition: nil, client: nil)
           logical = respond_to?(:collection) ? collection.to_s : name.to_s
-          puts("indexating collection #{logical}")
+          puts
+          puts(%(>>>>>> Indexating Collection "#{logical}"))
           client_obj = client || (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
 
           if partition.nil?
@@ -104,11 +105,12 @@ module SearchEngine
           end
 
           # New required lifecycle log wrappers
-          puts("dropping collection #{logical}")
+          puts
+          puts(%(>>>>>> Dropping Collection "#{logical}"))
           puts("Drop Collection — processing (logical=#{logical} physical=#{physical})")
           client.delete_collection(physical)
           puts('Drop Collection — done')
-          puts("dropped collection #{logical}")
+          puts(%(>>>>>> Dropped Collection "#{logical}"))
           nil
         end
       end
@@ -223,6 +225,8 @@ module SearchEngine
             __se_index_partitions!(into: nil)
             puts('Step 5: Indexation — done')
           end
+          # Trigger cascade for referencers after a full indexation flow (or apply-index inside schema apply)
+          __se_cascade_after_indexation!(context: :full)
         end
       end
 
@@ -276,11 +280,66 @@ module SearchEngine
             )
           end
           puts('Step 3: Partial Indexation — done')
+          # After partial indexation, trigger full fallback cascade for referencers
+          __se_cascade_after_indexation!(context: :full)
         end
       end
 
       class_methods do
         # ----------------------------- Helpers ---------------------------
+        def __se_cascade_after_indexation!(context: :full)
+          puts
+          puts(%(>>>>>> Cascade Referencers))
+          results = SearchEngine::Cascade.cascade_reindex!(source: self, ids: nil, context: context)
+          outcomes = Array(results[:outcomes])
+          if outcomes.empty?
+            puts('  none')
+          else
+            outcomes.each do |o|
+              coll = o[:collection] || o['collection']
+              mode = (o[:mode] || o['mode']).to_s
+              case mode
+              when 'partial'
+                puts(%(  Referencer "#{coll}" → partial reindex))
+              when 'full'
+                puts(%(  Referencer "#{coll}" → full reindex))
+              when 'skipped_unregistered'
+                puts(%(  Referencer "#{coll}" → skipped (unregistered)))
+              when 'skipped_cycle'
+                puts(%(  Referencer "#{coll}" → skipped (cycle)))
+              else
+                puts(%(  Referencer "#{coll}" → #{mode}))
+              end
+            end
+          end
+          puts('>>>>>> Cascade Done')
+        rescue StandardError => error
+          # Provide more verbose error output for debugging
+          base = "Cascade — error=#{error.class}: #{error.message.to_s[0, 200]}"
+          if error.respond_to?(:status) || error.respond_to?(:body)
+            status = begin
+              error.respond_to?(:status) ? error.status : nil
+            rescue StandardError
+              nil
+            end
+            body_preview = begin
+              b = error.respond_to?(:body) ? error.body : nil
+              if b.is_a?(String)
+                b[0, 500]
+              elsif b.is_a?(Hash)
+                b.inspect[0, 500]
+              else
+                b.to_s[0, 500]
+              end
+            rescue StandardError
+              nil
+            end
+            warn([base, ("status=#{status}" if status), ("body=#{body_preview}" if body_preview)].compact.join(' '))
+          else
+            warn(base)
+          end
+        end
+
         def __se_schema_missing?(diff)
           opts = diff[:collection_options]
           opts.is_a?(Hash) && opts[:live] == :missing

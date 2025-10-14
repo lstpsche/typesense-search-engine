@@ -19,9 +19,10 @@ module SearchEngine
       # @param into [String, nil] override physical collection name
       # @param partition [Object, nil] partition token for resolvers
       # @param timeout_ms [Integer, nil] optional read timeout override in ms
+      # @param cascade [Boolean, nil] when true, trigger cascade reindex for referencing collections
       # @return [Integer] number of updated documents (0 or 1)
       # @raise [SearchEngine::Errors::InvalidParams] when the record id is unavailable
-      def update(attributes = nil, into: nil, partition: nil, timeout_ms: nil, **kwattrs)
+      def update(attributes = nil, into: nil, partition: nil, timeout_ms: nil, cascade: nil, **kwattrs)
         attrs = __se_coalesce_update_attributes(attributes, kwattrs)
         raise SearchEngine::Errors::InvalidParams, 'attributes must be a non-empty Hash' if attrs.nil? || attrs.empty?
 
@@ -43,7 +44,18 @@ module SearchEngine
           fields: attrs,
           timeout_ms: timeout_ms
         )
-        resp ? 1 : 0
+        updated = resp ? 1 : 0
+
+        # Best-effort cascade when requested
+        if updated.positive? && cascade
+          begin
+            SearchEngine::Cascade.cascade_reindex!(source: self.class, ids: [id_value], context: :update)
+          rescue StandardError
+            # swallow cascade errors to keep update semantics stable
+          end
+        end
+
+        updated
       end
 
       private

@@ -1,0 +1,312 @@
+# frozen_string_literal: true
+
+module SearchEngine
+  # Cascade reindexing for collections that reference other collections via
+  # Typesense field-level references.
+  #
+  # Public API:
+  # - {.cascade_reindex!(source:, ids:, context: :update, client: nil)} => Hash summary
+  #   - source: Class (SearchEngine::Base subclass) or String collection name
+  #   - ids: Array<String, Integer>, the target key values to match in referencers
+  #   - context: :update or :full (controls partial vs full behavior)
+  module Cascade
+    class << self
+      # Trigger cascade reindex on collections that reference +source+.
+      #
+      # @param source [Class, String]
+      # @param ids [Array<#to_s>, nil]
+      # @param context [Symbol] :update or :full
+      # @param client [SearchEngine::Client, nil]
+      # @return [Hash]
+      def cascade_reindex!(source:, ids:, context: :update, client: nil)
+        raise ArgumentError, 'context must be :update or :full' unless %i[update full].include?(context.to_sym)
+
+        src_collection = normalize_collection_name(source)
+        ts_client = client || (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+
+        graph = build_reverse_graph(client: ts_client)
+        referencers = Array(graph[src_collection])
+
+        # Detect immediate cycles (A <-> B) and skip those pairs
+        cycle_pairs = detect_immediate_cycles(graph)
+
+        outcomes = []
+        partial_count = 0
+        full_count = 0
+        skipped_unregistered = 0
+        skipped_cycles = []
+
+        seen_full = {}
+        referencers.each do |edge|
+          referrer_coll = edge[:referrer]
+          local_key = edge[:local_key]
+
+          # Skip cycle pairs deterministically (avoid ping-pong)
+          if cycle_pairs.include?([src_collection, referrer_coll])
+            skipped_cycles << { pair: [src_collection, referrer_coll] }
+            outcomes << { collection: referrer_coll, mode: :skipped_cycle }
+            next
+          end
+
+          ref_klass = safe_collection_class(referrer_coll)
+          unless ref_klass
+            skipped_unregistered += 1
+            outcomes << { collection: referrer_coll, mode: :skipped_unregistered }
+            next
+          end
+
+          mode = :full
+          if context.to_sym == :update && can_partial_reindex?(ref_klass)
+            begin
+              SearchEngine::Indexer.rebuild_partition!(ref_klass, partition: { local_key.to_sym => Array(ids) },
+into: nil
+              )
+              mode = :partial
+              partial_count += 1
+            rescue StandardError => error
+              # Fallback to full when partial path fails unexpectedly
+              if seen_full[referrer_coll]
+                mode = :skipped_duplicate
+              else
+                executed = __se_full_reindex_for_referrer(ref_klass)
+                seen_full[referrer_coll] = true if executed
+                if executed
+                  mode = :full
+                  full_count += 1
+                else
+                  mode = :skipped_no_partitions
+                end
+              end
+              # Record diagnostic on the outcome for visibility upstream
+              outcomes << { collection: referrer_coll, mode: :partial_failed, error_class: error.class.name,
+                            message: error.message.to_s[0, 200] }
+            end
+          elsif seen_full[referrer_coll]
+            mode = :skipped_duplicate
+          else
+            executed = __se_full_reindex_for_referrer(ref_klass)
+            seen_full[referrer_coll] = true if executed
+            if executed
+              mode = :full
+              full_count += 1
+            else
+              mode = :skipped_no_partitions
+            end
+          end
+
+          outcomes << { collection: referrer_coll, mode: mode }
+        end
+
+        payload = {
+          source_collection: src_collection,
+          ids_count: Array(ids).size,
+          context: context.to_sym,
+          targets_total: referencers.size,
+          partial_count: partial_count,
+          full_count: full_count,
+          skipped_unregistered: skipped_unregistered,
+          skipped_cycles: skipped_cycles
+        }
+        SearchEngine::Instrumentation.instrument('search_engine.cascade.run', payload.merge(outcomes: outcomes)) {}
+
+        payload.merge(outcomes: outcomes)
+      end
+
+      # Build a reverse graph from Typesense live schemas when possible, falling
+      # back to compiled local schemas for registered models.
+      #
+      # @param client [SearchEngine::Client]
+      # @return [Hash{String=>Array<Hash>}] mapping target_collection => [{ referrer, local_key, foreign_key }]
+      def build_reverse_graph(client:)
+        from_ts = build_from_typesense(client)
+        return from_ts unless from_ts.empty?
+
+        build_from_registry
+      end
+
+      private
+
+      # Perform a full reindex for a referencer collection, honoring partitioning
+      # directives when present. Falls back to a single non-partitioned rebuild
+      # when no partitions are configured.
+      # @param ref_klass [Class]
+      # @return [void]
+      def __se_full_reindex_for_referrer(ref_klass)
+        begin
+          compiled = SearchEngine::Partitioner.for(ref_klass)
+        rescue StandardError
+          compiled = nil
+        end
+
+        executed = false
+        if compiled
+          parts = begin
+            Array(compiled.partitions)
+          rescue StandardError
+            []
+          end
+
+          parts = parts.reject { |p| p.nil? || p.to_s.strip.empty? }
+
+          logical = ref_klass.respond_to?(:collection) ? ref_klass.collection.to_s : ref_klass.name.to_s
+          if parts.empty?
+            puts(%(  Referencer "#{logical}" — partitions=0 → skip))
+            return false
+          end
+
+          puts(%(  Referencer "#{logical}" — partitions=#{parts.size} parallel=#{compiled.max_parallel}))
+          parts.each do |p|
+            SearchEngine::Indexer.rebuild_partition!(ref_klass, partition: p, into: nil)
+            executed = true
+          end
+
+        else
+          logical = ref_klass.respond_to?(:collection) ? ref_klass.collection.to_s : ref_klass.name.to_s
+          puts(%(  Referencer "#{logical}" — single))
+          SearchEngine::Indexer.rebuild_partition!(ref_klass, partition: nil, into: nil)
+          executed = true
+        end
+        executed
+      end
+
+      def normalize_collection_name(source)
+        return source.to_s unless source.is_a?(Class)
+
+        if source.respond_to?(:collection)
+          source.collection.to_s
+        else
+          source.name.to_s
+        end
+      end
+
+      def build_from_typesense(client)
+        graph = Hash.new { |h, k| h[k] = [] }
+        collections = Array(client.list_collections)
+        names = collections.map { |c| (c[:name] || c['name']).to_s }.reject(&:empty?)
+        names.each do |name|
+          begin
+            schema = client.retrieve_collection_schema(name)
+          rescue StandardError
+            schema = nil
+          end
+          next unless schema
+
+          fields = Array(schema[:fields] || schema['fields'])
+          fields.each do |f|
+            ref = f[:reference] || f['reference']
+            next if ref.nil? || ref.to_s.strip.empty?
+
+            coll, fk = parse_reference(ref)
+            next if coll.nil? || coll.empty?
+
+            referrer_name = (schema[:name] || schema['name']).to_s
+            referrer_logical = normalize_physical_to_logical(referrer_name)
+            graph[coll] << { referrer: referrer_logical, local_key: (f[:name] || f['name']).to_s,
+foreign_key: fk }
+          end
+        end
+        graph
+      rescue StandardError
+        {}
+      end
+
+      def build_from_registry
+        graph = Hash.new { |h, k| h[k] = [] }
+        mapping = SearchEngine::Registry.mapping
+        mapping.each do |coll_name, klass|
+          compiled = SearchEngine::Schema.compile(klass)
+          fields = Array(compiled[:fields])
+          fields.each do |f|
+            ref = f[:reference] || f['reference']
+            next if ref.nil? || ref.to_s.strip.empty?
+
+            target_coll, fk = parse_reference(ref)
+            next if target_coll.nil? || target_coll.empty?
+
+            graph[target_coll] << { referrer: coll_name.to_s, local_key: (f[:name] || f['name']).to_s,
+foreign_key: fk }
+          end
+        rescue StandardError
+          # ignore individual compile errors for robustness
+        end
+        graph
+      end
+
+      def parse_reference(ref_value)
+        s = ref_value.to_s
+        parts = s.split('.', 2)
+        coll = parts[0].to_s
+        fk = parts[1]&.to_s
+        [coll, fk]
+      end
+
+      # Convert a physical collection name like
+      #   logical_YYYYMMDD_HHMMSS_###
+      # back to its logical base name. If it doesn't match the pattern, return as-is.
+      # @param name [String]
+      # @return [String]
+      def normalize_physical_to_logical(name)
+        s = name.to_s
+        m = s.match(/\A(.+)_\d{8}_\d{6}_\d{3}\z/)
+        return s unless m
+
+        base = m[1].to_s
+        base.empty? ? s : base
+      end
+
+      def detect_immediate_cycles(graph)
+        pairs = []
+        # Avoid mutating the Hash while iterating: do not access graph[other] unless key exists
+        graph.each do |target, edges|
+          edges.each do |e|
+            other = e[:referrer]
+            next unless graph.key?(other)
+
+            back_edges = graph[other]
+            back = Array(back_edges).any? { |x| x[:referrer] == target }
+            pairs << [target, other] if back
+          end
+        end
+        pairs.uniq
+      end
+
+      def safe_collection_class(name)
+        # Try registry first
+        SearchEngine.collection_for(name)
+      rescue StandardError
+        # Best-effort: try to constantize a namespaced model from the logical collection name
+        begin
+          if defined?(ActiveSupport::Inflector)
+            klass_name = ActiveSupport::Inflector.classify(name.to_s)
+            const_name = "SearchEngine::#{klass_name}"
+            const = const_name.constantize
+          else
+            # Fallback: simple camelize/classify approximation
+            base = name.to_s.split('_').map { |s| s[0].upcase + s[1..] }.join
+            const = Object.const_get("SearchEngine::#{base}")
+          end
+          return const if const.is_a?(Class) && const.ancestors.include?(SearchEngine::Base)
+        rescue StandardError
+          # ignore
+        end
+        nil
+      end
+
+      def can_partial_reindex?(klass)
+        # Disallow partial when a custom Partitioner is used
+        return false if SearchEngine::Partitioner.for(klass)
+
+        # Require ActiveRecord source adapter for partition Hash filtering support
+        dsl = begin
+          klass.instance_variable_defined?(:@__mapper_dsl__) ? klass.instance_variable_get(:@__mapper_dsl__) : nil
+        rescue StandardError
+          nil
+        end
+        return false unless dsl.is_a?(Hash)
+
+        src = dsl[:source]
+        src && src[:type].to_s == 'active_record'
+      end
+    end
+  end
+end

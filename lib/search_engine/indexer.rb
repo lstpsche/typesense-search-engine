@@ -707,6 +707,11 @@ module SearchEngine
         end
         return unless present
 
+        # Safety: do not execute before_partition hooks for nil partitions.
+        # This prevents developers from accidentally issuing dangerous deletes
+        # with empty filter values (e.g., "store_id:=").
+        return if partition.nil?
+
         run_hook_with_timeout(
           before_hook,
           partition,
