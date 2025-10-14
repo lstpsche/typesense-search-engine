@@ -37,6 +37,7 @@ require 'search_engine/hydration/materializers'
 require 'search_engine/compiled_params'
 require 'search_engine/deletion'
 require 'search_engine/update'
+require 'search_engine/collections_graph'
 
 # Top-level namespace for the SearchEngine gem.
 # Provides Typesense integration points for Rails applications.
@@ -252,6 +253,25 @@ module SearchEngine
       end
     rescue Errors::Api => error
       raise augment_multi_api_error(error, labels)
+    end
+
+    # Build and render a graph of Typesense collections and their interconnections.
+    #
+    # Discovers collections and field-level references from Typesense (with a
+    # registry fallback) and returns a Hash with nodes, edges, cycles, isolated
+    # nodes, and ready-to-print ASCII renderings. The diagram prefers Unicode
+    # box-drawing characters and falls back to ASCII when requested.
+    #
+    # @param style [Symbol] :unicode (default) or :ascii
+    # @param width [Integer, nil] maximum diagram width; auto-detected when nil
+    # @param client [SearchEngine::Client, nil] optional client instance
+    # @return [Hash] { nodes:, edges:, cycles:, isolated:, ascii:, ascii_compact:, stats: { ... } }
+    # @example
+    #   g = SearchEngine.collections_graph
+    #   puts g[:ascii]
+    def collections_graph(style: :unicode, width: nil, client: nil)
+      ts_client = client || (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+      SearchEngine::CollectionsGraph.build(client: ts_client, style: style, width: width)
     end
 
     private
