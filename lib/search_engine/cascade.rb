@@ -271,25 +271,7 @@ foreign_key: fk }
       end
 
       def safe_collection_class(name)
-        # Try registry first
-        SearchEngine.collection_for(name)
-      rescue StandardError
-        # Best-effort: try to constantize a namespaced model from the logical collection name
-        begin
-          if defined?(ActiveSupport::Inflector)
-            klass_name = ActiveSupport::Inflector.classify(name.to_s)
-            const_name = "SearchEngine::#{klass_name}"
-            const = const_name.constantize
-          else
-            # Fallback: simple camelize/classify approximation
-            base = name.to_s.split('_').map { |s| s[0].upcase + s[1..] }.join
-            const = Object.const_get("SearchEngine::#{base}")
-          end
-          return const if const.is_a?(Class) && const.ancestors.include?(SearchEngine::Base)
-        rescue StandardError
-          # ignore
-        end
-        nil
+        SearchEngine::CollectionResolver.model_for_logical(name)
       end
 
       def can_partial_reindex?(klass)

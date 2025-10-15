@@ -269,6 +269,8 @@ module SearchEngine
     # @return [Float]
     def self.monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+    rescue StandardError
+      (Time.now.to_f * 1000.0)
     end
 
     # Internal: normalize and prune a payload hash.

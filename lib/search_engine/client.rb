@@ -105,7 +105,7 @@ module SearchEngine
 
       raise
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # Retrieve the live schema for a physical collection name.
@@ -131,7 +131,7 @@ module SearchEngine
 
       raise
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # Upsert an alias to point to the provided physical collection (atomic server-side swap).
@@ -155,7 +155,7 @@ module SearchEngine
 
       symbolize_keys_deep(result)
     ensure
-      instrument(:put, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:put, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # Create a new physical collection with the given schema.
@@ -175,7 +175,7 @@ module SearchEngine
 
       symbolize_keys_deep(result)
     ensure
-      instrument(:post, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:post, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # Delete a physical collection by name.
@@ -200,7 +200,7 @@ module SearchEngine
 
       raise
     ensure
-      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:delete, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # List all collections.
@@ -218,7 +218,7 @@ module SearchEngine
 
       symbolize_keys_deep(result)
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # Perform a server health check.
@@ -236,7 +236,40 @@ module SearchEngine
 
       symbolize_keys_deep(result)
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
+    end
+
+    # --- Admin: API Keys ------------------------------------------------------
+
+    # List API keys configured on the Typesense server.
+    #
+    # @return [Array<Hash>] list of keys with symbolized fields when possible
+    # @see `https://typesense.org/docs/latest/api/api-keys.html#list-keys`
+    def list_api_keys
+      ts = typesense
+      start = current_monotonic_ms
+      path = '/keys'
+
+      result = with_exception_mapping(:get, path, {}, start) do
+        # Minimal supported client: typesense-ruby >= 4.1.0
+        # API shape: `ts.keys.retrieve` returns { "keys" : [ { ... }, ... ] } or Array depending on version
+        res = begin
+          ts.keys.retrieve
+        rescue NoMethodError
+          # Some client versions expose .keys.list
+          ts.keys.list
+        end
+        # Normalize to Array of Hashes
+        if res.is_a?(Hash)
+          Array(res[:keys] || res['keys'])
+        else
+          Array(res)
+        end
+      end
+
+      symbolize_keys_deep(result)
+    ensure
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # --- Admin: Synonyms ----------------------------------------------------
@@ -261,7 +294,7 @@ module SearchEngine
       end
       symbolize_keys_deep(result)
     ensure
-      instrument(:put, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:put, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # @return [Array<Hash>]
@@ -277,7 +310,7 @@ module SearchEngine
       end
       symbolize_keys_deep(result)
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # @return [Hash, nil]
@@ -298,7 +331,7 @@ module SearchEngine
 
       raise
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # @return [Hash]
@@ -315,7 +348,7 @@ module SearchEngine
       end
       symbolize_keys_deep(result)
     ensure
-      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:delete, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # --- Admin: Stopwords ---------------------------------------------------
@@ -339,7 +372,7 @@ module SearchEngine
       end
       symbolize_keys_deep(result)
     ensure
-      instrument(:put, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:put, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # @return [Array<Hash>]
@@ -355,7 +388,7 @@ module SearchEngine
       end
       symbolize_keys_deep(result)
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # @return [Hash, nil]
@@ -376,7 +409,7 @@ module SearchEngine
 
       raise
     ensure
-      instrument(:get, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:get, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # @return [Hash]
@@ -393,7 +426,7 @@ module SearchEngine
       end
       symbolize_keys_deep(result)
     ensure
-      instrument(:delete, path, current_monotonic_ms - start, {}) if defined?(start)
+      instrument(:delete, path, (start ? (current_monotonic_ms - start) : 0.0), {})
     end
 
     # -----------------------------------------------------------------------
@@ -714,8 +747,8 @@ module SearchEngine
         api_key: config.api_key,
         connection_timeout_seconds: (config.open_timeout_ms.to_i / 1000.0),
         read_timeout_seconds: read_timeout_seconds,
-        num_retries: config.retries[:attempts].to_i,
-        retry_interval_seconds: config.retries[:backoff].to_f,
+        num_retries: safe_retry_attempts,
+        retry_interval_seconds: safe_retry_backoff,
         logger: safe_logger
       )
     end
@@ -728,8 +761,8 @@ module SearchEngine
         api_key: config.api_key,
         connection_timeout_seconds: (config.open_timeout_ms.to_i / 1000.0),
         read_timeout_seconds: (config.timeout_ms.to_i / 1000.0),
-        num_retries: config.retries[:attempts].to_i,
-        retry_interval_seconds: config.retries[:backoff].to_f,
+        num_retries: safe_retry_attempts,
+        retry_interval_seconds: safe_retry_backoff,
         logger: safe_logger
       )
     end
@@ -748,6 +781,32 @@ module SearchEngine
       config.logger
     rescue StandardError
       nil
+    end
+
+    def safe_retry_attempts
+      r = begin
+        config.retries
+      rescue StandardError
+        nil
+      end
+      return 0 unless r.is_a?(Hash)
+
+      v = r[:attempts]
+      v = v.to_i if v.respond_to?(:to_i)
+      v.is_a?(Integer) && v >= 0 ? v : 0
+    end
+
+    def safe_retry_backoff
+      r = begin
+        config.retries
+      rescue StandardError
+        nil
+      end
+      return 0.0 unless r.is_a?(Hash)
+
+      v = r[:backoff]
+      v = v.to_f if v.respond_to?(:to_f)
+      v.is_a?(Float) && v >= 0.0 ? v : 0.0
     end
 
     def derive_cache_opts(url_opts)
