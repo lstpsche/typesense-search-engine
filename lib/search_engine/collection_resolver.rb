@@ -31,7 +31,7 @@ module SearchEngine
                         const.collection.to_s
                       else
                         demod = const.name.split('::').last
-                        demod.respond_to?(:underscore) ? demod.underscore.pluralize : (demod.downcase + 's')
+                        demod.respond_to?(:underscore) ? demod.underscore.pluralize : "#{demod.downcase}s"
                       end
             map[logical] ||= const
           end

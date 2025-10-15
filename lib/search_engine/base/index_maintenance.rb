@@ -8,6 +8,7 @@ module SearchEngine
     module IndexMaintenance
       extend ActiveSupport::Concern
 
+      # rubocop:disable Metrics/BlockLength
       class_methods do
         # Run indexing workflow for this collection.
         # @param partition [Object, Array<Object>, nil]
@@ -287,6 +288,7 @@ module SearchEngine
 
       class_methods do
         # ----------------------------- Helpers ---------------------------
+        # rubocop:disable Metrics/PerceivedComplexity
         def __se_cascade_after_indexation!(context: :full)
           puts
           puts(%(>>>>>> Cascade Referencers))
@@ -339,6 +341,7 @@ module SearchEngine
             warn(base)
           end
         end
+        # rubocop:enable Metrics/PerceivedComplexity
 
         def __se_schema_missing?(diff)
           opts = diff[:collection_options]
@@ -353,6 +356,7 @@ module SearchEngine
           added.any? || removed.any? || !changed.empty? || !coll_opts.empty?
         end
       end
+      # rubocop:enable Metrics/BlockLength
 
       class_methods do
         def __se_extract_sample_error(summary)

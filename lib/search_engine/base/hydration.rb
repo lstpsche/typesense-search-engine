@@ -207,6 +207,7 @@ module SearchEngine
       #   "doc_updated_at" removed to avoid duplication
       #
       # @return [Hash{Symbol=>Object}]
+      # rubocop:disable Metrics/PerceivedComplexity
       def attributes
         declared = begin
           self.class.respond_to?(:attributes) ? self.class.attributes : {}
@@ -261,6 +262,7 @@ module SearchEngine
         out[:unknown_attributes] = unknowns unless unknowns.empty?
         out
       end
+      # rubocop:enable Metrics/PerceivedComplexity
 
       # Return the Typesense document id if available.
       #

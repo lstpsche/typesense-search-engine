@@ -98,6 +98,7 @@ module SearchEngine
 
       # Build grouped view of collections from physical -> logical and resolve models.
       # Returns a Hash with :rows for printing and :choices for selection.
+      # rubocop:disable Metrics/AbcSize
       def build_collections_index(client)
         list = Array(client.list_collections)
         phys_items = list.map do |h|
@@ -121,6 +122,7 @@ module SearchEngine
         end
 
         # Resolve class per logical (best-effort): try logical first, then per-physical alias-aware
+        # rubocop:disable Style/CombinableLoops
         groups.each do |logical, info|
           klass = SearchEngine::CollectionResolver.model_for_logical(logical)
           if klass.nil?
@@ -131,6 +133,7 @@ module SearchEngine
           end
           info[:klass] = klass
         end
+        # rubocop:enable Style/CombinableLoops
 
         rows = []
         choices = []
@@ -156,6 +159,7 @@ module SearchEngine
 
         { rows: rows, choices: choices }
       end
+      # rubocop:enable Metrics/AbcSize
 
       def show_collection_actions(prompt, client, logical_name)
         # New conditional actions per spec.
@@ -441,7 +445,7 @@ module SearchEngine
         warn("Typesense is not configured (missing api_key). Cannot #{action}.")
         warn('Set TYPESENSE_API_KEY (and host/port/protocol if needed), or configure via SearchEngine.configure.')
         begin
-          prompt.keypress('Press any key to return') if prompt
+          prompt&.keypress('Press any key to return')
         rescue StandardError
           # ignore
         end

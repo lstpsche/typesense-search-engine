@@ -206,6 +206,16 @@ module SearchEngine
       raise
     end
 
+    # Ensure reflective APIs correctly report delegated methods on the
+    # materialized Array target. This keeps semantics consistent with
+    # method_missing above for interactive consoles and chaining.
+    # @param method_name [Symbol]
+    # @param include_private [Boolean]
+    # @return [Boolean]
+    def respond_to_missing?(method_name, include_private = false)
+      to_a.respond_to?(method_name, include_private) || super
+    end
+
     protected
 
     # Spawn a new relation with a deep-duplicated mutable state.
