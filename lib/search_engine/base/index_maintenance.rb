@@ -172,8 +172,7 @@ module SearchEngine
           if missing
             puts('Step 2: Create+Apply Schema — processing')
             SearchEngine::Schema.apply!(self, client: client) do |new_physical|
-              __se_index_partitions!(into: new_physical)
-              indexed_inside_apply = true
+              indexed_inside_apply = __se_index_partitions!(into: new_physical)
             end
             applied = true
             puts('Step 2: Create+Apply Schema — done')
@@ -204,8 +203,7 @@ module SearchEngine
           if drift
             puts('Step 4: Apply New Schema — processing')
             SearchEngine::Schema.apply!(self, client: client) do |new_physical|
-              __se_index_partitions!(into: new_physical)
-              indexed_inside_apply = true
+              indexed_inside_apply = __se_index_partitions!(into: new_physical)
             end
             applied = true
             puts('Step 4: Apply New Schema — done')
@@ -219,15 +217,22 @@ module SearchEngine
       class_methods do
         # Step 5: Indexation (when nothing was applied)
         def __se_full_indexation(applied, indexed_inside_apply)
+          cascade_ok = false
           if applied && indexed_inside_apply
             puts('Step 5: Indexation — skip (performed during schema apply)')
+            begin
+              cascade_ok = indexed_inside_apply.to_sym == :ok
+            rescue StandardError
+              cascade_ok = false
+            end
           else
             puts('Step 5: Indexation — processing')
-            __se_index_partitions!(into: nil)
+            idx_status = __se_index_partitions!(into: nil)
             puts('Step 5: Indexation — done')
+            cascade_ok = (idx_status == :ok)
           end
-          # Trigger cascade for referencers after a full indexation flow (or apply-index inside schema apply)
-          __se_cascade_after_indexation!(context: :full)
+          # Trigger cascade for referencers only when main indexation succeeded
+          __se_cascade_after_indexation!(context: :full) if cascade_ok
         end
       end
 
@@ -270,6 +275,7 @@ module SearchEngine
 
           # Step 3: Partial indexing
           puts('Step 3: Partial Indexation — processing')
+          all_ok = true
           partitions.each do |p|
             summary = SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: nil)
             sample_err = __se_extract_sample_error(summary)
@@ -279,10 +285,15 @@ module SearchEngine
               "duration_ms=#{summary.duration_ms_total}" \
               "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
+            begin
+              all_ok &&= (summary.status == :ok)
+            rescue StandardError
+              all_ok &&= false
+            end
           end
           puts('Step 3: Partial Indexation — done')
-          # After partial indexation, trigger full fallback cascade for referencers
-          __se_cascade_after_indexation!(context: :full)
+          # After partial indexation, trigger full fallback cascade for referencers only if all partitions succeeded
+          __se_cascade_after_indexation!(context: :full) if all_ok
         end
       end
 
@@ -407,6 +418,7 @@ module SearchEngine
               "duration_ms=#{summary.duration_ms_total}" \
               "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
+            summary.status
           end
         end
       end
@@ -414,6 +426,7 @@ module SearchEngine
       class_methods do
         # Sequential processing of partition list
         def __se_index_partitions_seq!(parts, into)
+          agg = :ok
           parts.each do |part|
             summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
             sample_err = __se_extract_sample_error(summary)
@@ -425,7 +438,18 @@ module SearchEngine
               "duration_ms=#{summary.duration_ms_total}" \
               "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
             )
+            begin
+              st = summary.status
+              if st == :failed
+                agg = :failed
+              elsif st == :partial && agg == :ok
+                agg = :partial
+              end
+            rescue StandardError
+              agg = :failed
+            end
           end
+          agg
         end
       end
 
@@ -436,6 +460,7 @@ module SearchEngine
           pool = Concurrent::FixedThreadPool.new(max_p)
           ctx = SearchEngine::Instrumentation.context
           mtx = Mutex.new
+          agg = :ok
           begin
             parts.each do |part|
               pool.post do
@@ -451,11 +476,22 @@ module SearchEngine
                       "duration_ms=#{summary.duration_ms_total}" \
                       "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
                     )
+                    begin
+                      st = summary.status
+                      if st == :failed
+                        agg = :failed
+                      elsif st == :partial && agg == :ok
+                        agg = :partial
+                      end
+                    rescue StandardError
+                      agg = :failed
+                    end
                   end
                 end
               rescue StandardError => error
                 mtx.synchronize do
                   warn("  partition=#{part.inspect} → error=#{error.class}: #{error.message.to_s[0, 200]}")
+                  agg = :failed
                 end
               end
             end
@@ -465,6 +501,7 @@ module SearchEngine
             pool.wait_for_termination(3600) || pool.kill
             pool.wait_for_termination(60)
           end
+          agg
         end
       end
 

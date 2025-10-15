@@ -27,7 +27,7 @@ module SearchEngine
       datetime: 'string'
     }.freeze
 
-    FIELD_COMPARE_KEYS = %i[type reference locale sort optional infix].freeze
+    FIELD_COMPARE_KEYS = %i[type reference async_reference locale sort optional infix].freeze
 
     class << self
       # Build a Typesense-compatible schema hash from a model class DSL.
@@ -51,6 +51,7 @@ module SearchEngine
         attributes_map = klass.respond_to?(:attributes) ? klass.attributes : {}
         attribute_options = klass.respond_to?(:attribute_options) ? (klass.attribute_options || {}) : {}
         references_by_local_key = build_references_by_local_key(klass)
+        async_reference_by_local_key = build_async_reference_by_local_key(klass)
         fields_array = []
         needs_nested_fields = false
         attributes_map.each do |attribute_name, type_descriptor|
@@ -72,7 +73,8 @@ module SearchEngine
               sort: opts[:sort],
               optional: opts[:optional],
               infix: opts[:infix],
-              reference: references_by_local_key[attribute_name.to_sym]
+              reference: references_by_local_key[attribute_name.to_sym],
+              async_reference: async_reference_by_local_key[attribute_name.to_sym]
             }.compact)
           }
 
@@ -398,7 +400,7 @@ module SearchEngine
           entry = { name: fname, type: normalize_type(ftype) }
           entry[:reference] = fref.to_s unless fref.nil? || fref.to_s.strip.empty?
           # Preserve attribute-level flags from either compiled or live schemas.
-          %i[locale sort optional infix].each do |k|
+          %i[locale sort optional infix async_reference].each do |k|
             val = field[k] || field[k.to_s]
             entry[k] = val unless val.nil?
           end
@@ -583,6 +585,10 @@ module SearchEngine
         return refs unless klass.respond_to?(:joins_config)
 
         (klass.joins_config || {}).each_value do |cfg|
+          # Only belongs_to contributes references to schema (treat missing as belongs_to for back-compat)
+          kind = (cfg[:kind] || :belongs_to).to_sym
+          next if kind == :has
+
           lk = cfg[:local_key]
           coll = cfg[:collection]
           fk = cfg[:foreign_key]
@@ -596,6 +602,26 @@ module SearchEngine
           refs[key] ||= "#{coll_name}.#{fk_name}"
         end
         refs
+      end
+
+      # Build a mapping of local attribute names to async_reference flag based on belongs_to declarations.
+      # @param klass [Class]
+      # @return [Hash{Symbol=>Boolean}]
+      def build_async_reference_by_local_key(klass)
+        out = {}
+        return out unless klass.respond_to?(:joins_config)
+
+        (klass.joins_config || {}).each_value do |cfg|
+          kind = (cfg[:kind] || :belongs_to).to_sym
+          next if kind == :has
+
+          lk = cfg[:local_key]
+          async = cfg[:async_ref]
+          next if lk.nil?
+
+          out[lk.to_sym] = true if async
+        end
+        out
       end
 
       # Append hidden flags based on attribute options:
