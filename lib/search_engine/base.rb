@@ -5,6 +5,7 @@ require_relative 'base/hydration'
 require_relative 'base/index_maintenance'
 require_relative 'base/indexing_dsl'
 require_relative 'base/creation'
+require_relative 'base/scopes'
 require_relative 'base/joins'
 require_relative 'base/model_dsl'
 require_relative 'base/presets'
@@ -25,6 +26,7 @@ module SearchEngine
     include SearchEngine::Base::PrettyPrinter
     include SearchEngine::Base::ModelDsl
     include SearchEngine::Base::RelationDelegation
+    include SearchEngine::Base::Scopes
     include SearchEngine::Base::IndexingDsl
     include SearchEngine::Base::Joins
     include SearchEngine::Base::Presets
