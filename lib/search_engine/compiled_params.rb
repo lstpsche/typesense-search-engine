@@ -46,7 +46,7 @@ module SearchEngine
 
     # Implicit Hash conversion for APIs like Hash#merge expecting #to_hash.
     # @return [Hash]
-    alias to_hash to_h
+    alias_method :to_hash, :to_h
 
     # Deterministic JSON serialization using the canonical ordered Hash.
     # @return [String]

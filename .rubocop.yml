@@ -69,7 +69,7 @@ Metrics/ModuleLength:
   Enabled: false
 
 Metrics/BlockLength:
-  Max: 40
+  Max: 50
   Exclude:
     - spec/**/*
     - lib/tasks/**/*

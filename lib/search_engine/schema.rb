@@ -42,70 +42,12 @@ module SearchEngine
       # @note Automatically sets `enable_nested_fields: true` at collection level when
       #   any attribute is declared with type `:object` or `[:object]`.
       def compile(klass)
-        collection_name = klass.respond_to?(:collection) ? klass.collection : nil
-        if collection_name.nil? || collection_name.to_s.strip.empty?
-          raise ArgumentError,
-                'klass must define a collection name'
-        end
+        collection_name = collection_name_for!(klass)
 
-        attributes_map = klass.respond_to?(:attributes) ? klass.attributes : {}
-        attribute_options = klass.respond_to?(:attribute_options) ? (klass.attribute_options || {}) : {}
-        references_by_local_key = build_references_by_local_key(klass)
-        async_reference_by_local_key = build_async_reference_by_local_key(klass)
-        fields_array = []
-        needs_nested_fields = false
-        attributes_map.each do |attribute_name, type_descriptor|
-          # Validate unsupported or unsafe type descriptors early
-          if type_descriptor.to_s.downcase == 'auto'
-            raise SearchEngine::Errors::InvalidOption,
-                  "Unsupported attribute type :auto for #{attribute_name}. Use a concrete type or :object/[:object]."
-          end
-          ts_type = typesense_type_for(type_descriptor)
-          opts = attribute_options[attribute_name.to_sym] || {}
-          needs_nested_fields ||= %w[object object[]].include?(ts_type)
+        fields_array, needs_nested_fields = compile_fields_for(klass)
+        coerce_doc_updated_at_type!(fields_array)
 
-          # Insert compiled attribute schema field into result schema fields array
-          fields_array << {
-            name: attribute_name.to_s,
-            type: ts_type,
-            **({
-              locale: opts[:locale],
-              sort: opts[:sort],
-              optional: opts[:optional],
-              infix: opts[:infix],
-              reference: references_by_local_key[attribute_name.to_sym],
-              async_reference: async_reference_by_local_key[attribute_name.to_sym]
-            }.compact)
-          }
-
-          # Hidden flags:
-          # - <name>_empty for array attributes with empty_filtering enabled
-          # - <name>_blank for any attribute with optional enabled
-          append_hidden_empty_field(fields_array, attribute_name, type_descriptor, opts)
-        end
-
-        # Ensure mandatory system field is present with enforced type.
-        # Developers should not declare this field; if they do, we coerce type to int64.
-        fields_array.each do |f|
-          fname = (f[:name] || f['name']).to_s
-          next unless fname == 'doc_updated_at'
-
-          # Coerce type deterministically to int64 when explicitly declared
-          if f.key?(:type)
-            f[:type] = 'int64'
-          elsif f.key?('type')
-            f['type'] = 'int64'
-          else
-            f[:type] = 'int64'
-          end
-          break
-        end
-
-        # NOTE: when object/object[] fields are present, the collection requires
-        # Typesense's nested fields mode. We auto-enable it at collection level.
-        schema = { name: collection_name.to_s, fields: fields_array }
-        # Auto-enable nested fields at collection level when object/object[] types are present
-        schema[:enable_nested_fields] = true if needs_nested_fields
+        schema = build_schema_hash(collection_name, fields_array, needs_nested_fields)
         deep_freeze(schema)
       end
 
@@ -372,6 +314,101 @@ module SearchEngine
 
       def monotonic_ms
         SearchEngine::Instrumentation.monotonic_ms
+      end
+
+      # Extract and validate collection name as a non-empty string.
+      def collection_name_for!(klass)
+        collection_name = klass.respond_to?(:collection) ? klass.collection : nil
+        if collection_name.nil? || collection_name.to_s.strip.empty?
+          raise ArgumentError, 'klass must define a collection name'
+        end
+
+        collection_name.to_s
+      end
+
+      # Compile attributes from the model DSL into a fields array and detect nested fields requirement.
+      def compile_fields_for(klass)
+        attributes_map = klass.respond_to?(:attributes) ? klass.attributes : {}
+        attribute_options = klass.respond_to?(:attribute_options) ? (klass.attribute_options || {}) : {}
+        references_by_local_key = build_references_by_local_key(klass)
+        async_reference_by_local_key = build_async_reference_by_local_key(klass)
+
+        fields_array = []
+        needs_nested_fields = false
+
+        attributes_map.each do |attribute_name, type_descriptor|
+          validate_attribute_type!(attribute_name, type_descriptor)
+
+          ts_type = typesense_type_for(type_descriptor)
+          opts = attribute_options[attribute_name.to_sym] || {}
+          needs_nested_fields ||= nested_type?(ts_type)
+
+          fields_array << build_field_entry(
+            attribute_name,
+            ts_type,
+            references_by_local_key,
+            async_reference_by_local_key,
+            opts
+          )
+
+          # Hidden flags:
+          # - <name>_empty for array attributes with empty_filtering enabled
+          # - <name>_blank for any attribute with optional enabled
+          append_hidden_empty_field(fields_array, attribute_name, type_descriptor, opts)
+        end
+
+        [fields_array, needs_nested_fields]
+      end
+
+      # Validate unsupported or unsafe type descriptors early.
+      def validate_attribute_type!(attribute_name, type_descriptor)
+        return unless type_descriptor.to_s.downcase == 'auto'
+
+        raise SearchEngine::Errors::InvalidOption,
+              "Unsupported attribute type :auto for #{attribute_name}. Use a concrete type or :object/[:object]."
+      end
+
+      def nested_type?(ts_type)
+        %w[object object[]].include?(ts_type)
+      end
+
+      def build_field_entry(attribute_name, ts_type, references_by_local_key, async_reference_by_local_key, opts)
+        {
+          name: attribute_name.to_s,
+          type: ts_type,
+          **{
+            locale: opts[:locale],
+            sort: opts[:sort],
+            optional: opts[:optional],
+            infix: opts[:infix],
+            reference: references_by_local_key[attribute_name.to_sym],
+            async_reference: async_reference_by_local_key[attribute_name.to_sym]
+          }.compact
+        }
+      end
+
+      # Ensure mandatory system field is present with enforced type when declared by developers.
+      def coerce_doc_updated_at_type!(fields_array)
+        fields_array.each do |f|
+          fname = (f[:name] || f['name']).to_s
+          next unless fname == 'doc_updated_at'
+
+          if f.key?(:type)
+            f[:type] = 'int64'
+          elsif f.key?('type')
+            f['type'] = 'int64'
+          else
+            f[:type] = 'int64'
+          end
+          break
+        end
+      end
+
+      # Build the final schema hash and set collection-level nested fields when needed.
+      def build_schema_hash(collection_name, fields_array, needs_nested_fields)
+        schema = { name: collection_name.to_s, fields: fields_array }
+        schema[:enable_nested_fields] = true if needs_nested_fields
+        schema
       end
 
       def typesense_type_for(type_descriptor)

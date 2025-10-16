@@ -40,7 +40,7 @@ module SearchEngine
       def ==(other)
         other.is_a?(self.class) && equality_key == other.send(:equality_key)
       end
-      alias eql? ==
+      alias_method :eql?, :==
 
       # Stable hash for use in sets/maps
       # @return [Integer]
