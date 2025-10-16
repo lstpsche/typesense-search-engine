@@ -134,6 +134,46 @@ module SearchEngine
     private_class_method :binary
 
     def compile_boolean(children, joiner, parent_prec:, my_prec:)
+      # For conjunctions only, merge multiple $assoc(inner ...) predicates targeting
+      # the same association into a single $assoc(inner && inner ...) expression
+      # to satisfy Typesense join filter rules.
+      if joiner == ' && '
+        items = [] # [{ pos:, str: }]
+        assoc_first_pos = {}
+        assoc_inner_map = {} # { assoc => [inner_str, ...] }
+
+        children.each_with_index do |child, idx|
+          inner = extract_join_inner_binary(child)
+          if inner
+            assoc, inner_expr = inner
+            assoc_first_pos[assoc] = idx unless assoc_first_pos.key?(assoc)
+            assoc_inner_map[assoc] ||= []
+            assoc_inner_map[assoc] << inner_expr
+            next
+          end
+
+          cstr = compile_node(child, parent_prec: my_prec)
+          cstr = "(#{cstr})" if needs_parentheses?(child, parent_prec: my_prec)
+          items << { pos: idx, str: cstr }
+        end
+
+        unless assoc_inner_map.empty?
+          # Emit one consolidated token per assoc at the first position it appeared
+          assoc_first_pos.sort_by { |_a, pos| pos }.each do |assoc, pos|
+            inners = Array(assoc_inner_map[assoc]).flatten.compact
+            next if inners.empty?
+
+            token = "$#{assoc}(#{inners.join(' && ')})"
+            items << { pos: pos, str: token }
+          end
+
+          inner = items.sort_by { |it| it[:pos] }.map { |it| it[:str] }.join(joiner)
+
+          return parent_prec > my_prec ? "(#{inner})" : inner
+        end
+      end
+
+      # Fallback/default behavior
       parts = children.map do |child|
         cstr = compile_node(child, parent_prec: my_prec)
         if needs_parentheses?(child, parent_prec: my_prec)
@@ -152,6 +192,54 @@ module SearchEngine
       end
     end
     private_class_method :compile_boolean
+
+    # Try to extract join association and compiled inner expression for a binary node
+    # with a joined field like "$assoc.field". Returns [assoc(String), inner(String)] or nil.
+    def extract_join_inner_binary(node)
+      case node
+      when SearchEngine::AST::Eq, SearchEngine::AST::NotEq,
+           SearchEngine::AST::Gt, SearchEngine::AST::Gte,
+           SearchEngine::AST::Lt, SearchEngine::AST::Lte,
+           SearchEngine::AST::In, SearchEngine::AST::NotIn
+        field = node.respond_to?(:field) ? node.field.to_s : nil
+        return nil unless field && field.start_with?('$')
+
+        m = field.match(/^\$(\w+)\.(.+)$/)
+        return nil unless m
+
+        assoc = m[1]
+        inner_field = m[2]
+        op = op_for(node)
+        rhs = if node.respond_to?(:value)
+                quote(node.value)
+              elsif node.respond_to?(:values)
+                quote(node.values)
+              else
+                return nil
+              end
+
+        [assoc, "#{inner_field}#{op}#{rhs}"]
+      else
+        nil
+      end
+    end
+    private_class_method :extract_join_inner_binary
+
+    def op_for(node)
+      case node
+      when SearchEngine::AST::Eq then ':='
+      when SearchEngine::AST::NotEq then ':!='
+      when SearchEngine::AST::Gt then ':>'
+      when SearchEngine::AST::Gte then ':>='
+      when SearchEngine::AST::Lt then ':<'
+      when SearchEngine::AST::Lte then ':<='
+      when SearchEngine::AST::In then ':='
+      when SearchEngine::AST::NotIn then ':!='
+      else
+        raise Error, "Unknown binary node for join extraction: #{node.class}"
+      end
+    end
+    private_class_method :op_for
 
     def quote(value)
       # Use conditional scalar quoting for scalars; preserve array element quoting rules
