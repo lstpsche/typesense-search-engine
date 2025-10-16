@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'active_support/concern'
+require 'set'
 
 module SearchEngine
   class Base
@@ -13,17 +14,18 @@ module SearchEngine
         # Run indexing workflow for this collection.
         # @param partition [Object, Array<Object>, nil]
         # @param client [SearchEngine::Client, nil]
+        # @param pre [Symbol, nil] :ensure (ensure presence) or :index (ensure + fix drift)
         # @return [void]
-        def indexate(partition: nil, client: nil)
+        def indexate(partition: nil, client: nil, pre: nil)
           logical = respond_to?(:collection) ? collection.to_s : name.to_s
           puts
           puts(%(>>>>>> Indexating Collection "#{logical}"))
           client_obj = client || (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
 
           if partition.nil?
-            __se_indexate_full(client: client_obj)
+            __se_indexate_full(client: client_obj, pre: pre)
           else
-            __se_indexate_partial(partition: partition, client: client_obj)
+            __se_indexate_partial(partition: partition, client: client_obj, pre: pre)
           end
           nil
         end
@@ -31,10 +33,11 @@ module SearchEngine
 
       class_methods do
         # Drop the collection and then run full indexation.
+        # @param pre [Symbol, nil] :ensure or :index
         # @return [void]
-        def reindexate!
+        def reindexate!(pre: nil)
           drop_collection!
-          indexate
+          indexate(pre: pre)
         end
       end
 
@@ -42,8 +45,13 @@ module SearchEngine
         # Rebuild one or many partitions inline using the Indexer.
         # @param partition [Object, Array<Object>, nil]
         # @param into [String, nil]
+        # @param pre [Symbol, nil] optional dependency preflight (:ensure or :index)
         # @return [SearchEngine::Indexer::Summary, Array<SearchEngine::Indexer::Summary>]
-        def rebuild_partition!(partition:, into: nil)
+        def rebuild_partition!(partition:, into: nil, pre: nil)
+          if pre
+            client_obj = (SearchEngine.config.respond_to?(:client) && SearchEngine.config.client) || SearchEngine::Client.new
+            __se_preflight_dependencies!(mode: pre, client: client_obj)
+          end
           parts = if partition.nil? || (partition.respond_to?(:empty?) && partition.empty?)
                     [nil]
                   else
@@ -148,8 +156,10 @@ module SearchEngine
 
       class_methods do
         # --------------------------- Full flow ---------------------------
-        def __se_indexate_full(client:)
+        def __se_indexate_full(client:, pre: nil)
           logical = respond_to?(:collection) ? collection.to_s : name.to_s
+          # Optional: preflight dependency indexation for belongs_to chains
+          __se_preflight_dependencies!(mode: pre, client: client) if pre
 
           # Step 1: Presence
           diff = SearchEngine::Schema.diff(self, client: client)[:diff] || {}
@@ -251,7 +261,7 @@ module SearchEngine
 
       class_methods do
         # -------------------------- Partial flow -------------------------
-        def __se_indexate_partial(partition:, client:)
+        def __se_indexate_partial(partition:, client:, pre: nil)
           partitions = Array(partition)
           diff_res = SearchEngine::Schema.diff(self, client: client)
           diff = diff_res[:diff] || {}
@@ -273,6 +283,9 @@ module SearchEngine
           end
           puts('Step 2: Check Schema Status — in_sync')
 
+          # Optional: preflight dependencies prior to partial indexation
+          __se_preflight_dependencies!(mode: pre, client: client) if pre
+
           # Step 3: Partial indexing
           puts('Step 3: Partial Indexation — processing')
           all_ok = true
@@ -288,6 +301,108 @@ module SearchEngine
           puts('Step 3: Partial Indexation — done')
           # After partial indexation, trigger full fallback cascade for referencers only if all partitions succeeded
           __se_cascade_after_indexation!(context: :full) if all_ok
+        end
+      end
+
+      class_methods do
+        # ---------------------- Preflight dependencies ----------------------
+        # Recursively ensure/index direct and transitive belongs_to dependencies
+        # before indexing the current collection.
+        # @param mode [Symbol] :ensure (only missing) or :index (missing + drift)
+        # @param client [SearchEngine::Client]
+        # @param visited [Set<String>, nil]
+        # @return [void]
+        def __se_preflight_dependencies!(mode:, client:, visited: nil)
+          return unless mode
+
+          visited ||= Set.new
+          current = begin
+            respond_to?(:collection) ? (collection || '').to_s : name.to_s
+          rescue StandardError
+            name.to_s
+          end
+          return if current.to_s.strip.empty?
+          return if visited.include?(current)
+
+          visited.add(current)
+
+          configs = begin
+            joins_config || {}
+          rescue StandardError
+            {}
+          end
+          deps = configs.values.select { |c| (c[:kind] || c['kind']).to_s == 'belongs_to' }
+          return if deps.empty?
+
+          puts
+          puts(%(>>>>>> Preflight Dependencies (mode: #{mode})))
+
+          deps.each do |cfg|
+            dep_coll = (cfg[:collection] || cfg['collection']).to_s
+            next if dep_coll.strip.empty?
+            next if visited.include?(dep_coll)
+
+            dep_klass = begin
+              SearchEngine.collection_for(dep_coll)
+            rescue StandardError
+              nil
+            end
+
+            if dep_klass.nil?
+              puts(%(  "#{dep_coll}" → skipped (unregistered)))
+              visited.add(dep_coll)
+              next
+            end
+
+            # Recurse first to ensure deeper dependencies are handled
+            begin
+              dep_klass.__se_preflight_dependencies!(mode: mode, client: client, visited: visited)
+            rescue StandardError
+              # ignore recursion errors to not block main flow
+            end
+
+            diff = begin
+              SearchEngine::Schema.diff(dep_klass, client: client)[:diff] || {}
+            rescue StandardError
+              {}
+            end
+            missing = begin
+              dep_klass.__se_schema_missing?(diff)
+            rescue StandardError
+              false
+            end
+            drift = begin
+              dep_klass.__se_schema_drift?(diff)
+            rescue StandardError
+              false
+            end
+
+            case mode.to_s
+            when 'ensure'
+              if missing
+                puts(%(  "#{dep_coll}" → ensure (missing) → indexate))
+                # Avoid nested preflight to prevent redundant recursion cycles
+                dep_klass.indexate(client: client)
+              else
+                puts(%(  "#{dep_coll}" → present (skip)))
+              end
+            when 'index'
+              if missing || drift
+                reason = missing ? 'missing' : 'drift'
+                puts(%(  "#{dep_coll}" → index (#{reason}) → indexate))
+                # Avoid nested preflight to prevent redundant recursion cycles
+                dep_klass.indexate(client: client)
+              else
+                puts(%(  "#{dep_coll}" → in_sync (skip)))
+              end
+            else
+              puts(%(  "#{dep_coll}" → skipped (unknown mode: #{mode})))
+            end
+
+            visited.add(dep_coll)
+          end
+
+          puts('>>>>>> Preflight Done')
         end
       end
 
