@@ -202,7 +202,7 @@ module SearchEngine
            SearchEngine::AST::Lt, SearchEngine::AST::Lte,
            SearchEngine::AST::In, SearchEngine::AST::NotIn
         field = node.respond_to?(:field) ? node.field.to_s : nil
-        return nil unless field && field.start_with?('$')
+        return nil unless field&.start_with?('$')
 
         m = field.match(/^\$(\w+)\.(.+)$/)
         return nil unless m
@@ -219,8 +219,6 @@ module SearchEngine
               end
 
         [assoc, "#{inner_field}#{op}#{rhs}"]
-      else
-        nil
       end
     end
     private_class_method :extract_join_inner_binary

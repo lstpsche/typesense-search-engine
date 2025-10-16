@@ -47,6 +47,10 @@ module SearchEngine
         # @param fields [Array<Symbol,String,Hash,Array>]
         # @return [SearchEngine::Relation]
         # @see `https://github.com/lstpsche/search-engine-for-typesense/wiki/Field-Selection`
+        #
+        # When excluding, you may also pass a joined association name (after calling
+        # `joins(:assoc)`) to exclude the entire joined payload from the response.
+        # For example: `exclude(:authors)` compiles to Typesense `exclude_fields: "$authors(*,doc_updated_at)"`.
         def exclude(*fields)
           normalized = normalize_select_input(fields, context: 'excluding fields')
           spawn do |s|
@@ -147,12 +151,42 @@ module SearchEngine
           nested = {}
           nested_order = []
 
-          add_base = ->(val) { base.concat(normalize_select([val])) }
+          add_base = build_add_base_proc(context, base, nested, nested_order)
           add_nested = build_add_nested_proc(context, nested, nested_order)
 
           process_selection_list!(list, add_base, add_nested)
 
           { base: base.uniq, nested: nested, nested_order: nested_order }
+        end
+
+        # Base-field adder that, in excluding context, treats a bare joined assoc
+        # token as a request to exclude the entire association payload (sentinel :__all).
+        def build_add_base_proc(context, base, nested, nested_order)
+          lambda do |val|
+            # Only special-case in excluding context; otherwise fallback to base normalization.
+            if context.to_s.include?('exclud')
+              name = val.to_s.strip
+              unless name.empty?
+                key = name.to_sym
+                begin
+                  # Validate join existence and that it was applied on this relation.
+                  @klass.join_for(key)
+                  SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, key, context: context)
+
+                  # Mark full association exclusion via sentinel; exclude wins later in compiler.
+                  nested[key] = [:__all]
+                  nested_order << key unless nested_order.include?(key)
+                  return
+                rescue StandardError
+                  # Not a known/applied join; fall through to base normalization
+                end
+              end
+            end
+
+            # Default behavior: treat as base field(s) and validate accordingly.
+            base_fields = normalize_select([val])
+            base.concat(base_fields)
+          end
         end
 
         def build_add_nested_proc(context, nested, nested_order)

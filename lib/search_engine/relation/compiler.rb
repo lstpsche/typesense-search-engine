@@ -124,6 +124,9 @@ module SearchEngine
           next if inc_fields.empty?
 
           exc_fields = Array(exclude_nested_map[assoc])
+          # Full-association exclusion sentinel wins: omit nested include segment entirely
+          next if exc_fields.include?(:__all) || exc_fields.map(&:to_s).include?('__all')
+
           fields = (inc_fields - exc_fields).map(&:to_s).reject(&:empty?)
           fields = fields.sort
           next if fields.empty?
@@ -152,9 +155,17 @@ module SearchEngine
         include_nested_map = @state[:select_nested] || {}
 
         exclude_nested_order.each do |assoc|
+          exc_raw = Array(exclude_nested_map[assoc])
+          # If full-association exclusion sentinel present, emit "$assoc(*,doc_updated_at)" regardless of includes
+          if exc_raw.include?(:__all) || exc_raw.map(&:to_s).include?('__all')
+            segments << "$#{assoc}(*,doc_updated_at)"
+            next
+          end
+
+          # Otherwise, only emit nested exclude when there are no nested includes for this assoc
           next if Array(include_nested_map[assoc]).any?
 
-          fields = Array(exclude_nested_map[assoc]).map(&:to_s).reject(&:empty?)
+          fields = exc_raw.map(&:to_s).reject(&:empty?)
           fields = fields.sort
           next if fields.empty?
 
