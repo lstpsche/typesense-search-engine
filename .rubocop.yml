@@ -25,6 +25,9 @@ Lint/RaiseException:
 Lint/StructNewOverride:
   Enabled: true
 
+Style/Alias:
+  EnforcedStyle: prefer_alias_method
+
 Style/ExponentialNotation:
   Enabled: true
 

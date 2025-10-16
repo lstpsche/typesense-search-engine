@@ -40,11 +40,8 @@ module SearchEngine
         end
 
         # Convenience alias for `select` supporting nested include_fields input.
-        # @param fields [Array]
         # @return [SearchEngine::Relation]
-        def include_fields(*fields)
-          select(*fields)
-        end
+        alias_method :include_fields, :select
 
         # Exclude a subset of fields from the final selection.
         # @param fields [Array<Symbol,String,Hash,Array>]
@@ -78,6 +75,11 @@ module SearchEngine
             s[:exclude_nested_order] = existing_order
           end
         end
+
+        # Convenience alias for `exclude` supporting nested exclude_fields input.
+        # Mirrors Typesense param naming for API symmetry with `include_fields`.
+        # @return [SearchEngine::Relation]
+        alias_method :exclude_fields, :exclude
 
         # Replace the selected fields list (Typesense `include_fields`).
         # @param fields [Array<#to_sym,#to_s>]
