@@ -34,6 +34,80 @@ module SearchEngine
       v.respond_to?(:to_h) ? v.to_h : v
     end
 
+    # Return compiled Typesense filter_by string for this relation.
+    # Pure and deterministic; delegates to the compiler without I/O.
+    #
+    # @return [String, nil] the filter_by string or nil when absent
+    def filter_params
+      params = to_typesense_params
+      params[:filter_by]
+    end
+
+    # Return a Hash of simple base-field equality filters accumulated on this relation.
+    # Extracts only Eq/In predicates on base fields (no joins, no ranges, no negations, no ORs).
+    # When the predicate set contains constructs that cannot be represented as a flat Hash
+    # (e.g. OR, NOT, range comparisons, join predicates), returns an empty Hash to avoid
+    # misrepresenting the filter semantics.
+    #
+    # @return [Hash{Symbol=>Object}] symbolized base field => value(s) or {}
+    def filter_params_hash
+      nodes = Array(@state[:ast]).flatten.compact
+      return {} if nodes.empty?
+
+      result = {}
+      ambiguous = false
+
+      walker = lambda do |node|
+        return if ambiguous || node.nil?
+
+        case node
+        when SearchEngine::AST::And
+          Array(node.children).each { |child| walker.call(child) }
+        when SearchEngine::AST::Group
+          inner = Array(node.children).first
+          walker.call(inner)
+        when SearchEngine::AST::Eq
+          field = node.field.to_s
+          # Only base fields: exclude joins like "$assoc.field"
+          result[field.to_sym] = node.value unless join_field?(field)
+        when SearchEngine::AST::In
+          field = node.field.to_s
+          result[field.to_sym] = Array(node.values) unless join_field?(field)
+        else
+          # Any non-equality, negation, OR, range, or raw fragment makes this ambiguous
+          ambiguous ||= ambiguous_ast_node?(node)
+        end
+      end
+
+      nodes.each { |n| walker.call(n) }
+      return {} if ambiguous
+
+      result
+    end
+
+    private
+
+    # True when the field name refers to a joined field like "$assoc.field".
+    # @param field [String]
+    # @return [Boolean]
+    def join_field?(field)
+      field.start_with?('$') || field.include?('.')
+    end
+
+    # True when node type cannot be represented as a flat Hash of base Eq/In.
+    # @param node [SearchEngine::AST::Node]
+    # @return [Boolean]
+    def ambiguous_ast_node?(node)
+      node.is_a?(SearchEngine::AST::Or) ||
+        node.is_a?(SearchEngine::AST::NotEq) ||
+        node.is_a?(SearchEngine::AST::NotIn) ||
+        node.is_a?(SearchEngine::AST::Gt) ||
+        node.is_a?(SearchEngine::AST::Gte) ||
+        node.is_a?(SearchEngine::AST::Lt) ||
+        node.is_a?(SearchEngine::AST::Lte) ||
+        node.is_a?(SearchEngine::AST::Raw)
+    end
+
     # Read-only access to accumulated predicate AST nodes.
     # @return [Array<SearchEngine::AST::Node>] a frozen Array of AST nodes
     def ast
