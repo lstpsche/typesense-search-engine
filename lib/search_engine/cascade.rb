@@ -157,9 +157,23 @@ into: nil
           end
 
           puts(%(  Referencer "#{logical}" — partitions=#{parts.size} parallel=#{compiled.max_parallel}))
-          parts.each do |p|
-            SearchEngine::Indexer.rebuild_partition!(ref_klass, partition: p, into: nil)
+          mp = compiled.max_parallel.to_i
+          if mp > 1 && parts.size > 1
+            require 'concurrent-ruby'
+            pool = Concurrent::FixedThreadPool.new(mp)
+            ctx = SearchEngine::Instrumentation.context
+            mtx = Mutex.new
+            begin
+              post_partitions_to_pool!(pool, ctx, parts, ref_klass, mtx)
+            ensure
+              pool.shutdown
+              # Wait up to 1 hour, then force-kill and wait a bit more to ensure cleanup
+              pool.wait_for_termination(3600) || pool.kill
+              pool.wait_for_termination(60)
+            end
             executed = true
+          else
+            executed = rebuild_partitions_sequential!(ref_klass, parts)
           end
 
         else
@@ -179,6 +193,27 @@ into: nil
         else
           source.name.to_s
         end
+      end
+
+      def post_partitions_to_pool!(pool, ctx, parts, ref_klass, mtx)
+        parts.each do |p|
+          pool.post do
+            SearchEngine::Instrumentation.with_context(ctx) do
+              summary = SearchEngine::Indexer.rebuild_partition!(ref_klass, partition: p, into: nil)
+              mtx.synchronize { puts(SearchEngine::Logging::PartitionProgress.line(p, summary)) }
+            end
+          end
+        end
+      end
+
+      def rebuild_partitions_sequential!(ref_klass, parts)
+        executed = false
+        parts.each do |p|
+          summary = SearchEngine::Indexer.rebuild_partition!(ref_klass, partition: p, into: nil)
+          puts(SearchEngine::Logging::PartitionProgress.line(p, summary))
+          executed = true
+        end
+        executed
       end
 
       def build_from_typesense(client)

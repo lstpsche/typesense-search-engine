@@ -278,13 +278,7 @@ module SearchEngine
           all_ok = true
           partitions.each do |p|
             summary = SearchEngine::Indexer.rebuild_partition!(self, partition: p, into: nil)
-            sample_err = __se_extract_sample_error(summary)
-            puts(
-              "  partition=#{p.inspect} → status=#{summary.status} docs=#{summary.docs_total} " \
-              "failed=#{summary.failed_total} batches=#{summary.batches_total} " \
-              "duration_ms=#{summary.duration_ms_total}" \
-              "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
-            )
+            puts(SearchEngine::Logging::PartitionProgress.line(p, summary))
             begin
               all_ok &&= (summary.status == :ok)
             rescue StandardError
@@ -429,15 +423,7 @@ module SearchEngine
           agg = :ok
           parts.each do |part|
             summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
-            sample_err = __se_extract_sample_error(summary)
-            puts(
-              "  partition=#{part.inspect} → status=#{summary.status} " \
-              "docs=#{summary.docs_total} " \
-              "failed=#{summary.failed_total} " \
-              "batches=#{summary.batches_total} " \
-              "duration_ms=#{summary.duration_ms_total}" \
-              "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
-            )
+            puts(SearchEngine::Logging::PartitionProgress.line(part, summary))
             begin
               st = summary.status
               if st == :failed
@@ -466,16 +452,8 @@ module SearchEngine
               pool.post do
                 SearchEngine::Instrumentation.with_context(ctx) do
                   summary = SearchEngine::Indexer.rebuild_partition!(self, partition: part, into: into)
-                  sample_err = __se_extract_sample_error(summary)
                   mtx.synchronize do
-                    puts(
-                      "  partition=#{part.inspect} → status=#{summary.status} " \
-                      "docs=#{summary.docs_total} " \
-                      "failed=#{summary.failed_total} " \
-                      "batches=#{summary.batches_total} " \
-                      "duration_ms=#{summary.duration_ms_total}" \
-                      "#{sample_err ? " sample_error=#{sample_err.inspect}" : ''}"
-                    )
+                    puts(SearchEngine::Logging::PartitionProgress.line(part, summary))
                     begin
                       st = summary.status
                       if st == :failed
