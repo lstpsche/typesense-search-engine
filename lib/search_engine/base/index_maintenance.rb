@@ -316,22 +316,14 @@ module SearchEngine
           return unless mode
 
           visited ||= Set.new
-          current = begin
-            respond_to?(:collection) ? (collection || '').to_s : name.to_s
-          rescue StandardError
-            name.to_s
-          end
+          current = __se_current_collection_name
           return if current.to_s.strip.empty?
           return if visited.include?(current)
 
           visited.add(current)
 
-          configs = begin
-            joins_config || {}
-          rescue StandardError
-            {}
-          end
-          deps = configs.values.select { |c| (c[:kind] || c['kind']).to_s == 'belongs_to' }
+          configs = __se_fetch_joins_config
+          deps = __se_belongs_to_dependencies(configs)
           return if deps.empty?
 
           puts
@@ -339,14 +331,9 @@ module SearchEngine
 
           deps.each do |cfg|
             dep_coll = (cfg[:collection] || cfg['collection']).to_s
-            next if dep_coll.strip.empty?
-            next if visited.include?(dep_coll)
+            next if __se_skip_dep?(dep_coll, visited)
 
-            dep_klass = begin
-              SearchEngine.collection_for(dep_coll)
-            rescue StandardError
-              nil
-            end
+            dep_klass = __se_resolve_dep_class(dep_coll)
 
             if dep_klass.nil?
               puts(%(  "#{dep_coll}" → skipped (unregistered)))
@@ -355,55 +342,135 @@ module SearchEngine
             end
 
             # Recurse first to ensure deeper dependencies are handled
-            begin
-              dep_klass.__se_preflight_dependencies!(mode: mode, client: client, visited: visited)
-            rescue StandardError
-              # ignore recursion errors to not block main flow
-            end
+            __se_preflight_recurse(dep_klass, mode, client, visited)
 
-            diff = begin
-              SearchEngine::Schema.diff(dep_klass, client: client)[:diff] || {}
-            rescue StandardError
-              {}
-            end
-            missing = begin
-              dep_klass.__se_schema_missing?(diff)
-            rescue StandardError
-              false
-            end
-            drift = begin
-              dep_klass.__se_schema_drift?(diff)
-            rescue StandardError
-              false
-            end
+            diff = __se_diff_for(dep_klass, client)
+            missing, drift = __se_dependency_status(diff, dep_klass)
 
-            case mode.to_s
-            when 'ensure'
-              if missing
-                puts(%(  "#{dep_coll}" → ensure (missing) → indexate))
-                # Avoid nested preflight to prevent redundant recursion cycles
-                dep_klass.indexate(client: client)
-              else
-                puts(%(  "#{dep_coll}" → present (skip)))
-              end
-            when 'index'
-              if missing || drift
-                reason = missing ? 'missing' : 'drift'
-                puts(%(  "#{dep_coll}" → index (#{reason}) → indexate))
-                # Avoid nested preflight to prevent redundant recursion cycles
-                dep_klass.indexate(client: client)
-              else
-                puts(%(  "#{dep_coll}" → in_sync (skip)))
-              end
-            else
-              puts(%(  "#{dep_coll}" → skipped (unknown mode: #{mode})))
-            end
+            __se_handle_preflight_action(mode, dep_coll, missing, drift, dep_klass, client)
 
             visited.add(dep_coll)
           end
 
           puts('>>>>>> Preflight Done')
         end
+
+        # @return [String] current collection logical name; empty string when unavailable
+        def __se_current_collection_name
+          respond_to?(:collection) ? (collection || '').to_s : name.to_s
+        rescue StandardError
+          name.to_s
+        end
+
+        # @return [Hash] raw joins configuration or empty hash on errors
+        def __se_fetch_joins_config
+          joins_config || {}
+        rescue StandardError
+          {}
+        end
+
+        # @param configs [Hash]
+        # @return [Array<Hash>] only belongs_to-type dependency configs
+        def __se_belongs_to_dependencies(configs)
+          values = begin
+            configs.values
+          rescue StandardError
+            []
+          end
+          values.select { |c| (c[:kind] || c['kind']).to_s == 'belongs_to' }
+        end
+
+        # @param dep_coll [String]
+        # @param visited [Set<String>]
+        # @return [Boolean]
+        def __se_skip_dep?(dep_coll, visited)
+          dep_coll.to_s.strip.empty? || visited.include?(dep_coll)
+        end
+
+        # @param dep_coll [String]
+        # @return [Class, nil]
+        def __se_resolve_dep_class(dep_coll)
+          SearchEngine.collection_for(dep_coll)
+        rescue StandardError
+          nil
+        end
+
+        # @param dep_klass [Class]
+        # @param mode [Symbol]
+        # @param client [SearchEngine::Client]
+        # @param visited [Set<String>]
+        # @return [void]
+        def __se_preflight_recurse(dep_klass, mode, client, visited)
+          dep_klass.__se_preflight_dependencies!(mode: mode, client: client, visited: visited)
+        rescue StandardError
+          # ignore recursion errors to not block main flow
+        end
+
+        # @param dep_klass [Class]
+        # @param client [SearchEngine::Client]
+        # @return [Hash]
+        def __se_diff_for(dep_klass, client)
+          SearchEngine::Schema.diff(dep_klass, client: client)[:diff] || {}
+        rescue StandardError
+          {}
+        end
+
+        # @param diff [Hash]
+        # @param dep_klass [Class]
+        # @return [Array(Boolean, Boolean)]
+        def __se_dependency_status(diff, dep_klass)
+          missing = begin
+            dep_klass.__se_schema_missing?(diff)
+          rescue StandardError
+            false
+          end
+          drift = begin
+            dep_klass.__se_schema_drift?(diff)
+          rescue StandardError
+            false
+          end
+          [missing, drift]
+        end
+
+        # @param mode [Symbol]
+        # @param dep_coll [String]
+        # @param missing [Boolean]
+        # @param drift [Boolean]
+        # @param dep_klass [Class]
+        # @param client [SearchEngine::Client]
+        # @return [void]
+        def __se_handle_preflight_action(mode, dep_coll, missing, drift, dep_klass, client)
+          case mode.to_s
+          when 'ensure'
+            if missing
+              puts(%(  "#{dep_coll}" → ensure (missing) → indexate))
+              # Avoid nested preflight to prevent redundant recursion cycles
+              dep_klass.indexate(client: client)
+            else
+              puts(%(  "#{dep_coll}" → present (skip)))
+            end
+          when 'index'
+            if missing || drift
+              reason = missing ? 'missing' : 'drift'
+              puts(%(  "#{dep_coll}" → index (#{reason}) → indexate))
+              # Avoid nested preflight to prevent redundant recursion cycles
+              dep_klass.indexate(client: client)
+            else
+              puts(%(  "#{dep_coll}" → in_sync (skip)))
+            end
+          else
+            puts(%(  "#{dep_coll}" → skipped (unknown mode: #{mode})))
+          end
+        end
+        private :__se_current_collection_name,
+                :__se_fetch_joins_config,
+                :__se_belongs_to_dependencies,
+                :__se_skip_dep?,
+                :__se_resolve_dep_class,
+                :__se_preflight_recurse,
+                :__se_diff_for,
+                :__se_dependency_status,
+                :__se_handle_preflight_action
       end
 
       class_methods do
@@ -613,8 +680,6 @@ module SearchEngine
       end
 
       class_methods do
-        private
-
         def __se_retention_cleanup!(logical:, client:)
           keep = begin
             local = respond_to?(:schema_retention) ? (schema_retention || {}) : {}
@@ -641,6 +706,7 @@ module SearchEngine
           to_drop.each { |n| client.delete_collection(n) }
           to_drop
         end
+        private :__se_retention_cleanup!
       end
 
       class_methods do
