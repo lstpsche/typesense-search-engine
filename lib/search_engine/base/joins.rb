@@ -12,12 +12,11 @@ module SearchEngine
       class_methods do
         # Declare a belongs_to association with auto-resolution of params.
         #
-        # Defaults when options are omitted:
-        # - collection: pluralized first argument (e.g., :product -> "products")
-        # - local_key: current collection's singular + "_id" (e.g., "books" -> :book_id)
-        # - foreign_key: on the target, prefer current_singular_ids if declared, else current_singular_id;
-        #   if target has a matching `has` declaration referencing this model's collection and its name is plural,
-        #   prefer `_ids`, otherwise `_id`.
+        # Defaults when options are omitted (association-name based):
+        # - collection: pluralized first argument (e.g., :brand -> "brands", :promotion_labels -> "promotion_labels")
+        # - local_key: singular(name) + "_ids" when the provided name is plural; otherwise singular(name) + "_id"
+        #   (e.g., :promotion_labels -> :promotion_label_ids, :brand -> :brand_id)
+        # - foreign_key: singular(name) + "_id" (e.g., :promotion_labels -> :promotion_label_id)
         #
         # @param name [#to_sym]
         # @param collection [#to_s, nil]
@@ -29,21 +28,24 @@ module SearchEngine
           assoc_name = name.to_sym
           raise ArgumentError, 'belongs_to name must be non-empty' if assoc_name.to_s.strip.empty?
 
-          target_collection = (collection ? collection.to_s : ActiveSupport::Inflector.pluralize(assoc_name.to_s))
+          arg_str = assoc_name.to_s
+          arg_plural = ActiveSupport::Inflector.pluralize(arg_str) == arg_str
 
-          current_collection = respond_to?(:collection) ? collection : nil
-          if current_collection.nil?
-            demod = self.name ? ActiveSupport::Inflector.demodulize(self.name) : ''
-            current_collection = ActiveSupport::Inflector.underscore(demod).to_s
-          end
-          current_singular = ActiveSupport::Inflector.singularize(current_collection.to_s)
+          target_collection = (collection ? collection.to_s : ActiveSupport::Inflector.pluralize(arg_str))
 
-          lk = (local_key ? local_key.to_sym : "#{current_singular}_id".to_sym)
+          assoc_singular = ActiveSupport::Inflector.singularize(arg_str)
+
+          lk = if local_key
+                 local_key.to_sym
+               else
+                 base = assoc_singular
+                 (arg_plural ? "#{base}_ids" : "#{base}_id").to_sym
+               end
 
           fk = if foreign_key
                  foreign_key.to_sym
                else
-                 __se_guess_fk_for_belongs_to!(target_collection, current_singular)
+                 "#{assoc_singular}_id".to_sym
                end
 
           normalized_async = nil
