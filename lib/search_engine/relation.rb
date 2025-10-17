@@ -5,6 +5,14 @@ module SearchEngine
   #
   # Facade wiring that composes State, Options, DSL, Compiler, and Materializers.
   class Relation
+    # Limited set of Array/Enumerable methods we intentionally delegate to the
+    # materialized results for convenience. Restricting this list prevents
+    # accidental network calls during reflection/printing in non‑interactive contexts.
+    ARRAY_DELEGATED_METHODS = %i[
+      to_a each map collect select reject find detect any? all? none? one? empty?
+      size length include? first last take drop [] at slice reduce inject sum uniq
+      compact flatten each_with_index
+    ].freeze
     # Keys considered essential for :only preset mode.
     ESSENTIAL_PARAM_KEYS = %i[q page per_page].freeze
 
@@ -128,6 +136,8 @@ module SearchEngine
       @state[:preset_name]
     end
 
+    public :ast, :preset_mode, :preset_name, :to_typesense_params
+
     # Create a new Relation.
     # @param klass [Class]
     # @param state [Hash]
@@ -154,41 +164,88 @@ module SearchEngine
       @state == DEFAULT_STATE
     end
 
-    # Console-friendly inspect:
-    # - In interactive consoles, execute and render hydrated records as a plain Array.
-    # - In non-interactive contexts, keep a concise summary without I/O
+    public
+
+    # Console-friendly inspect without network I/O.
+    # Always return a concise, stable summary to avoid surprises across consoles.
     # @return [String]
     def inspect
-      if interactive_console?
-        begin
-          records = SearchEngine::Hydration::Materializers.to_a(self)
-          # Render as a plain Array.
-          # Prefer pretty-printed formatting when available.
-          begin
-            require 'pp'
-            rendered = PP.pp(records, +'')
-            return rendered.end_with?("\n") ? rendered[0..-2] : rendered
-          rescue StandardError
-            return records.inspect
-          end
-        rescue StandardError
-          # fall back to summary below
-        end
+      cfg = begin
+        SearchEngine.config
+      rescue StandardError
+        nil
       end
 
-      summary_inspect_string
+      materialize = cfg.respond_to?(:relation_print_materializes) ? cfg.relation_print_materializes : true
+      return summary_inspect_string unless materialize
+
+      preview_size = 11
+      begin
+        items = SearchEngine::Hydration::Materializers.preview(self, preview_size)
+        entries = Array(items).map { |obj| obj.respond_to?(:inspect) ? obj.inspect : obj.to_s }
+        entries[10] = '...' if entries.size == preview_size
+        +"#<#{self.class.name} [#{entries.join(', ')}]>"
+      rescue StandardError
+        # Defensive fallback to non-I/O summary when materialization fails
+        summary_inspect_string
+      end
     end
 
-    # Pretty print as a plain Array of hydrated records (no Relation wrapper).
-    # This mirrors ActiveRecord, allowing Pry/IRB to format multiline arrays nicely.
+    # String form mirrors inspect to support printers that prefer to_s.
+    # @return [String]
+    def to_s
+      inspect
+    end
+
+    # Pry hooks into pretty_inspect in many cases. Keep it consistent with #inspect
+    # to avoid delegating to model class printers accidentally.
+    # @return [String]
+    def pretty_inspect
+      inspect
+    end
+
+    # Pretty print the concise, stable summary without network I/O.
+    # Avoid hydration during console pretty printing to keep behavior predictable.
     # @param pp [PP]
     # @return [void]
     def pretty_print(pp)
-      records = SearchEngine::Hydration::Materializers.to_a(self)
-      pp.pp(records)
-    rescue StandardError
-      pp.text(summary_inspect_string)
+      cfg = begin
+        SearchEngine.config
+      rescue StandardError
+        nil
+      end
+
+      materialize = cfg.respond_to?(:relation_print_materializes) ? cfg.relation_print_materializes : true
+      unless materialize
+        pp.text(summary_inspect_string)
+        return
+      end
+
+      preview_size = 11
+      begin
+        items = SearchEngine::Hydration::Materializers.preview(self, preview_size)
+
+        pp.group(2, "#<#{self.class.name} [", ']>') do
+          items.each_with_index do |obj, idx|
+            if idx.positive?
+              pp.text(',')
+              pp.breakable ' '
+            end
+            pp.pp(obj)
+          end
+
+          if items.size == preview_size
+            pp.text(',') unless items.empty?
+            pp.breakable ' '
+            pp.text('...')
+          end
+        end
+      rescue StandardError
+        pp.text(summary_inspect_string)
+      end
     end
+
+    public :ast, :preset_mode, :preset_name, :to_typesense_params
 
     # Explain the current relation without performing any network calls.
     # @return [String]
@@ -271,23 +328,28 @@ module SearchEngine
     # @raise [NoMethodError] when the delegated Array doesn't support the method
     def method_missing(method_name, *args, &block)
       # Delegate to the model class first (AR-like behavior)
-      return @klass.public_send(method_name, *args, &block) if @klass.respond_to?(method_name)
-
-      arr = to_a
-      begin
-        return arr.public_send(method_name, *args, &block)
-      rescue NoMethodError => error
-        # Only handle when the error came from the delegation target `arr` and
-        # for the same method; otherwise preserve original exceptions.
-        handled = error.respond_to?(:receiver) && error.receiver.equal?(arr) && error.name == method_name
-        raise unless handled
+      # Avoid delegating reflective/identity methods that console printers may use
+      # to derive labels; these should reflect the Relation itself.
+      blocked_class_delegations = %i[
+        name inspect pretty_inspect to_s to_str to_ary class object_id __id__
+        methods public_methods singleton_class respond_to? respond_to_missing?
+      ]
+      if @klass.respond_to?(method_name) && !blocked_class_delegations.include?(method_name.to_sym)
+        return @klass.public_send(method_name, *args, &block)
       end
 
-      # Raise a clean NoMethodError outside the rescue to avoid preserving the
-      # Array's exception as `cause`. Reference the model class to mimic
-      # ActiveRecord's error shape: "for Product:Class".
-      raise NoMethodError, %(undefined method `#{method_name}` for #{@klass}:Class)
+      return super if blocked_class_delegations.include?(method_name.to_sym)
+
+      # Only delegate to the materialized Array for a conservative whitelist of methods.
+      unless ARRAY_DELEGATED_METHODS.include?(method_name.to_sym)
+        raise NoMethodError, %(undefined method `#{method_name}` for #{@klass}:Class)
+      end
+
+      arr = to_a
+      arr.public_send(method_name, *args, &block)
     end
+
+    public :ast, :preset_mode, :preset_name, :to_typesense_params
 
     # Ensure reflective APIs correctly report delegated methods on the
     # materialized Array target. This keeps semantics consistent with
@@ -296,7 +358,11 @@ module SearchEngine
     # @param include_private [Boolean]
     # @return [Boolean]
     def respond_to_missing?(method_name, include_private = false)
-      to_a.respond_to?(method_name, include_private) || super
+      # Explicitly avoid implicit conversions that change object identity in consoles
+      return false if %i[to_ary to_str].include?(method_name.to_sym)
+
+      # Whitelist a conservative set of Enumerable-like methods for convenience.
+      ARRAY_DELEGATED_METHODS.include?(method_name.to_sym) || super
     end
 
     protected
@@ -311,6 +377,12 @@ module SearchEngine
     end
 
     private
+
+    # True when the relation has already executed and memoized the result.
+    # @return [Boolean]
+    def loaded?
+      @__loaded == true
+    end
 
     def summary_inspect_string
       parts = []
@@ -354,6 +426,10 @@ module SearchEngine
     def interactive_console?
       return true if defined?(Rails::Console)
       return true if defined?(IRB) && $stdout.respond_to?(:tty?) && $stdout.tty?
+
+      # Pry detection (best-effort, without hard dependency)
+      return true if defined?(Pry) && (Pry.respond_to?(:active?) ? Pry.active? : true)
+
       return true if $PROGRAM_NAME&.end_with?('console')
 
       false

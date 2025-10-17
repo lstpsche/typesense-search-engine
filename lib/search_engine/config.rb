@@ -63,7 +63,8 @@ module SearchEngine
                   :multi_search_limit,
                   :client,
                   :default_console_model,
-                  :search_engine_models
+                  :search_engine_models,
+                  :relation_print_materializes
 
     # Lightweight nested configuration for schema lifecycle.
     class SchemaConfig
@@ -354,6 +355,8 @@ module SearchEngine
       @default_console_model = nil
       # Path may be relative to Rails.root or absolute. Set nil/false to disable.
       @search_engine_models = 'app/search_engine'
+      # When true, Relation#inspect/pretty_print materialize a preview (AR-like).
+      @relation_print_materializes = true
     end
 
     # Expose schema lifecycle configuration.
@@ -631,7 +634,8 @@ module SearchEngine
         observability: observability_hash_for_to_h,
         selection: selection_hash_for_to_h,
         presets: presets_hash_for_to_h,
-        curation: curation_hash_for_to_h
+        curation: curation_hash_for_to_h,
+        relation_print_materializes: relation_print_materializes ? true : false
       }
     end
 

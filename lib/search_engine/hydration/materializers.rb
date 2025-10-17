@@ -51,9 +51,62 @@ module SearchEngine
 
       # --- Public materializers (delegation targets) ------------------------
 
+      # Return a shallow copy of hydrated hits.
+      # @return [Array<Object>]
       def to_a(relation)
         result = execute(relation)
         result.to_a
+      end
+
+      # Lightweight preview for console rendering; fetches up to the given limit
+      # without memoizing as the relation’s main result. Does not mutate relation state.
+      # @param relation [SearchEngine::Relation]
+      # @param limit [Integer]
+      # @return [Array<Object>]
+      def preview(relation, limit)
+        limit = limit.to_i
+        return [] unless limit.positive?
+
+        if relation.send(:loaded?)
+          memo = relation.instance_variable_get(:@__result_memo)
+          return [] unless memo
+
+          array = memo.respond_to?(:to_a) ? memo.to_a : Array(memo)
+          return array.first(limit)
+        end
+
+        if relation.instance_variable_defined?(:@__preview_memo)
+          cached = relation.instance_variable_get(:@__preview_memo)
+          return Array(cached).first(limit)
+        end
+
+        preview_relation = relation.send(:spawn) do |state|
+          state[:page] = 1
+          state[:per_page] = limit
+        end
+
+        collection = preview_relation.send(:collection_name_for_klass)
+        params = SearchEngine::CompiledParams.from(preview_relation.to_typesense_params)
+        url_opts = preview_relation.send(:build_url_opts)
+        raw_result = preview_relation.send(:client).search(collection: collection, params: params, url_opts: url_opts)
+
+        selection_ctx = SearchEngine::Hydration::SelectionContext.build(preview_relation)
+        facets_ctx = build_facets_context_from_state(preview_relation)
+
+        result = if selection_ctx || facets_ctx
+                   SearchEngine::Result.new(
+                     raw_result.raw,
+                     klass: preview_relation.klass,
+                     selection: selection_ctx,
+                     facets: facets_ctx
+                   )
+                 else
+                   raw_result
+                 end
+
+        array = Array(result.respond_to?(:to_a) ? result.to_a : result).first(limit)
+        relation.instance_variable_set(:@__preview_memo, array)
+        array
       end
 
       def each(relation, &block)
