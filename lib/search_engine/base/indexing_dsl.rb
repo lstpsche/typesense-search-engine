@@ -81,6 +81,24 @@ module SearchEngine
           val.is_a?(String) ? val : val.to_s
         end
 
+        # Map a single record using the compiled mapper for this collection.
+        # Returns the normalized document as it would be imported during indexation.
+        # @param record [Object]
+        # @return [Hash]
+        # @raise [SearchEngine::Errors::InvalidParams] when mapper is missing or record is nil
+        def mapped_data_for(record)
+          raise SearchEngine::Errors::InvalidParams, 'record must be provided' if record.nil?
+
+          mapper = SearchEngine::Mapper.for(self)
+          unless mapper
+            raise SearchEngine::Errors::InvalidParams,
+                  "mapper is not defined for #{name}. Define it via `index do ... map { ... } end`."
+          end
+
+          docs, = mapper.map_batch!([record], batch_index: 0)
+          docs.first
+        end
+
         # Define a stale filter builder for delete-by-filter operations.
         # @yieldparam partition [Object, nil]
         # @yieldreturn [String, nil]
