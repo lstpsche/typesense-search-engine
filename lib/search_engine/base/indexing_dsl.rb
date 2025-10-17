@@ -32,6 +32,7 @@ module SearchEngine
 
           # Store definition on the class; Mapper.for will compile and cache
           instance_variable_set(:@__mapper_dsl__, definition)
+          instance_variable_set(:@__stale_entries__, Array(definition[:stale]))
           nil
         end
 
@@ -97,6 +98,13 @@ module SearchEngine
 
           docs, = mapper.map_batch!([record], batch_index: 0)
           docs.first
+        end
+
+        # Return frozen stale cleanup entries defined on this model.
+        # @return [Array<Hash>]
+        def stale_entries
+          list = instance_variable_defined?(:@__stale_entries__) ? @__stale_entries__ : []
+          list.dup.freeze
         end
 
         # Define a stale filter builder for delete-by-filter operations.

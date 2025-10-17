@@ -97,6 +97,12 @@ module SearchEngine
       def count
         SearchEngine::Hydration::Materializers.count(self)
       end
+
+      # Return total number of pages for this relation based on total hits and per-page size.
+      # @return [Integer]
+      def pages_count
+        SearchEngine::Hydration::Materializers.pages_count(self)
+      end
     end
   end
 end

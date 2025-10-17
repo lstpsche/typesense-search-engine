@@ -208,6 +208,18 @@ module SearchEngine
         fetch_found_only(relation)
       end
 
+      # Compute number of result pages based on total hits and per-page value.
+      # @return [Integer]
+      def pages_count(relation)
+        total_hits = count(relation).to_i
+        return 0 if total_hits <= 0
+
+        per_page = effective_per_page(relation)
+        return total_hits if per_page <= 0
+
+        (total_hits.to_f / per_page).ceil
+      end
+
       # --- internals --------------------------------------------------------
 
       def fetch_found_only(relation)
@@ -226,6 +238,28 @@ module SearchEngine
         count
       end
       module_function :fetch_found_only
+
+      def effective_per_page(relation)
+        state = relation.instance_variable_get(:@state) || {}
+        per_page = state[:per_page]
+        return per_page.to_i if per_page.to_i.positive?
+
+        loaded = relation.instance_variable_get(:@__loaded)
+        memo = relation.instance_variable_get(:@__result_memo)
+        if loaded && memo
+          request_params = memo.raw['request_params'] || memo.raw[:request_params]
+          request_params ||= memo.raw['search_params'] || memo.raw[:search_params]
+          if request_params
+            per = request_params['per_page'] || request_params[:per_page]
+            return per.to_i if per.to_i.positive?
+          end
+
+          return memo.hits.size if memo.respond_to?(:hits)
+        end
+
+        10
+      end
+      module_function :effective_per_page
 
       # Retrieve and hydrate all matching records by paging via multi-search.
       # Uses maximum per_page=250 to minimize requests and chunks batches under multi_search_limit.

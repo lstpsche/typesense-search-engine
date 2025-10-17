@@ -2,6 +2,8 @@
 
 require 'active_support/concern'
 require 'set'
+require 'json'
+require 'search_engine/indexer/batch_planner'
 
 module SearchEngine
   class Base
@@ -179,7 +181,7 @@ module SearchEngine
             if coerced
               document[key.to_s] = coerced
             elsif !valid
-              raise SearchEngine::Errors::InvalidParams new(
+              raise SearchEngine::Errors::InvalidParams.new(
                 err,
                 doc: 'docs/indexer.md#troubleshooting',
                 details: { field: key.to_s, expected: expected, got: value.class.name }
@@ -292,6 +294,192 @@ module SearchEngine
           )
         end
 
+        def resolve_target_collection(klass, into:, partition: nil)
+          return into.to_s if into && !into.to_s.strip.empty?
+
+          begin
+            ctx_into = SearchEngine::Instrumentation.context[:into]
+            return ctx_into if ctx_into && !ctx_into.to_s.strip.empty?
+          rescue StandardError
+            # fall through to default resolution
+          end
+
+          resolver = begin
+            SearchEngine.config.partitioning&.default_into_resolver
+          rescue StandardError
+            nil
+          end
+
+          if resolver.respond_to?(:arity)
+            case resolver.arity
+            when 1
+              val = resolver.call(klass)
+              return val if val && !val.to_s.strip.empty?
+            when 2, -1
+              val = resolver.call(klass, partition)
+              return val if val && !val.to_s.strip.empty?
+            end
+          elsif resolver
+            val = resolver.call(klass)
+            return val if val && !val.to_s.strip.empty?
+          end
+
+          if klass.respond_to?(:collection)
+            klass.collection.to_s
+          else
+            klass.name.to_s
+          end
+        end
+
+        def ensure_document_id!(klass, document)
+          id_value = document['id'] || document[:id]
+          return if id_value && !id_value.to_s.strip.empty?
+
+          computed = compute_id_for_create(klass, document)
+          if computed.nil? || computed.to_s.strip.empty?
+            raise SearchEngine::Errors::InvalidParams,
+                  'Document id could not be resolved. Provide :id or define identify_by.'
+          end
+          document['id'] = computed
+        end
+
+        def normalize_document!(klass, document, types_by_field, allowed_keys, required_keys)
+          ensure_document_id!(klass, document)
+          update_doc_updated_at!(document)
+          append_hidden_flags!(klass, document, allowed_keys)
+
+          present = document.keys.map(&:to_s).to_set
+          validate_required_and_unknown!(klass, present, allowed_keys, required_keys)
+          validate_and_coerce_types!(document, types_by_field, coercions_enabled?)
+          document
+        end
+
+        def normalize_mapped_data!(_klass, hash)
+          unless hash.is_a?(Hash)
+            raise SearchEngine::Errors::InvalidParams,
+                  'Mapped data must be a Hash with string/symbol keys.'
+          end
+
+          out = {}
+          hash.each do |key, value|
+            out[key.to_s] = value
+          end
+          out
+        end
+
+        def mapper_for!(klass)
+          mapper = SearchEngine::Mapper.for(klass)
+          return mapper if mapper
+
+          raise SearchEngine::Errors::InvalidParams,
+                "mapper is not defined for #{klass.name}. Define it via `index do ... end`."
+        end
+
+        def map_records!(klass, records)
+          mapper = mapper_for!(klass)
+          rows = Array(records)
+          docs, = mapper.map_batch!(rows, batch_index: 0)
+          docs.map do |doc|
+            out = {}
+            doc.each do |key, value|
+              out[key.to_s] = value
+            end
+            out
+          end
+        end
+
+        def encode_jsonl!(docs)
+          buffer = +''
+          count, bytes = SearchEngine::Indexer::BatchPlanner.encode_jsonl!(docs, buffer)
+          [count, bytes, buffer]
+        end
+
+        def prepare_documents(klass, records:, data:)
+          if records && data
+            raise SearchEngine::Errors::InvalidParams,
+                  'Provide either :records or :data, not both.'
+          end
+
+          source_docs =
+            if records
+              array = normalize_records_input(records)
+              return [] if array.empty?
+
+              map_records!(klass, array)
+            elsif data
+              docs_arr = normalize_data_input(data)
+              return [] if docs_arr.empty?
+
+              docs_arr.map { |doc| normalize_mapped_data!(klass, doc) }
+            else
+              raise SearchEngine::Errors::InvalidParams,
+                    'Provide :records or :data.'
+            end
+
+          compiled = SearchEngine::Schema.compile(klass)
+          types_by_field = build_types_by_field_from_schema(compiled)
+          allowed_keys = compute_required_keys_from_schema(klass, compiled)
+          required_keys = compute_required_keys_from_schema(klass, compiled)
+
+          source_docs.map do |doc|
+            normalize_document!(klass, doc, types_by_field, allowed_keys, required_keys)
+          end
+        end
+
+        def import_documents!(klass, docs, into:, partition: nil)
+          collection = resolve_target_collection(klass, into: into, partition: partition)
+          if docs.empty?
+            return {
+              collection: collection,
+              docs_count: 0,
+              success_count: 0,
+              failure_count: 0,
+              bytes_sent: 0,
+              response: nil
+            }
+          end
+
+          count, bytes, jsonl = encode_jsonl!(docs)
+          raw = SearchEngine::Client.new.import_documents(collection: collection, jsonl: jsonl, action: :upsert)
+
+          {
+            collection: collection,
+            docs_count: count,
+            success_count: count,
+            failure_count: 0,
+            bytes_sent: bytes,
+            response: raw
+          }
+        end
+
+        def safe_parse_json(str)
+          JSON.parse(str)
+        rescue StandardError
+          nil
+        end
+
+        def normalize_records_input(records)
+          if records.is_a?(Array)
+            records
+          elsif records.respond_to?(:to_a)
+            Array(records.to_a)
+          else
+            Array(records)
+          end
+        end
+
+        def normalize_data_input(data)
+          if data.is_a?(Array)
+            data
+          elsif data.is_a?(Hash)
+            [data]
+          elsif data.respond_to?(:to_a)
+            Array(data.to_a)
+          else
+            Array(data)
+          end
+        end
+
         def hydrate_from_document(klass, doc)
           hash = doc || {}
           return klass.from_document(hash) if klass.respond_to?(:from_document)
@@ -359,6 +547,43 @@ module SearchEngine
 
           created = client.create_document(collection: target, document: document)
           Helpers.hydrate_from_document(self, created)
+        end
+
+        # Upsert a single document into the collection.
+        #
+        # Accepts either an unmapped source record (mapped via the configured DSL)
+        # or pre-mapped data (as emitted by {.mapped_data_for}). The document is
+        # normalized against the compiled schema before streaming via JSONL.
+        #
+        # @param record [Object, nil] source record to map
+        # @param data [Hash, nil] pre-mapped document
+        # @param into [String, nil] optional physical collection override
+        # @param partition [Object, nil] partition token for resolvers
+        # @return [Integer] number of successfully upserted documents (0 or 1)
+        # @raise [SearchEngine::Errors::InvalidParams]
+        def upsert(record: nil, data: nil, into: nil, partition: nil)
+          docs = Helpers.prepare_documents(self, records: record ? [record] : nil, data: data)
+          return 0 if docs.empty?
+
+          result = Helpers.import_documents!(self, docs, into: into, partition: partition)
+          result[:success_count]
+        end
+
+        # Upsert many documents into the collection in a single JSONL payload.
+        #
+        # Accepts either an enumerable of unmapped source records or an enumerable
+        # of pre-mapped documents. Each entry is normalized using the same
+        # validation path as {.create} to ensure schema compatibility prior to import.
+        #
+        # @param records [Enumerable<Object>, nil]
+        # @param data [Enumerable<Hash>, nil]
+        # @param into [String, nil]
+        # @param partition [Object, nil]
+        # @return [Hash] stats payload with keys: :collection, :docs_count, :success_count, :failure_count, :bytes_sent, :response
+        # @raise [SearchEngine::Errors::InvalidParams]
+        def upsert_bulk(records: nil, data: nil, into: nil, partition: nil)
+          docs = Helpers.prepare_documents(self, records: records, data: data)
+          Helpers.import_documents!(self, docs, into: into, partition: partition)
         end
       end
     end

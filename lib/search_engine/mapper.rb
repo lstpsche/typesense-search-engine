@@ -30,6 +30,7 @@ module SearchEngine
         @partition_fetch_proc = nil
         @before_partition_proc = nil
         @after_partition_proc = nil
+        @stale_entries = []
       end
 
       # Declare a source adapter for this collection. Compatible with
@@ -86,6 +87,41 @@ module SearchEngine
           partition: effective_partition,
           timeout_ms: timeout_ms
         )
+      end
+
+      # Register a stale-cleanup rule evaluated during {SearchEngine::Base.cleanup}.
+      #
+      # Accepts one of the following forms:
+      # - `stale { where(active: false) }` — block evaluated against the model class
+      # - `stale scope: :inactive` — named scope invoked on the model
+      # - `stale :archived` or `stale attribute: :archived, value: true` — attribute equality
+      # - `stale(filter: 'status:=archived')` — raw Typesense filter fragment
+      # - `stale(product_state: 'archived')` — Hash converted to Relation filters
+      #
+      # Multiple stale entries are OR-ed together when cleanup runs.
+      # @param target [Symbol, String, Hash, SearchEngine::Relation, nil]
+      # @param scope [Symbol, nil]
+      # @param attribute [Symbol, nil]
+      # @param value [Object] value used with attribute form (defaults to +true+)
+      # @param filter [String, nil]
+      # @yield block evaluated against the model class; should return a Relation, String, or Hash
+      # @return [void]
+      def stale(target = nil, scope: nil, attribute: nil, value: true, filter: nil, &block)
+        entry = build_stale_entry(
+          target,
+          scope: scope,
+          attribute: attribute,
+          value: value,
+          filter: filter,
+          block: block
+        )
+        @stale_entries << entry.freeze
+        nil
+      end
+
+      # @return [Array<Hash>]
+      def stale_entries
+        @stale_entries.dup
       end
 
       # Partitioning: declare how to enumerate partitions for full rebuilds.
@@ -191,8 +227,70 @@ module SearchEngine
           partition_fetch: @partition_fetch_proc,
           before_partition: @before_partition_proc,
           after_partition: @after_partition_proc,
-          partition_max_parallel: @partition_max_parallel
+          partition_max_parallel: @partition_max_parallel,
+          stale: @stale_entries.dup.freeze
         }.freeze
+      end
+
+      private
+
+      def build_stale_entry(target, scope:, attribute:, value:, filter:, block:)
+        if block
+          { type: :block, block: block }
+        elsif scope
+          ensure_symbol!(:scope, scope)
+          { type: :scope, name: scope.to_sym }
+        elsif attribute || attribute_target?(target)
+          attr_name = (attribute || target).to_sym
+          { type: :attribute, name: attr_name, value: value }
+        elsif hash_target?(target)
+          normalized_hash = normalize_stale_hash(target)
+          { type: :hash, hash: normalized_hash }
+        elsif filter || filter_target?(target)
+          str = filter || target
+          ensure_string!(:filter, str)
+          { type: :filter, value: str.to_s }
+        elsif relation_target?(target)
+          { type: :relation, relation: target }
+        else
+          raise ArgumentError,
+                'stale requires a block, scope:, attribute:, filter:, relation, or hash input'
+        end
+      end
+
+      def attribute_target?(target)
+        target.is_a?(Symbol)
+      end
+
+      def hash_target?(target)
+        target.is_a?(Hash)
+      end
+
+      def relation_target?(target)
+        defined?(SearchEngine::Relation) && target.is_a?(SearchEngine::Relation)
+      end
+
+      def filter_target?(target)
+        target.is_a?(String)
+      end
+
+      def normalize_stale_hash(hash)
+        hash.each_with_object({}) do |(key, value), acc|
+          sym_key = key.respond_to?(:to_sym) ? key.to_sym : key
+          acc[sym_key] = value
+        end.freeze
+      end
+
+      def ensure_symbol!(name, value)
+        return if value.is_a?(Symbol)
+
+        raise ArgumentError, "#{name} must be a Symbol"
+      end
+
+      def ensure_string!(name, value)
+        return if value.respond_to?(:to_s)
+
+        raise ArgumentError, "#{name} must be convertible to String"
       end
     end
 

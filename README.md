@@ -98,11 +98,21 @@ result_set = SearchEngine.multi_search(common: { query_by: SearchEngine.config.d
 end
 result_set[:products].found
 
-# DX helpers
-rel = SearchEngine::Product.where(category: "snacks").limit(3)
-rel.dry_run!       # => { url:, body:, url_opts: }
-rel.to_params_json # => pretty JSON with redactions
-rel.to_curl        # => single-line curl with redacted API key
+# Upserting documents
+product_record = Product.first
+mapped = SearchEngine::Product.mapped_data_for(product_record)
+
+# Map + upsert a single record
+SearchEngine::Product.upsert(record: product_record)
+
+# Upsert already-mapped data
+SearchEngine::Product.upsert(data: mapped)
+
+# Bulk upsert records (mapper runs internally)
+SearchEngine::Product.upsert_bulk(records: Product.limit(2))
+
+# Bulk upsert mapped payloads
+SearchEngine::Product.upsert_bulk(data: [mapped])
 ```
 
 ## Documentation
