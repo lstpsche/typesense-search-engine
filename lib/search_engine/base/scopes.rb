@@ -31,6 +31,9 @@ module SearchEngine
         # The scope body is executed with `self` set to a fresh
         # {SearchEngine::Relation} bound to the model. It must return a
         # Relation (or nil, which is treated as `all`).
+        #
+        # Reserved names: scope names must not conflict with core query or
+        # materializer methods (e.g., :all, :first, :last, :find_by, :pluck).
         def scope(name, body = nil, &block)
           raise ArgumentError, 'scope requires a name' if name.nil?
 
@@ -39,11 +42,27 @@ module SearchEngine
 
           method_name = name.to_sym
 
+          # Avoid overriding core query methods and relation materializers.
+          reserved = %i[
+            all first last take count exists? find find_by pluck delete_all update_all
+            where rewhere order select include_fields exclude reselect joins preset ranking prefix search
+            limit offset page per_page per options cache
+          ]
+          if reserved.include?(method_name)
+            raise ArgumentError, "scope :#{method_name} conflicts with a reserved query method"
+          end
+
           define_singleton_method(method_name) do |*args, **kwargs, &_unused_block|
             base = all
+
+            # Evaluate scope body directly against the fresh relation, so `self`
+            # inside the scope is a Relation and chaining behaves predictably.
             result = base.instance_exec(*args, **kwargs, &impl)
 
-            return base if result.nil?
+            # Coerce common mistakes to a usable Relation:
+            # - nil (AR parity) -> return a fresh relation
+            # - model class returned by accident -> return a fresh relation
+            return base if result.nil? || result.equal?(base.klass)
             return result if result.is_a?(SearchEngine::Relation)
 
             raise ArgumentError,

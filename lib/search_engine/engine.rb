@@ -152,7 +152,9 @@ module SearchEngine
           SearchEngine.instance_variable_set(:@_models_loader_setup, true)
         end
 
-        l.eager_load if Rails.application.config.eager_load
+        # Always eager-load configured SearchEngine models so their `collection` calls
+        # register mappings at boot, regardless of Rails.eager_load setting.
+        l.eager_load
       end
     end
   end

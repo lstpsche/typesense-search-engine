@@ -128,7 +128,10 @@ module SearchEngine
 
         def process_hash_entry(entry, out_nodes, negated)
           entry.each do |k, v|
-            if v.is_a?(Hash)
+            # Join-scope shorthand: where(assoc: :scope) or where(assoc: [:s1, :s2])
+            if join_scope_value?(v) && join_assoc?(k)
+              process_join_scope(k.to_sym, v, out_nodes)
+            elsif v.is_a?(Hash)
               process_join_predicate(k, v, out_nodes, negated)
             else
               process_base_predicate(k, v, out_nodes, negated)
@@ -180,6 +183,138 @@ module SearchEngine
             end
           else
             out_nodes << SearchEngine::DSL::Parser.parse({ field => value }, klass: @klass, joins: joins_list)
+          end
+        end
+
+        # -- join-scope support -------------------------------------------------
+
+        # True when the given where value is a Symbol or an Array of Symbols.
+        # Accepts [:scope1, :scope2] and :scope forms only.
+        def join_scope_value?(value)
+          return true if value.is_a?(Symbol)
+
+          value.is_a?(Array) && value.all? { |el| el.is_a?(Symbol) }
+        end
+
+        # True when the key refers to a declared join association on @klass.
+        # Returns the association config Hash when present; falsey otherwise.
+        def join_assoc?(key)
+          @klass.join_for(key)
+        rescue StandardError
+          nil
+        end
+
+        # Process where(assoc: :scope) or where(assoc: [:s1, :s2]) by taking the AST
+        # produced by the target model's scope(s) and rewriting their fields into
+        # joined predicates (e.g., "$assoc.field"). Supports all comparison/node types
+        # except nested joins inside the scope and Raw fragments.
+        def process_join_scope(assoc_sym, scope_value, out_nodes)
+          assoc = assoc_sym.to_sym
+
+          # Validate join exists and is applied on this relation
+          cfg = @klass.join_for(assoc)
+          SearchEngine::Joins::Guard.ensure_join_applied!(joins_list, assoc, context: 'where join-scope')
+
+          collection = cfg[:collection]
+          target_klass = SearchEngine.collection_for(collection)
+
+          scope_names = Array(scope_value).flatten.compact
+          scope_names.each do |sname|
+            sym = sname.to_sym
+
+            unless target_klass.respond_to?(sym)
+              raise SearchEngine::Errors::InvalidParams.new(
+                %(Unknown join-scope :#{sym} on association :#{assoc} for #{target_klass}),
+                doc: 'docs/query_dsl.md#join-scope'
+              )
+            end
+
+            rel = target_klass.public_send(sym)
+            unless rel.is_a?(SearchEngine::Relation)
+              raise SearchEngine::Errors::InvalidParams.new(
+                %(join-scope :#{sym} on :#{assoc} must return a SearchEngine::Relation (got #{rel.class})),
+                doc: 'docs/query_dsl.md#join-scope'
+              )
+            end
+
+            nodes = Array(rel.send(:ast)).flatten.compact
+            next if nodes.empty?
+
+            rewritten = rewrite_join_scope_nodes(nodes, assoc, cfg)
+            out_nodes.concat(Array(rewritten))
+          end
+        end
+
+        # Rewrite a list of AST nodes so that any base-field predicate like
+        #   field OP value
+        # becomes a joined predicate
+        #   "$assoc.field" OP value
+        # Boolean/grouping nodes are rewritten recursively. Raw fragments and
+        # pre-joined fields inside the scope are rejected.
+        def rewrite_join_scope_nodes(nodes, assoc_sym, assoc_cfg)
+          Array(nodes).flatten.compact.map { |n| rewrite_join_scope_node(n, assoc_sym, assoc_cfg) }
+        end
+
+        def rewrite_join_scope_node(node, assoc_sym, assoc_cfg)
+          case node
+          when SearchEngine::AST::And
+            children = node.children.map { |ch| rewrite_join_scope_node(ch, assoc_sym, assoc_cfg) }
+            SearchEngine::AST.and_(*children)
+          when SearchEngine::AST::Or
+            children = node.children.map { |ch| rewrite_join_scope_node(ch, assoc_sym, assoc_cfg) }
+            SearchEngine::AST.or_(*children)
+          when SearchEngine::AST::Group
+            inner = Array(node.children).first
+            SearchEngine::AST.group(rewrite_join_scope_node(inner, assoc_sym, assoc_cfg))
+          when SearchEngine::AST::Raw
+            raise SearchEngine::Errors::InvalidParams.new(
+              'join-scope cannot include raw filter fragments',
+              doc: 'docs/query_dsl.md#join-scope'
+            )
+          when SearchEngine::AST::Eq,
+               SearchEngine::AST::NotEq,
+               SearchEngine::AST::Gt,
+               SearchEngine::AST::Gte,
+               SearchEngine::AST::Lt,
+               SearchEngine::AST::Lte,
+               SearchEngine::AST::In,
+               SearchEngine::AST::NotIn,
+               SearchEngine::AST::Matches,
+               SearchEngine::AST::Prefix
+            lhs = node.field.to_s
+            if lhs.start_with?('$') || lhs.include?('.')
+              raise SearchEngine::Errors::InvalidParams.new(
+                %(join-scope cannot reference nested join field #{lhs.inspect}; use base fields only),
+                doc: 'docs/query_dsl.md#join-scope',
+                details: { field: lhs, assoc: assoc_sym }
+              )
+            end
+
+            # Best-effort field validation against target collection
+            begin
+              SearchEngine::Joins::Guard.validate_joined_field!(assoc_cfg, lhs, source_klass: @klass)
+            rescue StandardError
+              nil
+            end
+
+            joined_lhs = "$#{assoc_sym}.#{lhs}"
+            builder = case node
+                      when SearchEngine::AST::Eq then :eq
+                      when SearchEngine::AST::NotEq then :not_eq
+                      when SearchEngine::AST::Gt then :gt
+                      when SearchEngine::AST::Gte then :gte
+                      when SearchEngine::AST::Lt then :lt
+                      when SearchEngine::AST::Lte then :lte
+                      when SearchEngine::AST::In then :in_
+                      when SearchEngine::AST::NotIn then :not_in
+                      when SearchEngine::AST::Matches then :matches
+                      when SearchEngine::AST::Prefix then :prefix
+                      end
+
+            SearchEngine::AST.public_send(builder, joined_lhs, node.right)
+          else
+            # Unknown node type: keep as-is (defensive)
+            node
           end
         end
 
@@ -305,10 +440,12 @@ module SearchEngine
             entry = list[i]
             case entry
             when Hash
-              # Validate only base keys here; assoc keys (values as Hash) are handled via AST/Parser
-              validate_hash_keys!(entry, known_attrs)
-              # Build fragments from base scalar/array pairs only; skip assoc=>{...}
-              base_pairs = entry.reject { |_, v| v.is_a?(Hash) }
+              # Validate only base-like keys here; assoc keys (values as Hash) are handled via AST/Parser
+              # and assoc keys with join-scope shorthand (values as Symbol/Array<Symbol>) are ignored for fragments.
+              base_like_pairs = entry.reject { |_, v| v.is_a?(Hash) || join_scope_value?(v) }
+              validate_hash_keys!(base_like_pairs, known_attrs)
+              # Build fragments from base scalar/array pairs only; skip assoc=>{...} and assoc=>:scope
+              base_pairs = base_like_pairs
               unless base_pairs.empty?
                 fragments.concat(
                   SearchEngine::Filters::Sanitizer.build_from_hash(base_pairs, known_attrs)

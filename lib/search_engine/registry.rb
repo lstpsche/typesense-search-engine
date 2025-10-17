@@ -80,6 +80,34 @@ module SearchEngine
       klass = Registry.mapping[normalized_name]
       return klass if klass
 
+      # Lazy autoload fallback: try to resolve a namespaced model constant
+      # based on the collection name and trigger its registration.
+      begin
+        begin
+          require 'active_support/inflector'
+        rescue StandardError
+          nil
+        end
+
+        demod = if defined?(ActiveSupport::Inflector)
+                  ActiveSupport::Inflector.classify(normalized_name)
+                else
+                  # Minimal classify fallback: singularize by dropping trailing 's' and camelize tokens
+                  base = normalized_name.end_with?('s') ? normalized_name[0..-2] : normalized_name
+                  base.split('_').map { |p| p[0] ? p[0].upcase + p[1..] : '' }.join
+                end
+
+        const_name = "SearchEngine::#{demod}"
+        # Trigger autoload; ignore when constant is missing
+        Object.const_get(const_name)
+      rescue NameError
+        # constant not found; proceed to error
+      end
+
+      # Re-check after potential autoload/registration
+      klass = Registry.mapping[normalized_name]
+      return klass if klass
+
       message = 'Unregistered collection: ' \
                 "'#{normalized_name}'. " \
                 'Define a model inheriting from SearchEngine::Base and call ' \

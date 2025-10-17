@@ -270,14 +270,23 @@ module SearchEngine
     # @return [Object]
     # @raise [NoMethodError] when the delegated Array doesn't support the method
     def method_missing(method_name, *args, &block)
-      arr = to_a
-      arr.public_send(method_name, *args, &block)
-    rescue NoMethodError => error
-      # Only convert when the error came from the delegation target `arr` and
-      # for the same method; otherwise preserve original exceptions.
-      return super if error.respond_to?(:receiver) && error.receiver.equal?(arr) && error.name == method_name
+      # Delegate to the model class first (AR-like behavior)
+      return @klass.public_send(method_name, *args, &block) if @klass.respond_to?(method_name)
 
-      raise
+      arr = to_a
+      begin
+        return arr.public_send(method_name, *args, &block)
+      rescue NoMethodError => error
+        # Only handle when the error came from the delegation target `arr` and
+        # for the same method; otherwise preserve original exceptions.
+        handled = error.respond_to?(:receiver) && error.receiver.equal?(arr) && error.name == method_name
+        raise unless handled
+      end
+
+      # Raise a clean NoMethodError outside the rescue to avoid preserving the
+      # Array's exception as `cause`. Reference the model class to mimic
+      # ActiveRecord's error shape: "for Product:Class".
+      raise NoMethodError, %(undefined method `#{method_name}` for #{@klass}:Class)
     end
 
     # Ensure reflective APIs correctly report delegated methods on the
