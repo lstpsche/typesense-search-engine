@@ -628,6 +628,23 @@ module SearchEngine
       symbolize_keys_deep(result)
     end
 
+    # Clear the Typesense server-side search cache.
+    #
+    # @return [Hash] response payload from Typesense (symbolized keys)
+    # @see `https://typesense.org/docs/latest/api/cluster-operations.html#clear-cache`
+    def clear_cache
+      ts = typesense
+      start = current_monotonic_ms
+      path = '/operations/cache/clear'
+
+      result = with_exception_mapping(:post, path, {}, start) do
+        ts.operations.perform('cache/clear')
+      end
+
+      instrument(:post, path, current_monotonic_ms - start, {})
+      symbolize_keys_deep(result)
+    end
+
     private
 
     attr_reader :config

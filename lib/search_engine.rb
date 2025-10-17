@@ -39,6 +39,7 @@ require 'search_engine/compiled_params'
 require 'search_engine/deletion'
 require 'search_engine/update'
 require 'search_engine/collections_graph'
+require 'search_engine/cache'
 require 'search_engine/engine'
 
 # Top-level namespace for the SearchEngine gem.
